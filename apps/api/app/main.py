@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -16,7 +20,22 @@ from .services.workflow_service import run_workflow
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
 log = logging.getLogger("ridian.api")
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 app = FastAPI(title="Ridian Agency API", version="0.1.0")
+
+# Local-only MVP: the Electron renderer makes cross-origin fetches against
+# 127.0.0.1:8000. Allow any origin so the desktop GUI, the bundled web
+# console, and curl all work. The server only listens on loopback, so this
+# is not externally reachable.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 class WorkflowRequest(BaseModel):
@@ -30,6 +49,11 @@ class WorkflowResponse(BaseModel):
     business_document: str
     slide_outline: str
     draft_email: str
+
+
+@app.get("/", include_in_schema=False)
+async def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")

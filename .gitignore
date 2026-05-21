@@ -10,6 +10,11 @@ venv/
 outputs/*/
 !outputs/.gitkeep
 
+# Electron desktop GUI
+desktop/node_modules/
+desktop/dist/
+desktop/out/
+
 # Editors
 .vscode/
 .idea/

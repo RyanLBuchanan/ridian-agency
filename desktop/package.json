@@ -1,0 +1,13 @@
+{
+  "name": "ridian-agency-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop GUI for the Ridian Agency local backend.",
+  "main": "main.js",
+  "scripts": {
+    "start": "node start.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

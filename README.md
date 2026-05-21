@@ -169,10 +169,49 @@ The Agents SDK uses OpenAI's hosted tracing by default. With `OPENAI_API_KEY`
 set, every `/workflows/run` call shows up as a `ridian-agency.workflow` trace
 at <https://platform.openai.com/traces>.
 
+## Desktop GUI (Electron)
+
+A native-feeling desktop window lives in [desktop/](desktop/). It's a thin
+Electron shell that loads a local HTML/CSS/JS renderer, talks to the FastAPI
+backend on `http://127.0.0.1:8000`, and shows a live backend-status pill.
+
+It does **not** bundle Python — the backend runs separately. Start the API
+first (per the steps above), then launch the desktop app.
+
+### Setup & run (Windows PowerShell)
+
+```powershell
+cd c:\Users\ryanl\Desktop\Ryan\Ridian_Technologies\ridian-agency\desktop
+npm install
+npm run start
+```
+
+A window titled **Ridian Agency** opens. The pill in the top-right reads
+*Backend online* (green) when `/health` responds, *Backend offline* (red)
+otherwise. If it's offline, a banner explains how to start the API.
+
+### Layout
+
+```
+desktop/
+  package.json
+  main.js          # Electron main process, BrowserWindow, CSP, secure defaults
+  preload.js       # exposes only window.ridian.backendOrigin to the renderer
+  renderer/
+    index.html
+    styles.css
+    app.js
+```
+
+Renderer security: `contextIsolation: true`, `nodeIntegration: false`,
+`sandbox: true`, plus a CSP that restricts network calls to
+`http://127.0.0.1:8000`. The API key never reaches the renderer; it stays in
+`apps/api/.env` and is read by the Python backend.
+
 ## Roadmap (intentionally not built yet)
 
-- Frontend
 - Database / persistent run history
 - Auth
 - Real web search tool wired into the research agent
 - Streaming responses
+- Bundling Python with the desktop app and auto-starting the backend

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ridian Agency</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">
+            <span class="brand-name">Ridian Agency</span>
+            <span class="brand-sub">Desktop Console</span>
+          </span>
+        </div>
+        <div
+          id="backend-pill"
+          class="backend-pill is-unknown"
+          role="status"
+          aria-live="polite"
+          title="Backend status"
+        >
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="backend-pill-label" class="status-label">Checking backend…</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="container main">
+      <section class="hero">
+        <h1>Run a business task through the agency</h1>
+        <p class="lead">
+          Submit a task and the agency will produce a market research summary,
+          a polished business document, a slide outline, and a draft email.
+          Each run is saved to the local <code>outputs/</code> folder.
+        </p>
+      </section>
+
+      <section
+        id="backend-down-banner"
+        class="banner banner-warn hidden"
+        role="alert"
+      >
+        <div class="banner-title">Backend is not running.</div>
+        <div class="banner-body">
+          Start the FastAPI server first, then this status will turn green.
+          From PowerShell:
+          <pre class="banner-code">cd c:\Users\ryanl\Desktop\Ryan\Ridian_Technologies\ridian-agency
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
+        </div>
+      </section>
+
+      <section class="card task-card" aria-labelledby="task-heading">
+        <div class="card-head">
+          <h2 id="task-heading">Task</h2>
+          <button id="example-btn" type="button" class="btn btn-ghost">
+            Use example task
+          </button>
+        </div>
+        <label class="sr-only" for="task-input">Business task</label>
+        <textarea
+          id="task-input"
+          rows="6"
+          placeholder="Describe the business task. Example: Research practical AI consulting opportunities for small businesses in Gulf Shores, Orange Beach, Foley, and Fairhope Alabama."
+        ></textarea>
+        <div class="card-actions">
+          <button id="run-btn" type="button" class="btn btn-primary">
+            Run workflow
+          </button>
+          <button id="clear-btn" type="button" class="btn btn-ghost">
+            Clear &amp; reset
+          </button>
+        </div>
+      </section>
+
+      <section
+        id="status-region"
+        class="status hidden"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="status-inner">
+          <span class="spinner" aria-hidden="true"></span>
+          <div>
+            <div class="status-title">Workflow running…</div>
+            <div class="status-sub">
+              This typically takes <strong>60&ndash;90 seconds</strong>. The
+              five agents run in sequence: research &rarr; writer &rarr;
+              reviewer &rarr; presentation &rarr; email.
+            </div>
+            <div class="status-timer">
+              Elapsed: <span id="elapsed">0s</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="error-region"
+        class="error hidden"
+        role="alert"
+        aria-live="assertive"
+      >
+        <div class="error-title">Something went wrong</div>
+        <div id="error-message" class="error-message"></div>
+      </section>
+
+      <section id="results-region" class="results hidden" aria-label="Results">
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>Artifact folder</h2>
+            <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">
+              Copy
+            </button>
+          </div>
+          <pre class="result-folder" data-field="artifact_folder"></pre>
+        </article>
+
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>Research summary</h2>
+            <button class="btn btn-ghost copy-btn" type="button" data-target="research_summary">
+              Copy
+            </button>
+          </div>
+          <div class="result-body" data-field="research_summary"></div>
+        </article>
+
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>Business document</h2>
+            <button class="btn btn-ghost copy-btn" type="button" data-target="business_document">
+              Copy
+            </button>
+          </div>
+          <div class="result-body" data-field="business_document"></div>
+        </article>
+
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>Slide outline</h2>
+            <button class="btn btn-ghost copy-btn" type="button" data-target="slide_outline">
+              Copy
+            </button>
+          </div>
+          <div class="result-body" data-field="slide_outline"></div>
+        </article>
+
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>Draft email</h2>
+            <button class="btn btn-ghost copy-btn" type="button" data-target="draft_email">
+              Copy
+            </button>
+          </div>
+          <div class="result-body" data-field="draft_email"></div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <span>Ridian Agency &middot; local desktop console</span>
+        <span class="muted">Powered by the OpenAI Agents SDK</span>
+      </div>
+    </footer>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
