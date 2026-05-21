@@ -1,5 +1,31 @@
 # Ridian Agency — Local MVP
 
+## Start with one click
+
+Once setup is done (Python venv created, `apps/api/.env` filled in, and
+`desktop/npm install` run — see the sections below), starting the whole stack
+is a double-click.
+
+1. **Double-click `Start-Ridian-Agency.bat`** in the repo root.
+2. A PowerShell window opens, checks dependencies, starts the backend (or
+   reuses the one already on port 8000), and launches the desktop app.
+3. When the desktop window appears and the pill reads **Backend online**,
+   you're ready.
+
+**If Windows blocks the script:** right-click the `.bat` → **Run as
+administrator**, or open PowerShell once and run:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+(The `.bat` invokes PowerShell with `-ExecutionPolicy Bypass` so this is
+usually unnecessary, but some lockdown policies block even that.)
+
+**To stop everything:** close the **Ridian Agency** desktop window, then
+close the **Ridian Agency — Backend (uvicorn)** PowerShell window. The
+launcher window self-closes after about 8 seconds; no action needed.
+
 A local prototype of a multi-agent "agency" built on the official
 [OpenAI Agents SDK](https://github.com/openai/openai-agents-python).
 
