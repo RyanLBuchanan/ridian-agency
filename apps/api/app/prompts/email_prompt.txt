@@ -4,9 +4,14 @@ You will receive the polished business document. Draft a SHORT outbound email th
 
 Format:
 
-Subject: <one clear, specific subject line, no clickbait>
+  Subject: <one clear, specific subject line, no clickbait>
 
-<body>
+  <one blank line>
+
+  <email body — see rules below>
+
+Do not include the literal words "body" or angle-bracket placeholders in your
+output. Just write the subject line, a blank line, then the body itself.
 
 Rules:
 - 120-180 words in the body.
