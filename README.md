@@ -195,6 +195,41 @@ The Agents SDK uses OpenAI's hosted tracing by default. With `OPENAI_API_KEY`
 set, every `/workflows/run` call shows up as a `ridian-agency.workflow` trace
 at <https://platform.openai.com/traces>.
 
+## Send the draft email (SMTP, approval-only)
+
+Every workflow run produces a draft email — but Ridian Agency **never auto-sends**
+it. To deliver the draft to your inbox, click **Approve & Send Email to Me** on
+the Draft Email card in the desktop app. The renderer asks for a confirmation,
+then `POST`s to `/email/send-approved`. The backend reads SMTP credentials from
+environment variables and sends the message.
+
+### Recommended SMTP setup
+
+Add these keys to `apps/api/.env` (they're already templated in
+`apps/api/.env.example`). The endpoint returns a clear, graceful 503 if any are
+missing — the workflow itself still works.
+
+| Variable           | Example                | Notes                                                |
+| ------------------ | ---------------------- | ---------------------------------------------------- |
+| `SMTP_HOST`        | `smtp.gmail.com`       | Gmail / Office 365 / Fastmail / your own server.    |
+| `SMTP_PORT`        | `587`                  | `587` for STARTTLS, `465` for implicit TLS.         |
+| `SMTP_USERNAME`    | `you@gmail.com`        | Usually your full email address.                    |
+| `SMTP_PASSWORD`    | _(app password)_       | For Gmail / Workspace, **App Password**, not your account password. |
+| `SMTP_FROM_EMAIL`  | `you@gmail.com`        | The `From:` address (most providers require it match `SMTP_USERNAME`). |
+| `DEFAULT_TO_EMAIL` | `you@yourdomain.com`   | Where to send when the request omits `to_email`.   |
+
+**Gmail App Password:** turn on 2-Step Verification, then create one at
+<https://myaccount.google.com/apppasswords>. Paste it into `SMTP_PASSWORD` with
+no spaces.
+
+### Privacy & safety
+
+- Credentials live in `apps/api/.env` only. The desktop renderer never sees them.
+- The endpoint never returns or logs `SMTP_PASSWORD`, and never echoes raw SMTP
+  server text (which on some servers can leak state).
+- The Approve & Send button never auto-fires — it requires a click and a
+  confirmation each time.
+
 ## Desktop GUI (Electron)
 
 A native-feeling desktop window lives in [desktop/](desktop/). It's a thin

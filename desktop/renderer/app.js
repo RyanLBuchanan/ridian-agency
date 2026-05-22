@@ -30,7 +30,59 @@ const els = {
   backendPill: document.getElementById('backend-pill'),
   backendLabel: document.getElementById('backend-pill-label'),
   backendDownBanner: document.getElementById('backend-down-banner'),
+  sendEmailBtn: document.getElementById('send-email-btn'),
+  sendEmailStatus: document.getElementById('send-email-status'),
 };
+
+const DEFAULT_EMAIL_SUBJECT = 'Ridian Agency Draft Email Output';
+
+const PROMPT_CATEGORIES = [
+  {
+    id: 'market-research',
+    label: 'Market Research',
+    prompts: [
+      'Research practical AI consulting opportunities for small businesses in Baldwin County, Alabama. Focus on industries, pain points, competitors, and first outreach opportunities.',
+      'Research AI workflow automation opportunities for healthcare clinics, dental offices, and wellness providers in Lower Alabama.',
+      'Research how local tourism and hospitality businesses could use AI for guest communication, scheduling, reviews, and operations.',
+    ],
+  },
+  {
+    id: 'client-outreach',
+    label: 'Client Outreach',
+    prompts: [
+      'Create a concise outreach package for a local business owner explaining how AI workflow automation could save time, reduce missed follow-ups, and improve customer communication.',
+      'Draft a professional introductory email to a chamber of commerce director proposing a short AI productivity presentation for local businesses.',
+      'Create a follow-up email after an AI consulting conversation, summarizing the opportunity and suggesting next steps.',
+    ],
+  },
+  {
+    id: 'slide-decks',
+    label: 'Slide Decks',
+    prompts: [
+      'Create a 7-slide outline for a presentation titled "Practical AI for Small Business Owners." Include pain points, examples, workflow ideas, and a simple call to action.',
+      'Create a chamber of commerce lunch-and-learn slide outline about AI productivity tools for local businesses.',
+      'Create a sales presentation outline for Ridian Technologies explaining market research agents, document generation, and email workflow support.',
+    ],
+  },
+  {
+    id: 'internal-productivity',
+    label: 'Internal Productivity',
+    prompts: [
+      'Create a weekly business development plan for Ridian Technologies focused on outreach, follow-ups, demos, content creation, and partnership opportunities.',
+      'Create a prioritized task plan for turning Ridian Agency into a polished local desktop product.',
+      'Create a founder operating brief summarizing the next 5 actions, risks, and opportunities for Ridian Technologies this week.',
+    ],
+  },
+  {
+    id: 'industry-specific',
+    label: 'Industry-Specific',
+    prompts: [
+      'Research AI automation opportunities for HVAC, plumbing, and electrical companies in Baldwin County.',
+      'Research AI productivity opportunities for real estate agents and property managers in coastal Alabama.',
+      'Research AI support workflows for educators, instructional designers, and training departments.',
+    ],
+  },
+];
 
 let currentResult = null;
 let elapsedTimer = null;
@@ -163,8 +215,80 @@ function renderResults(result) {
   document.querySelector('[data-field="business_document"]').innerHTML = renderMarkdown(result.business_document);
   document.querySelector('[data-field="slide_outline"]').innerHTML = renderMarkdown(result.slide_outline);
   document.querySelector('[data-field="draft_email"]').innerHTML = renderMarkdown(result.draft_email);
+  resetEmailStatus();
   show(els.resultsRegion);
   els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ---------- Approve & send email ---------- */
+
+function resetEmailStatus() {
+  if (!els.sendEmailStatus) return;
+  els.sendEmailStatus.textContent = '';
+  els.sendEmailStatus.className = 'email-status';
+}
+
+function parseDraftEmail(raw) {
+  // The email agent emits:
+  //   Subject: ...
+  //   <blank>
+  //   <body lines>
+  // If the first line isn't "Subject: ...", treat the whole thing as the body.
+  const lines = (raw || '').split(/\r?\n/);
+  if (lines.length && /^subject:\s*/i.test(lines[0])) {
+    const subject = lines[0].replace(/^subject:\s*/i, '').trim();
+    let i = 1;
+    while (i < lines.length && lines[i].trim() === '') i++;
+    const body = lines.slice(i).join('\n').trim();
+    return { subject, body };
+  }
+  return { subject: '', body: (raw || '').trim() };
+}
+
+async function sendApprovedEmail() {
+  if (!currentResult || !currentResult.draft_email) return;
+
+  const ok = window.confirm('Send this generated email to your configured email address?');
+  if (!ok) return;
+
+  const { subject, body } = parseDraftEmail(currentResult.draft_email);
+  if (!body) {
+    els.sendEmailStatus.className = 'email-status is-err';
+    els.sendEmailStatus.textContent = 'Email body is empty — nothing to send.';
+    return;
+  }
+  const finalSubject = subject || DEFAULT_EMAIL_SUBJECT;
+
+  els.sendEmailBtn.disabled = true;
+  els.sendEmailStatus.className = 'email-status';
+  els.sendEmailStatus.textContent = 'Sending…';
+
+  try {
+    const res = await fetch(`${BACKEND}/email/send-approved`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: finalSubject, body }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    els.sendEmailStatus.className = 'email-status is-ok';
+    const to = data && data.to_email ? ` to ${data.to_email}` : '';
+    els.sendEmailStatus.textContent = `Email sent successfully${to}.`;
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    els.sendEmailStatus.className = 'email-status is-err';
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      els.sendEmailStatus.textContent = 'Backend is not reachable. Start the FastAPI server first.';
+      setBackendStatus(false);
+    } else {
+      els.sendEmailStatus.textContent = msg;
+    }
+  } finally {
+    els.sendEmailBtn.disabled = false;
+  }
 }
 
 /* ---------- Copy ---------- */
@@ -262,6 +386,7 @@ async function runWorkflow() {
     const el = document.querySelector(`[data-field="${f}"]`);
     if (el) el.textContent = '';
   });
+  resetEmailStatus();
 
   setRunning(true);
   show(els.status);
@@ -307,6 +432,7 @@ function clearAll() {
   hide(els.errorRegion);
   hide(els.resultsRegion);
   hide(els.status);
+  resetEmailStatus();
   currentResult = null;
   els.taskInput.focus();
 }
@@ -314,6 +440,66 @@ function clearAll() {
 function fillExample() {
   els.taskInput.value = EXAMPLE_TASK;
   els.taskInput.focus();
+}
+
+/* ---------- Prompt library ---------- */
+
+function buildPromptLibrary() {
+  const tabsEl = document.querySelector('.prompts-tabs');
+  const panelsEl = document.querySelector('.prompts-panels');
+  if (!tabsEl || !panelsEl) return;
+
+  PROMPT_CATEGORIES.forEach((cat, i) => {
+    const isFirst = i === 0;
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'prompt-tab' + (isFirst ? ' is-active' : '');
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', isFirst ? 'true' : 'false');
+    tab.setAttribute('data-cat', cat.id);
+    tab.textContent = cat.label;
+    tab.addEventListener('click', () => activatePromptCategory(cat.id));
+    tabsEl.appendChild(tab);
+
+    const panel = document.createElement('div');
+    panel.className = 'prompts-grid' + (isFirst ? '' : ' hidden');
+    panel.setAttribute('data-cat-panel', cat.id);
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-label', cat.label);
+
+    cat.prompts.forEach((promptText) => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'prompt-pill';
+      pill.textContent = promptText;
+      pill.addEventListener('click', () => fillTaskFromPrompt(promptText));
+      panel.appendChild(pill);
+    });
+
+    panelsEl.appendChild(panel);
+  });
+}
+
+function activatePromptCategory(id) {
+  document.querySelectorAll('.prompt-tab').forEach((t) => {
+    const active = t.getAttribute('data-cat') === id;
+    t.classList.toggle('is-active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-cat-panel]').forEach((p) => {
+    p.classList.toggle('hidden', p.getAttribute('data-cat-panel') !== id);
+  });
+}
+
+function fillTaskFromPrompt(text) {
+  els.taskInput.value = text;
+  els.taskInput.focus();
+  // Place caret at the end so the user can immediately keep typing.
+  els.taskInput.setSelectionRange(text.length, text.length);
+  // Bring the task card into view; the prompt library sits above it.
+  const card = els.taskInput.closest('.card') || els.taskInput;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /* ---------- Wire up ---------- */
@@ -329,5 +515,10 @@ els.taskInput.addEventListener('keydown', (e) => {
   }
 });
 
+if (els.sendEmailBtn) {
+  els.sendEmailBtn.addEventListener('click', sendApprovedEmail);
+}
+
+buildPromptLibrary();
 wireCopyButtons();
 startHealthPolling();

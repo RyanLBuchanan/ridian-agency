@@ -22,6 +22,11 @@ def _outputs_dir() -> Path:
     return Path(override).resolve() if override else DEFAULT_OUTPUTS_DIR
 
 
+def outputs_dir() -> Path:
+    """Public accessor for callers outside this module."""
+    return _outputs_dir()
+
+
 def _slugify(text: str, max_len: int = 40) -> str:
     text = text.strip().lower()
     text = re.sub(r"[^a-z0-9]+", "-", text)

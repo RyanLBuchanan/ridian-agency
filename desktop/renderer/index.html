@@ -54,6 +54,24 @@ uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
         </div>
       </section>
 
+      <section class="card prompts-card" aria-labelledby="prompts-heading">
+        <div class="prompts-head">
+          <h2 id="prompts-heading">Suggested productivity prompts</h2>
+          <p class="prompts-sub">
+            Choose a starter task, customize it, then run the workflow.
+          </p>
+        </div>
+        <div
+          class="prompts-tabs"
+          role="tablist"
+          aria-label="Prompt categories"
+        ></div>
+        <div class="prompts-panels"></div>
+        <p class="prompts-foot">
+          Or write your own — the textarea accepts any task.
+        </p>
+      </section>
+
       <section class="card task-card" aria-labelledby="task-heading">
         <div class="card-head">
           <h2 id="task-heading">Task</h2>
@@ -158,6 +176,17 @@ uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
             </button>
           </div>
           <div class="result-body" data-field="draft_email"></div>
+          <div class="email-actions">
+            <button id="send-email-btn" type="button" class="btn btn-primary">
+              Approve &amp; Send Email to Me
+            </button>
+            <span
+              id="send-email-status"
+              class="email-status"
+              role="status"
+              aria-live="polite"
+            ></span>
+          </div>
         </article>
       </section>
     </main>

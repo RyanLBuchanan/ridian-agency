@@ -6,6 +6,9 @@ __pycache__/
 venv/
 .env
 
+# Local settings (contains SMTP password)
+apps/api/local_settings.json
+
 # Outputs (generated artifacts)
 outputs/*/
 !outputs/.gitkeep
