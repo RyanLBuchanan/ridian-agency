@@ -152,7 +152,10 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
 
     Blank ``smtp_password`` means "keep the previous value" so the renderer
     never has to round-trip the password back to the server."""
-    updates = payload.model_dump(exclude_unset=False)
+    # exclude_unset=True so a client that omits a field leaves the saved value
+    # alone. Sending a present-but-empty string still clears the field (except
+    # smtp_password, which has its own preserve-on-blank rule in the service).
+    updates = payload.model_dump(exclude_unset=True)
     settings_service.save_settings(updates)
     return _settings_view_with_outputs()
 

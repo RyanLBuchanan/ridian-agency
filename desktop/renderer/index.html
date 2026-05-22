@@ -16,15 +16,26 @@
             <span class="brand-sub">Desktop Console</span>
           </span>
         </div>
-        <div
-          id="backend-pill"
-          class="backend-pill is-unknown"
-          role="status"
-          aria-live="polite"
-          title="Backend status"
-        >
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="backend-pill-label" class="status-label">Checking backend…</span>
+        <div class="header-right">
+          <div
+            id="backend-pill"
+            class="backend-pill is-unknown"
+            role="status"
+            aria-live="polite"
+            title="Backend status"
+          >
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="backend-pill-label" class="status-label">Checking backend…</span>
+          </div>
+          <button
+            id="settings-open-btn"
+            type="button"
+            class="btn btn-ghost btn-compact"
+            aria-haspopup="dialog"
+            aria-controls="settings-modal"
+          >
+            Settings
+          </button>
         </div>
       </div>
     </header>
@@ -197,6 +208,140 @@ uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
         <span class="muted">Powered by the OpenAI Agents SDK</span>
       </div>
     </footer>
+
+    <div
+      id="settings-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      aria-hidden="true"
+    >
+      <div class="modal-card" role="document">
+        <header class="modal-head">
+          <h2 id="settings-title">Settings</h2>
+          <button
+            id="settings-close-btn"
+            type="button"
+            class="modal-close"
+            aria-label="Close settings"
+          >×</button>
+        </header>
+
+        <form id="settings-form" class="modal-body" autocomplete="off">
+          <fieldset class="form-group">
+            <legend>Operator profile</legend>
+            <label class="field">
+              <span class="field-label">Operator name</span>
+              <input name="operator_name" type="text" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">Operator email</span>
+              <input name="operator_email" type="email" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">Company name</span>
+              <input name="company_name" type="text" autocomplete="off" />
+            </label>
+          </fieldset>
+
+          <fieldset class="form-group">
+            <legend>Default email recipient</legend>
+            <label class="field">
+              <span class="field-label">Default recipient</span>
+              <input
+                name="default_to_email"
+                type="email"
+                autocomplete="off"
+                placeholder="you@yourdomain.com"
+              />
+              <span class="field-hint">
+                Used when no recipient is supplied at send time.
+              </span>
+            </label>
+          </fieldset>
+
+          <fieldset class="form-group">
+            <legend>SMTP credentials</legend>
+            <label class="field">
+              <span class="field-label">SMTP host</span>
+              <input
+                name="smtp_host"
+                type="text"
+                autocomplete="off"
+                placeholder="smtp.gmail.com"
+              />
+            </label>
+            <label class="field">
+              <span class="field-label">SMTP port</span>
+              <input
+                name="smtp_port"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="587"
+              />
+            </label>
+            <label class="field">
+              <span class="field-label">SMTP username</span>
+              <input name="smtp_username" type="email" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">SMTP password</span>
+              <input
+                name="smtp_password"
+                type="password"
+                autocomplete="new-password"
+                placeholder=""
+              />
+              <span id="settings-password-hint" class="field-hint"></span>
+            </label>
+            <label class="field">
+              <span class="field-label">From email</span>
+              <input name="smtp_from_email" type="email" autocomplete="off" />
+            </label>
+          </fieldset>
+
+          <fieldset class="form-group">
+            <legend>Output location</legend>
+            <div class="readonly-row">
+              <span class="field-label">Artifacts folder</span>
+              <code id="settings-outputs-path" class="readonly-value">—</code>
+              <span class="field-hint">
+                Set the <code>OUTPUTS_DIR</code> env var to override.
+              </span>
+            </div>
+          </fieldset>
+
+          <div
+            id="settings-status"
+            class="modal-status"
+            role="status"
+            aria-live="polite"
+          ></div>
+        </form>
+
+        <footer class="modal-foot">
+          <button
+            id="settings-test-email-btn"
+            type="button"
+            class="btn btn-ghost"
+          >Test email settings</button>
+          <span class="modal-foot-spacer"></span>
+          <button
+            id="settings-cancel-btn"
+            type="button"
+            class="btn btn-ghost"
+          >Cancel</button>
+          <button
+            id="settings-save-btn"
+            type="submit"
+            form="settings-form"
+            class="btn btn-primary"
+          >Save settings</button>
+        </footer>
+      </div>
+    </div>
 
     <script src="app.js" defer></script>
   </body>

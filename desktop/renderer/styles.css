@@ -149,6 +149,17 @@ body {
   text-transform: uppercase;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn-compact {
+  font-size: var(--fs-xs);
+  padding: 0.35rem 0.75rem;
+}
+
 /* Backend status pill */
 .backend-pill {
   display: inline-flex;
@@ -703,6 +714,185 @@ body {
 
 .muted {
   color: var(--color-muted-soft);
+}
+
+/* ---------- Settings modal ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.modal-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-elev);
+  width: 100%;
+  max-width: 580px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-head h2 {
+  font-size: var(--fs-h2);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.modal-close {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.modal-close:hover {
+  background: var(--color-bg-soft);
+  color: var(--color-text-strong);
+  border-color: var(--color-border-strong);
+}
+
+.modal-body {
+  padding: var(--space-3) var(--space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.form-group {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.form-group legend {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+  padding: 0;
+  margin-bottom: 2px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field-label {
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.field input {
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 0.55rem 0.75rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.field-hint {
+  font-size: var(--fs-xs);
+  color: var(--color-muted-soft);
+  line-height: 1.4;
+}
+
+.field-hint.is-ok {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.readonly-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.readonly-value {
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.modal-status {
+  min-height: 1.4em;
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+}
+
+.modal-status.is-ok {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.modal-status.is-err {
+  color: var(--color-error-text);
+  font-weight: 600;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+}
+
+.modal-foot-spacer {
+  flex: 1;
 }
 
 /* Utilities */

@@ -32,7 +32,19 @@ const els = {
   backendDownBanner: document.getElementById('backend-down-banner'),
   sendEmailBtn: document.getElementById('send-email-btn'),
   sendEmailStatus: document.getElementById('send-email-status'),
+  settingsOpenBtn: document.getElementById('settings-open-btn'),
+  settingsModal: document.getElementById('settings-modal'),
+  settingsForm: document.getElementById('settings-form'),
+  settingsCloseBtn: document.getElementById('settings-close-btn'),
+  settingsCancelBtn: document.getElementById('settings-cancel-btn'),
+  settingsSaveBtn: document.getElementById('settings-save-btn'),
+  settingsTestEmailBtn: document.getElementById('settings-test-email-btn'),
+  settingsStatus: document.getElementById('settings-status'),
+  settingsPasswordHint: document.getElementById('settings-password-hint'),
+  settingsOutputsPath: document.getElementById('settings-outputs-path'),
 };
+
+let cachedSettings = null;
 
 const DEFAULT_EMAIL_SUBJECT = 'Ridian Agency Draft Email Output';
 
@@ -442,6 +454,191 @@ function fillExample() {
   els.taskInput.focus();
 }
 
+/* ---------- Settings modal ---------- */
+
+const SETTINGS_FIELDS = [
+  'operator_name',
+  'operator_email',
+  'default_to_email',
+  'company_name',
+  'smtp_host',
+  'smtp_port',
+  'smtp_username',
+  'smtp_from_email',
+];
+
+function setSettingsStatus(text, kind) {
+  if (!els.settingsStatus) return;
+  els.settingsStatus.textContent = text || '';
+  els.settingsStatus.className = 'modal-status';
+  if (kind === 'ok') els.settingsStatus.classList.add('is-ok');
+  if (kind === 'err') els.settingsStatus.classList.add('is-err');
+}
+
+function applySettingsToForm(settings) {
+  if (!els.settingsForm) return;
+  SETTINGS_FIELDS.forEach((name) => {
+    const input = els.settingsForm.elements.namedItem(name);
+    if (input) input.value = settings[name] || '';
+  });
+  // Password is never returned from the server. Leave the field blank.
+  const pw = els.settingsForm.elements.namedItem('smtp_password');
+  if (pw) pw.value = '';
+
+  if (els.settingsPasswordHint) {
+    if (settings.smtp_password_configured) {
+      els.settingsPasswordHint.className = 'field-hint is-ok';
+      els.settingsPasswordHint.textContent =
+        'A password is currently saved. Leave blank to keep it; type a new one to replace it.';
+    } else {
+      els.settingsPasswordHint.className = 'field-hint';
+      els.settingsPasswordHint.textContent =
+        'No password saved yet. For Gmail use an App Password.';
+    }
+  }
+
+  if (els.settingsOutputsPath) {
+    els.settingsOutputsPath.textContent = settings.outputs_path || '—';
+  }
+}
+
+async function loadSettingsIntoForm() {
+  setSettingsStatus('Loading…');
+  try {
+    const res = await fetch(`${BACKEND}/settings`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    cachedSettings = data;
+    applySettingsToForm(data);
+    setSettingsStatus('');
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    setSettingsStatus(
+      /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable. Start the FastAPI server first.'
+        : `Could not load settings: ${msg}`,
+      'err'
+    );
+  }
+}
+
+function openSettings() {
+  if (!els.settingsModal) return;
+  els.settingsModal.classList.remove('hidden');
+  els.settingsModal.setAttribute('aria-hidden', 'false');
+  document.addEventListener('keydown', handleSettingsKeydown);
+  loadSettingsIntoForm().then(() => {
+    const first = els.settingsForm && els.settingsForm.elements.namedItem('operator_name');
+    if (first && typeof first.focus === 'function') first.focus();
+  });
+}
+
+function closeSettings() {
+  if (!els.settingsModal) return;
+  els.settingsModal.classList.add('hidden');
+  els.settingsModal.setAttribute('aria-hidden', 'true');
+  document.removeEventListener('keydown', handleSettingsKeydown);
+  setSettingsStatus('');
+  if (els.settingsOpenBtn) els.settingsOpenBtn.focus();
+}
+
+function handleSettingsKeydown(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeSettings();
+  }
+}
+
+async function saveSettings(e) {
+  if (e) e.preventDefault();
+  if (!els.settingsForm) return;
+
+  const fd = new FormData(els.settingsForm);
+  const payload = {};
+  SETTINGS_FIELDS.forEach((name) => {
+    payload[name] = (fd.get(name) || '').toString().trim();
+  });
+  // Password is sent only if the user typed something.
+  const pwValue = (fd.get('smtp_password') || '').toString();
+  if (pwValue !== '') payload.smtp_password = pwValue;
+
+  els.settingsSaveBtn.disabled = true;
+  setSettingsStatus('Saving…');
+
+  try {
+    const res = await fetch(`${BACKEND}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    cachedSettings = data;
+    applySettingsToForm(data);
+    setSettingsStatus('Settings saved.', 'ok');
+    setTimeout(() => {
+      // Clear the green confirmation after a beat, but only if no newer status replaced it.
+      if (els.settingsStatus && els.settingsStatus.textContent === 'Settings saved.') {
+        setSettingsStatus('');
+      }
+    }, 2500);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    setSettingsStatus(
+      /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable. Start the FastAPI server first.'
+        : `Could not save: ${msg}`,
+      'err'
+    );
+  } finally {
+    els.settingsSaveBtn.disabled = false;
+  }
+}
+
+async function testEmailSettings() {
+  const ok = window.confirm(
+    'Send a test email to your saved default recipient using the current SMTP settings?'
+  );
+  if (!ok) return;
+
+  els.settingsTestEmailBtn.disabled = true;
+  setSettingsStatus('Sending test email…');
+
+  try {
+    const res = await fetch(`${BACKEND}/email/send-approved`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: 'Ridian Agency SMTP test',
+        body:
+          'This is a test email sent from the Ridian Agency Settings panel. ' +
+          'If you received this, your SMTP credentials are working.\n\n' +
+          '— Ridian Agency',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    const to = data && data.to_email ? ` to ${data.to_email}` : '';
+    setSettingsStatus(`Test email sent${to}.`, 'ok');
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    setSettingsStatus(
+      /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable. Start the FastAPI server first.'
+        : msg,
+      'err'
+    );
+  } finally {
+    els.settingsTestEmailBtn.disabled = false;
+  }
+}
+
 /* ---------- Prompt library ---------- */
 
 function buildPromptLibrary() {
@@ -517,6 +714,28 @@ els.taskInput.addEventListener('keydown', (e) => {
 
 if (els.sendEmailBtn) {
   els.sendEmailBtn.addEventListener('click', sendApprovedEmail);
+}
+
+if (els.settingsOpenBtn) {
+  els.settingsOpenBtn.addEventListener('click', openSettings);
+}
+if (els.settingsCloseBtn) {
+  els.settingsCloseBtn.addEventListener('click', closeSettings);
+}
+if (els.settingsCancelBtn) {
+  els.settingsCancelBtn.addEventListener('click', closeSettings);
+}
+if (els.settingsForm) {
+  els.settingsForm.addEventListener('submit', saveSettings);
+}
+if (els.settingsTestEmailBtn) {
+  els.settingsTestEmailBtn.addEventListener('click', testEmailSettings);
+}
+if (els.settingsModal) {
+  // Click on the dim backdrop closes the modal; clicks inside the card don't.
+  els.settingsModal.addEventListener('click', (e) => {
+    if (e.target === els.settingsModal) closeSettings();
+  });
 }
 
 buildPromptLibrary();
