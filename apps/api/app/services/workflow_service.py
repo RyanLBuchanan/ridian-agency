@@ -15,12 +15,39 @@ from pathlib import Path
 
 from agents import Runner, trace
 
+from ..agents import default_model
 from ..agents.email_agent import email_agent
 from ..agents.presentation_agent import presentation_agent
 from ..agents.research_agent import research_agent
 from ..agents.reviewer_agent import reviewer_agent
 from ..agents.writer_agent import writer_agent
 from .artifact_service import create_run_folder, write_artifact
+from .settings_service import apply_to_environment
+
+_PIPELINE_AGENTS = (
+    research_agent,
+    writer_agent,
+    reviewer_agent,
+    presentation_agent,
+    email_agent,
+)
+
+
+def _apply_runtime_settings() -> None:
+    """Pick up any settings the operator changed since startup.
+
+    The Agent objects were constructed at import time with whatever
+    ``default_model()`` resolved to back then. Mirror the latest settings
+    into ``os.environ`` and reassign each agent's ``model`` so a new
+    model name saved through the Settings panel takes effect on the next
+    workflow run without a backend restart. The OpenAI SDK reads
+    ``OPENAI_API_KEY`` from env at request time, so that key flows
+    through automatically once it's in ``os.environ``.
+    """
+    apply_to_environment()
+    model = default_model()
+    for agent in _PIPELINE_AGENTS:
+        agent.model = model
 
 
 @dataclass
@@ -33,6 +60,7 @@ class WorkflowResult:
 
 
 async def run_workflow(task: str) -> WorkflowResult:
+    _apply_runtime_settings()
     folder = create_run_folder(task)
 
     with trace("ridian-agency.workflow"):

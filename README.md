@@ -1,278 +1,177 @@
-# Ridian Agency — Local MVP
+# Ridian Agency
 
-## Start with one click
+A local desktop app that turns a business task into a polished package:
+market research summary, business document, slide outline, and a draft
+email — all in one ~90-second run, all saved to a folder on your machine.
 
-Once setup is done (Python venv created, `apps/api/.env` filled in, and
-`desktop/npm install` run — see the sections below), starting the whole stack
-is a double-click.
+Built on Python (FastAPI + the official OpenAI Agents SDK) for the backend
+and Electron for the desktop GUI. Local-first, no cloud, no auth, no
+database.
 
-1. **Double-click `Start-Ridian-Agency.bat`** in the repo root.
-2. A PowerShell window opens, checks dependencies, starts the backend (or
-   reuses the one already on port 8000), and launches the desktop app.
-3. When the desktop window appears and the pill reads **Backend online**,
-   you're ready.
+## New here? Read [QUICKSTART.md](QUICKSTART.md)
 
-**If Windows blocks the script:** right-click the `.bat` → **Run as
-administrator**, or open PowerShell once and run:
+A non-developer-friendly, step-by-step Windows setup guide. ~15 minutes
+to clone, install, configure your OpenAI key in the desktop Settings
+panel, and run your first workflow.
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
+## What you get
 
-(The `.bat` invokes PowerShell with `-ExecutionPolicy Bypass` so this is
-usually unnecessary, but some lockdown policies block even that.)
+- **Five OpenAI Agents** wired in a sequential pipeline: research → writer
+  → reviewer → presentation → email. Whole run is wrapped in a single
+  Agents SDK `trace`.
+- **Desktop GUI** (Electron) with a Settings panel, a prompt library, live
+  backend status, copy buttons on every result, and an approval-only
+  "send draft email" action.
+- **Local artifacts** written to `outputs/<timestamp>_<slug>/` — five
+  Markdown files per run plus the original task.
+- **One-click launcher**: `Start-Ridian-Agency.bat` starts the backend and
+  the desktop app.
 
-**To stop everything:** close the **Ridian Agency** desktop window, then
-close the **Ridian Agency — Backend (uvicorn)** PowerShell window. The
-launcher window self-closes after about 8 seconds; no action needed.
+## Local-only by design
 
-A local prototype of a multi-agent "agency" built on the official
-[OpenAI Agents SDK](https://github.com/openai/openai-agents-python).
+- The API server binds to `127.0.0.1:8000` (loopback only). Nothing
+  outside your machine can reach it.
+- The OpenAI key and SMTP password live on disk in
+  `apps/api/local_settings.json` (saved via the Settings panel) or
+  `apps/api/.env`. Both files are git-ignored.
+- The desktop renderer talks to the backend over plain HTTP. CSP locks
+  network access to `http://127.0.0.1:8000` only.
+- Secrets are never logged, never returned by any API endpoint, and
+  never shown to the renderer after they're saved. The Settings panel
+  shows `*_configured: true` flags instead.
 
-Submit a business task and get back:
+## Settings live in the desktop GUI
 
-1. A market research summary
-2. A polished business document
-3. A slide deck outline
-4. A draft outbound email
-5. All four saved to disk as `.md` artifacts
+You don't need to edit environment variables for normal use. Launch the
+app, click **Settings** in the top-right header, fill in:
 
-No frontend. No database. No auth. Just a FastAPI service and a folder.
+- **AI provider** — OpenAI API key (required), model (defaults to
+  `gpt-4o-mini`).
+- **Operator profile** — your name, email, company name.
+- **Default email recipient** — where the Approve & Send button delivers.
+- **SMTP credentials** — only needed for the email send button.
 
-## How it works
+Settings persist to `apps/api/local_settings.json` and take precedence
+over any values in `apps/api/.env`. If neither is set, the GUI shows a
+first-run banner pointing you at Settings; the **Run workflow** button
+stays disabled until an OpenAI key is configured.
 
-```
-operator task
-   │
-   ▼
-[research_agent]  ──► research_summary.md
-   │
-   ▼
-[writer_agent]    ──► draft document
-   │
-   ▼
-[reviewer_agent]  ──► business_document.md
-   │
-   ▼
-[presentation_agent] ──► slide_outline.md
-   │
-   ▼
-[email_agent]     ──► draft_email.md
-```
+## Developer setup (Windows PowerShell)
 
-The pipeline runs inside a single Agents SDK `trace("ridian-agency.workflow")`
-so the whole run shows up as one workflow in the OpenAI tracing dashboard.
-
-`apps/api/app/agents/triage_agent.py` also exposes the five specialists as
-**agents-as-tools** for ad-hoc requests where you don't want the full pipeline.
-
-## Project layout
-
-```
-ridian-agency/
-  apps/
-    api/
-      app/
-        main.py                  # FastAPI app
-        agents/
-          triage_agent.py        # orchestrator (agents-as-tools)
-          research_agent.py      # + function_tool example (get_today)
-          writer_agent.py
-          reviewer_agent.py
-          presentation_agent.py
-          email_agent.py
-        services/
-          artifact_service.py    # writes files under outputs/
-          workflow_service.py    # sequential pipeline + tracing
-        prompts/
-          research_prompt.txt
-          writer_prompt.txt
-          reviewer_prompt.txt
-          presentation_prompt.txt
-          email_prompt.txt
-      requirements.txt
-      .env.example
-  outputs/                       # one timestamped folder per run
-  README.md
-```
-
-## Setup (Windows PowerShell)
-
-From the repo root:
+End-users should follow [QUICKSTART.md](QUICKSTART.md). The condensed
+version for developers:
 
 ```powershell
-cd c:\Users\ryanl\Desktop\Ryan\Ridian_Technologies\ridian-agency
+# clone
+git clone <repo-url>
+cd ridian-agency
 
-# 1. Create and activate a virtual environment
+# Python backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-# If PowerShell blocks the activation script, run this once for the current user:
-#   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-
-# 2. Install dependencies
 pip install --upgrade pip
 pip install -r apps\api\requirements.txt
 
-# 3. Configure environment
-Copy-Item apps\api\.env.example apps\api\.env
-notepad apps\api\.env   # paste your OPENAI_API_KEY
-```
-
-## Run the API
-
-```powershell
-# From the repo root, with the venv activated:
-$env:PYTHONPATH = "apps\api"
-uvicorn app.main:app --reload --port 8000 --app-dir apps\api
-```
-
-You should see:
-
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-```
-
-## Try it
-
-### Health check
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-```
-
-### Run the workflow
-
-```powershell
-$body = @{
-  task = "Research practical AI consulting opportunities for small businesses in Gulf Shores, Orange Beach, Foley, and Fairhope Alabama."
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8000/workflows/run `
-  -ContentType "application/json" `
-  -Body $body
-```
-
-The response will look like:
-
-```json
-{
-  "status": "complete",
-  "artifact_folder": "C:\\...\\ridian-agency\\outputs\\20260521-143022_research-practical-ai-consulting",
-  "research_summary": "...",
-  "business_document": "...",
-  "slide_outline": "...",
-  "draft_email": "..."
-}
-```
-
-And under `outputs/<timestamp>_<slug>/` you will find:
-
-- `research_summary.md`
-- `business_document.md`
-- `slide_outline.md`
-- `draft_email.md`
-- `task.txt`
-
-### Open the interactive docs
-
-```powershell
-Start-Process http://127.0.0.1:8000/docs
-```
-
-## Configuration
-
-| Variable         | Default        | Purpose                                  |
-| ---------------- | -------------- | ---------------------------------------- |
-| `OPENAI_API_KEY` | _(required)_   | OpenAI key used by the Agents SDK.       |
-| `OPENAI_MODEL`   | `gpt-4o-mini`  | Model used by every agent.               |
-| `OUTPUTS_DIR`    | `./outputs`    | Where artifact folders are written.      |
-
-## Tracing
-
-The Agents SDK uses OpenAI's hosted tracing by default. With `OPENAI_API_KEY`
-set, every `/workflows/run` call shows up as a `ridian-agency.workflow` trace
-at <https://platform.openai.com/traces>.
-
-## Send the draft email (SMTP, approval-only)
-
-Every workflow run produces a draft email — but Ridian Agency **never auto-sends**
-it. To deliver the draft to your inbox, click **Approve & Send Email to Me** on
-the Draft Email card in the desktop app. The renderer asks for a confirmation,
-then `POST`s to `/email/send-approved`. The backend reads SMTP credentials from
-environment variables and sends the message.
-
-### Recommended SMTP setup
-
-Add these keys to `apps/api/.env` (they're already templated in
-`apps/api/.env.example`). The endpoint returns a clear, graceful 503 if any are
-missing — the workflow itself still works.
-
-| Variable           | Example                | Notes                                                |
-| ------------------ | ---------------------- | ---------------------------------------------------- |
-| `SMTP_HOST`        | `smtp.gmail.com`       | Gmail / Office 365 / Fastmail / your own server.    |
-| `SMTP_PORT`        | `587`                  | `587` for STARTTLS, `465` for implicit TLS.         |
-| `SMTP_USERNAME`    | `you@gmail.com`        | Usually your full email address.                    |
-| `SMTP_PASSWORD`    | _(app password)_       | For Gmail / Workspace, **App Password**, not your account password. |
-| `SMTP_FROM_EMAIL`  | `you@gmail.com`        | The `From:` address (most providers require it match `SMTP_USERNAME`). |
-| `DEFAULT_TO_EMAIL` | `you@yourdomain.com`   | Where to send when the request omits `to_email`.   |
-
-**Gmail App Password:** turn on 2-Step Verification, then create one at
-<https://myaccount.google.com/apppasswords>. Paste it into `SMTP_PASSWORD` with
-no spaces.
-
-### Privacy & safety
-
-- Credentials live in `apps/api/.env` only. The desktop renderer never sees them.
-- The endpoint never returns or logs `SMTP_PASSWORD`, and never echoes raw SMTP
-  server text (which on some servers can leak state).
-- The Approve & Send button never auto-fires — it requires a click and a
-  confirmation each time.
-
-## Desktop GUI (Electron)
-
-A native-feeling desktop window lives in [desktop/](desktop/). It's a thin
-Electron shell that loads a local HTML/CSS/JS renderer, talks to the FastAPI
-backend on `http://127.0.0.1:8000`, and shows a live backend-status pill.
-
-It does **not** bundle Python — the backend runs separately. Start the API
-first (per the steps above), then launch the desktop app.
-
-### Setup & run (Windows PowerShell)
-
-```powershell
-cd c:\Users\ryanl\Desktop\Ryan\Ridian_Technologies\ridian-agency\desktop
+# Desktop GUI
+cd desktop
 npm install
+cd ..
+
+# Launch (backend + desktop together)
+.\Start-Ridian-Agency.bat
+```
+
+If you'd rather run pieces by hand:
+
+```powershell
+# Backend only
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --port 8000 --app-dir apps\api
+
+# Desktop only (in a second terminal)
+cd desktop
 npm run start
 ```
 
-A window titled **Ridian Agency** opens. The pill in the top-right reads
-*Backend online* (green) when `/health` responds, *Backend offline* (red)
-otherwise. If it's offline, a banner explains how to start the API.
+Useful URLs (backend only):
 
-### Layout
+| URL | Purpose |
+| --- | --- |
+| <http://127.0.0.1:8000>            | The same operator console served as static HTML |
+| <http://127.0.0.1:8000/docs>       | Swagger UI for the API |
+| <http://127.0.0.1:8000/health>     | `{ openai_key_loaded, model, ... }` |
+| <http://127.0.0.1:8000/settings>   | GET / POST settings (never returns secrets) |
+| <http://127.0.0.1:8000/workflows/run> | POST the workflow |
+| <http://127.0.0.1:8000/email/send-approved> | POST to send an approved email |
+
+## Architecture
 
 ```
-desktop/
+desktop/                       Electron shell (renderer + preload + main)
+  renderer/{index.html, styles.css, app.js}
+  main.js, preload.js, start.js
   package.json
-  main.js          # Electron main process, BrowserWindow, CSP, secure defaults
-  preload.js       # exposes only window.ridian.backendOrigin to the renderer
-  renderer/
-    index.html
-    styles.css
-    app.js
+apps/api/
+  app/
+    main.py                    FastAPI app, all routes
+    agents/                    5 specialist agents + triage (agents-as-tools)
+    services/
+      workflow_service.py      Sequential pipeline, wrapped in one SDK trace
+      artifact_service.py      Writes outputs/<timestamp>_<slug>/*.md
+      email_delivery_service.py  SMTP via stdlib smtplib + ssl
+      settings_service.py      JSON-backed settings + env mirror
+    prompts/                   .txt prompt files, one per agent
+  requirements.txt
+  .env.example
+outputs/                       One folder per workflow run (git-ignored)
+Start-Ridian-Agency.bat        Double-click launcher (Windows)
+Start-Ridian-Agency.ps1        The real launcher logic
+QUICKSTART.md                  Setup for non-developers
+README.md
 ```
 
-Renderer security: `contextIsolation: true`, `nodeIntegration: false`,
-`sandbox: true`, plus a CSP that restricts network calls to
-`http://127.0.0.1:8000`. The API key never reaches the renderer; it stays in
-`apps/api/.env` and is read by the Python backend.
+Pipeline:
+
+```
+operator task
+   |
+   v
+research_agent     -> research_summary.md
+writer_agent       -> draft document
+reviewer_agent     -> business_document.md
+presentation_agent -> slide_outline.md
+email_agent        -> draft_email.md
+```
+
+A single `trace("ridian-agency.workflow")` wraps the whole pipeline so it
+shows up as one workflow at <https://platform.openai.com/traces>.
+
+## Files that must never be committed
+
+These are already in [.gitignore](.gitignore). Double-check before pushing:
+
+- `apps/api/.env` — contains your OpenAI key and SMTP password if you used
+  the env-var route.
+- `apps/api/local_settings.json` — contains your OpenAI key and SMTP
+  password as saved through the desktop Settings panel.
+- `outputs/` (except `outputs/.gitkeep`) — generated artifacts may contain
+  task content you don't want to publish.
+- `.venv/` — your local Python environment.
+- `desktop/node_modules/` — Electron + npm install tree (hundreds of MB).
+
+If you're about to push, a quick paranoia check:
+
+```powershell
+git status
+git diff --cached --name-only | Select-String -Pattern "(\.env|local_settings\.json|outputs/|\.venv/|node_modules/)"
+```
+
+The Select-String should return nothing.
 
 ## Roadmap (intentionally not built yet)
 
 - Database / persistent run history
-- Auth
-- Real web search tool wired into the research agent
+- User auth, Google OAuth, Microsoft OAuth
+- Real web-search tool wired into the research agent
 - Streaming responses
-- Bundling Python with the desktop app and auto-starting the backend
+- Bundling Python with the desktop app for true single-installer distribution

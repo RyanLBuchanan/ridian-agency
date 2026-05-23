@@ -40,27 +40,43 @@ Write-Host ''
 
 Write-Step 'Checking Python virtual environment...'
 if (-not (Test-Path $VenvPython)) {
-  Write-Err ".venv not found at $VenvPython"
-  Write-Host '   Run setup first (see README "Setup" section).'
+  Write-Err 'Python environment not found.'
+  Write-Host '   See QUICKSTART.md step 2 (Install). In short:'
+  Write-Host '     python -m venv .venv'
+  Write-Host '     .\.venv\Scripts\Activate.ps1'
+  Write-Host '     pip install -r apps\api\requirements.txt'
   exit 1
 }
 Write-Ok 'venv present'
 
-Write-Step 'Checking apps\api\.env...'
-if (-not (Test-Path $EnvFile)) {
-  Write-Err '.env not found'
-  Write-Host '   Copy apps\api\.env.example to apps\api\.env and set OPENAI_API_KEY.'
-  exit 1
-}
-Write-Ok '.env present'
-
 Write-Step 'Checking Electron deps (desktop\node_modules)...'
 if (-not (Test-Path $NodeModules)) {
-  Write-Err 'desktop\node_modules not found'
-  Write-Host '   Run: cd desktop; npm install'
+  Write-Err 'Desktop dependencies not installed.'
+  Write-Host '   See QUICKSTART.md step 3 (Install). In short:'
+  Write-Host '     cd desktop'
+  Write-Host '     npm install'
+  Write-Host '     cd ..'
   exit 1
 }
 Write-Ok 'desktop deps present'
+
+# .env and local_settings.json are both optional at launcher time. The
+# desktop GUI will show a first-run banner pointing to Settings if no
+# OpenAI key is configured.
+if (Test-Path $EnvFile) {
+  Write-Ok '.env present (settings panel can still override)'
+} else {
+  Write-Warn 'No apps\api\.env found.'
+  Write-Host '   That is OK -- you can configure your OpenAI key from the desktop Settings panel.'
+}
+
+$SettingsFile = Join-Path $ApiDir 'local_settings.json'
+if (Test-Path $SettingsFile) {
+  Write-Ok 'local_settings.json present'
+} else {
+  Write-Warn 'No local_settings.json yet.'
+  Write-Host '   The Settings panel will create it after your first save.'
+}
 
 # ---------- 2. backend ----------
 

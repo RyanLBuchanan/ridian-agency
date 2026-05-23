@@ -58,10 +58,22 @@
         <div class="banner-title">Backend is not running.</div>
         <div class="banner-body">
           Start the FastAPI server first, then this status will turn green.
-          From PowerShell:
-          <pre class="banner-code">cd c:\Users\ryanl\Desktop\Ryan\Ridian_Technologies\ridian-agency
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
+          The easiest way is to close this window and double-click
+          <code>Start-Ridian-Agency.bat</code> at the repo root. See
+          <code>QUICKSTART.md</code> if you have not done initial setup.
+        </div>
+      </section>
+
+      <section
+        id="openai-missing-banner"
+        class="banner banner-warn hidden"
+        role="alert"
+      >
+        <div class="banner-title">OpenAI API key is not configured.</div>
+        <div class="banner-body">
+          Open <strong>Settings</strong> (top right) to add your key before
+          running workflows. Get a key at
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
         </div>
       </section>
 
@@ -229,6 +241,34 @@ uvicorn app.main:app --port 8000 --app-dir apps\api</pre>
         </header>
 
         <form id="settings-form" class="modal-body" autocomplete="off">
+          <fieldset class="form-group">
+            <legend>AI provider</legend>
+            <label class="field">
+              <span class="field-label">OpenAI API key</span>
+              <input
+                name="openai_api_key"
+                type="password"
+                autocomplete="new-password"
+                placeholder=""
+              />
+              <span id="settings-openai-key-hint" class="field-hint"></span>
+            </label>
+            <label class="field">
+              <span class="field-label">Model</span>
+              <input
+                name="openai_model"
+                type="text"
+                autocomplete="off"
+                placeholder="gpt-4o-mini"
+              />
+              <span class="field-hint">
+                The OpenAI model every agent uses. Defaults to
+                <code>gpt-4o-mini</code>. Changes take effect on the next
+                workflow run.
+              </span>
+            </label>
+          </fieldset>
+
           <fieldset class="form-group">
             <legend>Operator profile</legend>
             <label class="field">

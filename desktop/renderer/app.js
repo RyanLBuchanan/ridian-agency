@@ -41,7 +41,9 @@ const els = {
   settingsTestEmailBtn: document.getElementById('settings-test-email-btn'),
   settingsStatus: document.getElementById('settings-status'),
   settingsPasswordHint: document.getElementById('settings-password-hint'),
+  settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
+  openaiMissingBanner: document.getElementById('openai-missing-banner'),
 };
 
 let cachedSettings = null;
@@ -345,6 +347,7 @@ function wireCopyButtons() {
 /* ---------- Backend health polling ---------- */
 
 let backendUp = null; // null = unknown, true/false once known
+let openaiKeyConfigured = null;
 
 function setBackendStatus(up) {
   if (backendUp === up) return;
@@ -361,6 +364,20 @@ function setBackendStatus(up) {
   }
 }
 
+function setOpenAIKeyState(configured) {
+  if (openaiKeyConfigured === configured) return;
+  openaiKeyConfigured = configured;
+  if (configured) {
+    hide(els.openaiMissingBanner);
+    els.runBtn.disabled = false;
+    els.runBtn.title = '';
+  } else {
+    show(els.openaiMissingBanner);
+    els.runBtn.disabled = true;
+    els.runBtn.title = 'Configure your OpenAI API key in Settings first.';
+  }
+}
+
 async function pollHealth() {
   try {
     const ctrl = new AbortController();
@@ -368,8 +385,14 @@ async function pollHealth() {
     const res = await fetch(`${BACKEND}/health`, { signal: ctrl.signal });
     clearTimeout(t);
     setBackendStatus(res.ok);
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setOpenAIKeyState(!!data.openai_key_loaded);
+    }
   } catch (_) {
     setBackendStatus(false);
+    // If we can't reach the backend we don't know the key state — leave the
+    // run button as-is, the backend-down banner already explains the issue.
   }
 }
 
@@ -389,6 +412,11 @@ async function runWorkflow() {
 
   if (backendUp === false) {
     showError('Backend is not running. Start the FastAPI server first.');
+    return;
+  }
+
+  if (openaiKeyConfigured === false) {
+    showError('OpenAI API key is not configured. Open Settings to add your key before running workflows.');
     return;
   }
 
@@ -461,11 +489,18 @@ const SETTINGS_FIELDS = [
   'operator_email',
   'default_to_email',
   'company_name',
+  'openai_model',
   'smtp_host',
   'smtp_port',
   'smtp_username',
   'smtp_from_email',
 ];
+
+// Secret fields use the preserve-on-blank convention: blank submission
+// keeps the saved server-side value. Names here must match the form
+// input `name` attributes AND the backend's `*_configured` flags
+// (without the `_configured` suffix).
+const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
 
 function setSettingsStatus(text, kind) {
   if (!els.settingsStatus) return;
@@ -481,9 +516,23 @@ function applySettingsToForm(settings) {
     const input = els.settingsForm.elements.namedItem(name);
     if (input) input.value = settings[name] || '';
   });
-  // Password is never returned from the server. Leave the field blank.
-  const pw = els.settingsForm.elements.namedItem('smtp_password');
-  if (pw) pw.value = '';
+  // Secrets are never returned from the server. Always leave the inputs blank.
+  SETTINGS_SECRET_FIELDS.forEach((name) => {
+    const input = els.settingsForm.elements.namedItem(name);
+    if (input) input.value = '';
+  });
+
+  if (els.settingsOpenaiKeyHint) {
+    if (settings.openai_api_key_configured) {
+      els.settingsOpenaiKeyHint.className = 'field-hint is-ok';
+      els.settingsOpenaiKeyHint.textContent =
+        'An OpenAI API key is currently saved. Leave blank to keep it; type a new one to replace it.';
+    } else {
+      els.settingsOpenaiKeyHint.className = 'field-hint';
+      els.settingsOpenaiKeyHint.textContent =
+        'Paste your OpenAI API key here. Get one at platform.openai.com/api-keys.';
+    }
+  }
 
   if (els.settingsPasswordHint) {
     if (settings.smtp_password_configured) {
@@ -558,9 +607,12 @@ async function saveSettings(e) {
   SETTINGS_FIELDS.forEach((name) => {
     payload[name] = (fd.get(name) || '').toString().trim();
   });
-  // Password is sent only if the user typed something.
-  const pwValue = (fd.get('smtp_password') || '').toString();
-  if (pwValue !== '') payload.smtp_password = pwValue;
+  // Secrets are sent only if the user typed something — otherwise the
+  // backend preserves the previously-saved value.
+  SETTINGS_SECRET_FIELDS.forEach((name) => {
+    const v = (fd.get(name) || '').toString();
+    if (v !== '') payload[name] = v;
+  });
 
   els.settingsSaveBtn.disabled = true;
   setSettingsStatus('Saving…');
@@ -578,6 +630,10 @@ async function saveSettings(e) {
     }
     cachedSettings = data;
     applySettingsToForm(data);
+    // Refresh /health immediately so the openai-missing banner and the
+    // Run Workflow button reflect the new state without waiting for the
+    // 5-second poll.
+    pollHealth();
     setSettingsStatus('Settings saved.', 'ok');
     setTimeout(() => {
       // Clear the green confirmation after a beat, but only if no newer status replaced it.

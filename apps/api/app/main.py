@@ -15,10 +15,18 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from .services import settings_service
-from .services.artifact_service import outputs_dir
-from .services.email_delivery_service import send_email
-from .services.workflow_service import run_workflow
+# Mirror any saved OPENAI_* settings into os.environ BEFORE importing the
+# workflow / agents modules. The Agent instances read OPENAI_MODEL at import
+# time via default_model(); the OpenAI SDK reads OPENAI_API_KEY at request
+# time. This call ensures both see the user's saved values from
+# apps/api/local_settings.json on a fresh start.
+from .services import settings_service  # noqa: E402  (import order matters)
+
+settings_service.apply_to_environment()
+
+from .services.artifact_service import outputs_dir  # noqa: E402
+from .services.email_delivery_service import send_email  # noqa: E402
+from .services.workflow_service import run_workflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
 log = logging.getLogger("ridian.api")
@@ -67,11 +75,16 @@ class EmailSendResponse(BaseModel):
 
 
 class SettingsView(BaseModel):
-    """Safe public view of local settings — never contains smtp_password."""
+    """Safe public view of local settings — never contains secrets.
+
+    ``smtp_password`` and ``openai_api_key`` are exposed only as
+    ``*_configured: bool`` flags."""
     operator_name: str = ""
     operator_email: str = ""
     default_to_email: str = ""
     company_name: str = ""
+    openai_model: str = ""
+    openai_api_key_configured: bool = False
     smtp_host: str = ""
     smtp_port: str = ""
     smtp_username: str = ""
@@ -83,12 +96,15 @@ class SettingsView(BaseModel):
 class SettingsUpdate(BaseModel):
     """All fields optional. Omitted fields are left alone.
 
-    Special case: ``smtp_password`` blank/missing means "keep the existing
-    saved value". Any other field present-and-blank clears its value."""
+    Special case: secrets (``smtp_password``, ``openai_api_key``) blank or
+    missing means "keep the existing saved value". Any other field present
+    and blank clears that field."""
     operator_name: str | None = None
     operator_email: str | None = None
     default_to_email: str | None = None
     company_name: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_username: str | None = None
@@ -109,11 +125,13 @@ async def index() -> FileResponse:
 
 @app.get("/health")
 async def health() -> dict:
+    # Reads through settings_service so the saved local_settings.json takes
+    # precedence over .env. Never returns the key itself.
     return {
         "status": "ok",
         "service": "ridian-agency",
-        "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "openai_key_loaded": bool(os.getenv("OPENAI_API_KEY")),
+        "model": settings_service.get_effective_value("OPENAI_MODEL") or "gpt-4o-mini",
+        "openai_key_loaded": bool(settings_service.get_effective_value("OPENAI_API_KEY")),
     }
 
 
@@ -154,9 +172,13 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
     never has to round-trip the password back to the server."""
     # exclude_unset=True so a client that omits a field leaves the saved value
     # alone. Sending a present-but-empty string still clears the field (except
-    # smtp_password, which has its own preserve-on-blank rule in the service).
+    # for secrets — smtp_password and openai_api_key have a preserve-on-blank
+    # rule in the service).
     updates = payload.model_dump(exclude_unset=True)
     settings_service.save_settings(updates)
+    # Mirror updated OPENAI_* values into os.environ so the next workflow run
+    # (and the next /health probe) see them without a backend restart.
+    settings_service.apply_to_environment()
     return _settings_view_with_outputs()
 
 
