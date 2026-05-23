@@ -32,6 +32,10 @@ const els = {
   backendDownBanner: document.getElementById('backend-down-banner'),
   sendEmailBtn: document.getElementById('send-email-btn'),
   sendEmailStatus: document.getElementById('send-email-status'),
+  actionsStatus: document.getElementById('actions-status'),
+  actionOpenFolder: document.getElementById('action-open-folder'),
+  actionCopyFolder: document.getElementById('action-copy-folder'),
+  actionExportZip: document.getElementById('action-export-zip'),
   settingsOpenBtn: document.getElementById('settings-open-btn'),
   settingsModal: document.getElementById('settings-modal'),
   settingsForm: document.getElementById('settings-form'),
@@ -230,8 +234,198 @@ function renderResults(result) {
   document.querySelector('[data-field="slide_outline"]').innerHTML = renderMarkdown(result.slide_outline);
   document.querySelector('[data-field="draft_email"]').innerHTML = renderMarkdown(result.draft_email);
   resetEmailStatus();
+  resetActionsStatus();
   show(els.resultsRegion);
   els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ---------- Artifact actions (open / export) ----------
+ *
+ * Each per-card action button writes its feedback to a status span sitting
+ * directly inside the same .card-actions-row. The global Actions card has
+ * its own #actions-status that handles its three global buttons.
+ *
+ * Earlier the per-card buttons wrote to #actions-status too, which is at
+ * the top of the results region — clicking Export DOCX on the Business
+ * Document card produced a success message off-screen, looking like a
+ * silent failure. The new per-card status fixes that.
+ */
+
+function writeStatus(el, text, kind) {
+  if (!el) return;
+  el.textContent = text || '';
+  // Preserve the base class (.actions-status or .card-action-status) but
+  // strip our two state modifiers before reapplying.
+  el.classList.remove('is-ok', 'is-err');
+  if (kind === 'ok') el.classList.add('is-ok');
+  if (kind === 'err') el.classList.add('is-err');
+}
+
+function setActionsStatus(text, kind) {
+  writeStatus(els.actionsStatus, text, kind);
+}
+
+function resetActionsStatus() {
+  setActionsStatus('');
+  document.querySelectorAll('.card-action-status').forEach((el) => writeStatus(el, ''));
+}
+
+function statusForButton(btn) {
+  // The per-card action row contains the button and the status span as
+  // siblings; the global Actions card's buttons are siblings of #actions-status
+  // inside .actions-row -> .actions-card. Look upward for either container.
+  const row = btn.closest('.card-actions-row');
+  if (row) {
+    const span = row.querySelector('.card-action-status');
+    if (span) return span;
+  }
+  // Fall back to the global status (used for the Actions card's own buttons).
+  return els.actionsStatus;
+}
+
+async function postJson(endpoint, body) {
+  const res = await fetch(`${BACKEND}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  return data;
+}
+
+function debugLog(...args) {
+  // Console-only, never user-facing. No secrets ever passed.
+  // Visible in DevTools (View > Toggle Developer Tools in Electron).
+  // eslint-disable-next-line no-console
+  console.log('[ridian]', ...args);
+}
+
+async function runAction({ statusEl, label, endpoint, body, success }) {
+  if (!currentResult || !currentResult.artifact_folder) {
+    writeStatus(statusEl, 'Run a workflow before exporting.', 'err');
+    debugLog('action.skip', { endpoint, reason: 'no-currentResult' });
+    return;
+  }
+  writeStatus(statusEl, `${label}…`);
+  debugLog('action.start', { endpoint, body });
+  try {
+    const data = await postJson(endpoint, body);
+    debugLog('action.ok', { endpoint, data });
+    writeStatus(statusEl, success(data), 'ok');
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    debugLog('action.fail', { endpoint, error: msg });
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      setBackendStatus(false);
+      writeStatus(statusEl, 'Backend is not reachable. Start the FastAPI server first.', 'err');
+    } else {
+      writeStatus(statusEl, msg, 'err');
+    }
+  }
+}
+
+// --- global Actions card buttons ---
+
+function openArtifactFolderAction() {
+  return runAction({
+    statusEl: els.actionsStatus,
+    label: 'Opening folder',
+    endpoint: '/artifacts/open-folder',
+    body: { artifact_folder: currentResult && currentResult.artifact_folder },
+    success: (data) => `Opened ${data.path}.`,
+  });
+}
+
+async function copyArtifactFolderAction() {
+  if (!currentResult || !currentResult.artifact_folder) {
+    setActionsStatus('Run a workflow before copying.', 'err');
+    return;
+  }
+  const ok = await copyToClipboard(currentResult.artifact_folder);
+  setActionsStatus(
+    ok ? 'Folder path copied to clipboard.' : 'Could not copy folder path.',
+    ok ? 'ok' : 'err'
+  );
+}
+
+function exportZipAction() {
+  return runAction({
+    statusEl: els.actionsStatus,
+    label: 'Building ZIP',
+    endpoint: '/artifacts/export-zip',
+    body: { artifact_folder: currentResult && currentResult.artifact_folder },
+    success: (data) => `ZIP saved: ${data.zip_path}`,
+  });
+}
+
+// --- per-card buttons (dispatched from handleCardAction) ---
+
+function openFolderFromCard(statusEl) {
+  return runAction({
+    statusEl,
+    label: 'Opening folder',
+    endpoint: '/artifacts/open-folder',
+    body: { artifact_folder: currentResult && currentResult.artifact_folder },
+    success: (data) => `Opened ${data.path}.`,
+  });
+}
+
+function openFileFromCard(statusEl, filename) {
+  return runAction({
+    statusEl,
+    label: `Opening ${filename}`,
+    endpoint: '/artifacts/open-file',
+    body: {
+      artifact_folder: currentResult && currentResult.artifact_folder,
+      filename,
+    },
+    success: (data) => `Opened ${data.path}.`,
+  });
+}
+
+function exportDocxFromCard(statusEl) {
+  return runAction({
+    statusEl,
+    label: 'Exporting DOCX',
+    endpoint: '/artifacts/export-docx',
+    body: { artifact_folder: currentResult && currentResult.artifact_folder },
+    success: (data) => `DOCX exported: ${data.docx_path}`,
+  });
+}
+
+function exportPptxFromCard(statusEl) {
+  return runAction({
+    statusEl,
+    label: 'Exporting PPTX',
+    endpoint: '/artifacts/export-pptx',
+    body: { artifact_folder: currentResult && currentResult.artifact_folder },
+    success: (data) => `PPTX exported: ${data.pptx_path}`,
+  });
+}
+
+function handleCardAction(e) {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.getAttribute('data-action');
+  const statusEl = statusForButton(btn);
+  debugLog('card.click', { action, hasResult: !!(currentResult && currentResult.artifact_folder) });
+
+  if (action === 'open-folder') {
+    openFolderFromCard(statusEl);
+  } else if (action === 'open-file') {
+    const filename = btn.getAttribute('data-filename');
+    if (filename) openFileFromCard(statusEl, filename);
+  } else if (action === 'export-docx') {
+    exportDocxFromCard(statusEl);
+  } else if (action === 'export-pptx') {
+    exportPptxFromCard(statusEl);
+  } else {
+    debugLog('card.click.unknown', { action });
+  }
 }
 
 /* ---------- Approve & send email ---------- */
@@ -427,6 +621,7 @@ async function runWorkflow() {
     if (el) el.textContent = '';
   });
   resetEmailStatus();
+  resetActionsStatus();
 
   setRunning(true);
   show(els.status);
@@ -473,6 +668,7 @@ function clearAll() {
   hide(els.resultsRegion);
   hide(els.status);
   resetEmailStatus();
+  resetActionsStatus();
   currentResult = null;
   els.taskInput.focus();
 }
@@ -770,6 +966,15 @@ els.taskInput.addEventListener('keydown', (e) => {
 
 if (els.sendEmailBtn) {
   els.sendEmailBtn.addEventListener('click', sendApprovedEmail);
+}
+
+if (els.actionOpenFolder) els.actionOpenFolder.addEventListener('click', openArtifactFolderAction);
+if (els.actionCopyFolder) els.actionCopyFolder.addEventListener('click', copyArtifactFolderAction);
+if (els.actionExportZip) els.actionExportZip.addEventListener('click', exportZipAction);
+
+// Delegate per-card action buttons (Open markdown / Open folder / Export DOCX-PPTX)
+if (els.resultsRegion) {
+  els.resultsRegion.addEventListener('click', handleCardAction);
 }
 
 if (els.settingsOpenBtn) {

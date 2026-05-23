@@ -151,6 +151,35 @@
       </section>
 
       <section id="results-region" class="results hidden" aria-label="Results">
+        <article class="card actions-card" aria-labelledby="actions-heading">
+          <div class="card-head">
+            <h2 id="actions-heading">Actions</h2>
+          </div>
+          <div class="actions-row">
+            <button
+              id="action-open-folder"
+              type="button"
+              class="btn btn-primary"
+            >Open artifact folder</button>
+            <button
+              id="action-copy-folder"
+              type="button"
+              class="btn btn-ghost"
+            >Copy folder path</button>
+            <button
+              id="action-export-zip"
+              type="button"
+              class="btn btn-ghost"
+            >Export all as ZIP</button>
+          </div>
+          <span
+            id="actions-status"
+            class="actions-status"
+            role="status"
+            aria-live="polite"
+          ></span>
+        </article>
+
         <article class="card result-card">
           <div class="card-head">
             <h2>Artifact folder</h2>
@@ -159,6 +188,14 @@
             </button>
           </div>
           <pre class="result-folder" data-field="artifact_folder"></pre>
+          <div class="card-actions-row">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="open-folder"
+            >Open folder</button>
+            <span class="card-action-status" role="status" aria-live="polite"></span>
+          </div>
         </article>
 
         <article class="card result-card">
@@ -169,6 +206,15 @@
             </button>
           </div>
           <div class="result-body" data-field="research_summary"></div>
+          <div class="card-actions-row">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="open-file"
+              data-filename="research_summary.md"
+            >Open markdown file</button>
+            <span class="card-action-status" role="status" aria-live="polite"></span>
+          </div>
         </article>
 
         <article class="card result-card">
@@ -179,6 +225,20 @@
             </button>
           </div>
           <div class="result-body" data-field="business_document"></div>
+          <div class="card-actions-row">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="open-file"
+              data-filename="business_document.md"
+            >Open markdown file</button>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="export-docx"
+            >Export as DOCX</button>
+            <span class="card-action-status" role="status" aria-live="polite"></span>
+          </div>
         </article>
 
         <article class="card result-card">
@@ -189,6 +249,20 @@
             </button>
           </div>
           <div class="result-body" data-field="slide_outline"></div>
+          <div class="card-actions-row">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="open-file"
+              data-filename="slide_outline.md"
+            >Open markdown file</button>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="export-pptx"
+            >Export as PPTX</button>
+            <span class="card-action-status" role="status" aria-live="polite"></span>
+          </div>
         </article>
 
         <article class="card result-card">
@@ -209,6 +283,15 @@
               role="status"
               aria-live="polite"
             ></span>
+          </div>
+          <div class="card-actions-row">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-action="open-file"
+              data-filename="draft_email.md"
+            >Open markdown file</button>
+            <span class="card-action-status" role="status" aria-live="polite"></span>
           </div>
         </article>
       </section>

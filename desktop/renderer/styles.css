@@ -656,6 +656,74 @@ body {
   margin: 1rem 0;
 }
 
+/* Actions card + per-card action rows */
+.actions-card {
+  background:
+    linear-gradient(135deg, rgba(29, 78, 216, 0.04), rgba(79, 70, 229, 0.03)),
+    var(--color-surface);
+  border-color: var(--color-accent-soft);
+}
+
+.actions-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.actions-status {
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+  min-height: 1.4em;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.actions-status.is-ok {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.actions-status.is-err {
+  color: var(--color-error-text);
+  font-weight: 600;
+}
+
+.card-actions-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  margin-top: -2px;
+}
+
+.card-actions-row .btn {
+  font-size: var(--fs-xs);
+  padding: 0.4rem 0.8rem;
+}
+
+.card-action-status {
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  line-height: 1.4;
+  word-break: break-word;
+  flex: 1 1 100%;
+}
+
+.card-action-status:empty {
+  display: none;
+}
+
+.card-action-status.is-ok {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.card-action-status.is-err {
+  color: var(--color-error-text);
+  font-weight: 600;
+}
+
 /* Approval-based email send (Draft Email card) */
 .email-actions {
   display: flex;

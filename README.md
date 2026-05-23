@@ -168,10 +168,55 @@ git diff --cached --name-only | Select-String -Pattern "(\.env|local_settings\.j
 
 The Select-String should return nothing.
 
+## Future Google Workspace exports (planned, not built)
+
+The current export layer is local-only:
+
+- **Local exports (built):** Open artifact folder in Explorer, open
+  individual artifact files in their default app, export the whole run
+  as a ZIP, export `business_document.md` as a real `.docx`, export
+  `slide_outline.md` as a real `.pptx`. All from `POST /artifacts/*`
+  endpoints that validate paths against the configured outputs
+  directory.
+
+A natural next step is uploading the same artifacts to the operator's
+Google Workspace account. The planned flow:
+
+1. **Connect Google account (OAuth, one time).** A "Connect Google"
+   button in Settings opens a Google OAuth consent screen in the
+   system browser. The OAuth tokens land in
+   `apps/api/local_settings.json` (or a sibling file) and never reach
+   the renderer.
+2. **Approval-only uploads.** Same model as the email send button:
+   nothing uploads until the operator clicks an explicit approval
+   button in the GUI. No background sync, no auto-upload.
+3. **Per-artifact destinations:**
+   - **Upload folder to Drive** — `POST /artifacts/upload-drive` zips
+     the run and uploads to a configured Drive folder (or creates one
+     named after the run).
+   - **Create a Google Doc from `business_document.md`** —
+     `POST /artifacts/export-google-doc` converts the Markdown to a
+     real Google Doc.
+   - **Create a Google Slides deck from `slide_outline.md`** —
+     `POST /artifacts/export-google-slides` converts the slide outline
+     into a real deck with speaker notes.
+4. **Scopes:** narrow `drive.file` (only files the app created) plus
+   `documents` and `presentations`. Never `drive` (full Drive access).
+5. **Revocation:** a "Disconnect Google" button in Settings revokes
+   the token locally and removes it from `local_settings.json`.
+
+Until that ships, use the local exports above — you can drag the
+generated `.docx`, `.pptx`, or ZIP into Google Drive yourself.
+
+See `apps/api/app/services/export_service.py` for the local export
+implementation, and look for `TODO(google-workspace)` markers when
+that work begins.
+
 ## Roadmap (intentionally not built yet)
 
+- Google Workspace upload (see the section above)
 - Database / persistent run history
-- User auth, Google OAuth, Microsoft OAuth
+- User auth, Microsoft OAuth
 - Real web-search tool wired into the research agent
 - Streaming responses
 - Bundling Python with the desktop app for true single-installer distribution

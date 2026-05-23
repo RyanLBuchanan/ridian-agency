@@ -26,6 +26,14 @@ settings_service.apply_to_environment()
 
 from .services.artifact_service import outputs_dir  # noqa: E402
 from .services.email_delivery_service import send_email  # noqa: E402
+from .services.export_service import (  # noqa: E402
+    ExportError,
+    export_docx,
+    export_pptx,
+    export_zip,
+    open_artifact_file,
+    open_artifact_folder,
+)
 from .services.workflow_service import run_workflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
@@ -110,6 +118,36 @@ class SettingsUpdate(BaseModel):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from_email: str | None = None
+
+
+class ArtifactFolderRequest(BaseModel):
+    artifact_folder: str = Field(..., min_length=1)
+
+
+class ArtifactFileRequest(BaseModel):
+    artifact_folder: str = Field(..., min_length=1)
+    filename: str = Field(..., min_length=1)
+
+
+class ArtifactOpenResponse(BaseModel):
+    status: str
+    detail: str
+    path: str
+
+
+class ArtifactZipResponse(BaseModel):
+    status: str
+    zip_path: str
+
+
+class ArtifactDocxResponse(BaseModel):
+    status: str
+    docx_path: str
+
+
+class ArtifactPptxResponse(BaseModel):
+    status: str
+    pptx_path: str
 
 
 def _settings_view_with_outputs() -> SettingsView:
@@ -200,3 +238,59 @@ async def email_send_approved(payload: EmailSendRequest) -> EmailSendResponse:
         raise HTTPException(status_code=503, detail=result.detail)
     log.info("email.send_approved.ok to=%s", result.to_email)
     return EmailSendResponse(ok=True, detail=result.detail, to_email=result.to_email)
+
+
+# ---------------------------------------------------------------------------
+# Artifact actions (open + export). All endpoints validate the folder path
+# is inside the configured outputs/ directory and reject anything else.
+# Filenames for open-file are restricted to an allowlist in export_service.
+# ---------------------------------------------------------------------------
+
+
+def _export_error_to_http(exc: ExportError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.detail)
+
+
+@app.post("/artifacts/open-folder", response_model=ArtifactOpenResponse)
+async def artifacts_open_folder(payload: ArtifactFolderRequest) -> ArtifactOpenResponse:
+    try:
+        folder = open_artifact_folder(payload.artifact_folder)
+    except ExportError as exc:
+        raise _export_error_to_http(exc) from exc
+    return ArtifactOpenResponse(status="success", detail="Folder opened.", path=str(folder))
+
+
+@app.post("/artifacts/open-file", response_model=ArtifactOpenResponse)
+async def artifacts_open_file(payload: ArtifactFileRequest) -> ArtifactOpenResponse:
+    try:
+        path = open_artifact_file(payload.artifact_folder, payload.filename)
+    except ExportError as exc:
+        raise _export_error_to_http(exc) from exc
+    return ArtifactOpenResponse(status="success", detail="File opened.", path=str(path))
+
+
+@app.post("/artifacts/export-zip", response_model=ArtifactZipResponse)
+async def artifacts_export_zip(payload: ArtifactFolderRequest) -> ArtifactZipResponse:
+    try:
+        zip_path = export_zip(payload.artifact_folder)
+    except ExportError as exc:
+        raise _export_error_to_http(exc) from exc
+    return ArtifactZipResponse(status="success", zip_path=str(zip_path))
+
+
+@app.post("/artifacts/export-docx", response_model=ArtifactDocxResponse)
+async def artifacts_export_docx(payload: ArtifactFolderRequest) -> ArtifactDocxResponse:
+    try:
+        docx_path = export_docx(payload.artifact_folder)
+    except ExportError as exc:
+        raise _export_error_to_http(exc) from exc
+    return ArtifactDocxResponse(status="success", docx_path=str(docx_path))
+
+
+@app.post("/artifacts/export-pptx", response_model=ArtifactPptxResponse)
+async def artifacts_export_pptx(payload: ArtifactFolderRequest) -> ArtifactPptxResponse:
+    try:
+        pptx_path = export_pptx(payload.artifact_folder)
+    except ExportError as exc:
+        raise _export_error_to_http(exc) from exc
+    return ArtifactPptxResponse(status="success", pptx_path=str(pptx_path))
