@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -34,6 +35,7 @@ from .services.export_service import (  # noqa: E402
     open_artifact_file,
     open_artifact_folder,
 )
+from .services import google_drive_service  # noqa: E402
 from .services.workflow_service import run_workflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
@@ -148,6 +150,23 @@ class ArtifactDocxResponse(BaseModel):
 class ArtifactPptxResponse(BaseModel):
     status: str
     pptx_path: str
+
+
+class GoogleStatusResponse(BaseModel):
+    """Safe public Google Drive connection state. Never contains tokens."""
+    connected: bool
+    email: str | None = None
+
+
+class GoogleUploadRequest(BaseModel):
+    artifact_folder: str = Field(..., min_length=1)
+
+
+class GoogleUploadResponse(BaseModel):
+    status: str
+    drive_folder_name: str
+    uploaded_files: list[str]
+    drive_folder_url: str
 
 
 def _settings_view_with_outputs() -> SettingsView:
@@ -294,3 +313,56 @@ async def artifacts_export_pptx(payload: ArtifactFolderRequest) -> ArtifactPptxR
     except ExportError as exc:
         raise _export_error_to_http(exc) from exc
     return ArtifactPptxResponse(status="success", pptx_path=str(pptx_path))
+
+
+# ---------------------------------------------------------------------------
+# Google Drive (approval-only). drive.file scope — only files the app makes.
+# No endpoint ever returns OAuth tokens or the client_secret. The renderer
+# only ever sees connected state + email + folder URL.
+# ---------------------------------------------------------------------------
+
+
+def _google_error_to_http(exc: google_drive_service.GoogleDriveError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.detail)
+
+
+@app.get("/google/status", response_model=GoogleStatusResponse)
+async def google_status() -> GoogleStatusResponse:
+    return GoogleStatusResponse(**google_drive_service.get_status())
+
+
+@app.post("/google/connect", response_model=GoogleStatusResponse)
+async def google_connect() -> GoogleStatusResponse:
+    """Run the installed-app OAuth flow.
+
+    Blocks the calling HTTP request until the user finishes consent in
+    their browser. Runs via asyncio.to_thread so uvicorn stays responsive
+    to /health, /google/status, and other endpoints during the wait.
+    """
+    try:
+        status = await asyncio.to_thread(google_drive_service.run_oauth_flow)
+    except google_drive_service.GoogleDriveError as exc:
+        raise _google_error_to_http(exc) from exc
+    return GoogleStatusResponse(**status)
+
+
+@app.post("/google/disconnect", response_model=GoogleStatusResponse)
+async def google_disconnect() -> GoogleStatusResponse:
+    return GoogleStatusResponse(**google_drive_service.disconnect())
+
+
+@app.post("/google/upload-artifacts", response_model=GoogleUploadResponse)
+async def google_upload_artifacts(payload: GoogleUploadRequest) -> GoogleUploadResponse:
+    """Upload allowlisted artifact files to a new Drive folder.
+
+    Requires an already-connected Google Drive account. Validates that the
+    artifact folder lives inside the configured outputs/ directory; rejects
+    path traversal and arbitrary paths.
+    """
+    try:
+        result = await asyncio.to_thread(
+            google_drive_service.upload_artifact_folder, payload.artifact_folder
+        )
+    except google_drive_service.GoogleDriveError as exc:
+        raise _google_error_to_http(exc) from exc
+    return GoogleUploadResponse(**result)

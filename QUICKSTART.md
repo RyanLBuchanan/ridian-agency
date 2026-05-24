@@ -181,6 +181,61 @@ Other providers work the same way; common settings:
 | Outlook / Office 365 | smtp.office365.com | 587  |
 | Fastmail           | smtp.fastmail.com   | 465  |
 
+## Google Drive setup (optional)
+
+You can upload the artifact folder for any run to your own Google Drive,
+one click at a time. Uploads only happen after you click **Upload to
+Google Drive** in the desktop window and confirm — Ridian Agency never
+uploads anything automatically.
+
+The app uses the narrow `drive.file` OAuth scope: it can only see files
+that it itself created. It can never read or modify the rest of your
+Drive.
+
+### 1. Create a Google Cloud OAuth client (one time, ~5 minutes)
+
+1. Go to <https://console.cloud.google.com/>.
+2. Pick or create a project (top-left dropdown → **New Project**).
+3. In the left nav, **APIs & Services → Library** → search for
+   **Google Drive API** → **Enable**.
+4. **APIs & Services → OAuth consent screen** → choose **External**
+   (or Internal if you have Workspace). Fill in the required name +
+   support email. Add **your own Google email** under **Test users**.
+   (You can leave Scopes empty here; we request the scope at login time.)
+5. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+6. **Application type: Desktop app**. Name it anything ("Ridian Agency").
+7. Click **Download JSON** on the new credential.
+8. Save the downloaded file as
+   `apps/api/google_credentials.json` inside your Ridian Agency repo.
+
+The file is git-ignored — it will not be committed.
+
+### 2. Connect inside Ridian Agency
+
+1. Launch the app (`Start-Ridian-Agency.bat`).
+2. Click **Settings** (top right of the desktop window).
+3. Scroll to **Google Workspace**.
+4. Click **Connect Google Drive**.
+5. Your default browser opens to the Google consent screen. Sign in
+   with the same email you added as a test user in step 1.4. Grant the
+   single requested permission (file-level access).
+6. The browser shows a "received" page; the Settings panel updates to
+   **Connected as `you@example.com`** (your actual address).
+
+### 3. Upload after a workflow
+
+1. Run any workflow.
+2. In the **Actions** card, click **Upload to Google Drive**.
+3. Confirm the prompt.
+4. Watch the status: *"Uploading to Google Drive…"* → *"Uploaded to
+   Google Drive: N files in folder "&lt;name&gt;""*.
+5. Click **Open Drive folder** to view it in your browser.
+
+### Disconnect
+
+Settings → Google Workspace → **Disconnect Google Drive**. The token
+file is deleted from your machine. Reconnect any time.
+
 ## Troubleshooting
 
 **"Backend is not running"** in the desktop window

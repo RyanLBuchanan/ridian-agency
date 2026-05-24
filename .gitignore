@@ -9,6 +9,10 @@ venv/
 # Local settings (contains SMTP password)
 apps/api/local_settings.json
 
+# Google Drive OAuth (never commit either file)
+apps/api/google_credentials.json
+apps/api/google_token.json
+
 # Outputs (generated artifacts)
 outputs/*/
 !outputs/.gitkeep

@@ -171,6 +171,11 @@
               type="button"
               class="btn btn-ghost"
             >Export all as ZIP</button>
+            <button
+              id="action-upload-drive"
+              type="button"
+              class="btn btn-ghost"
+            >Upload to Google Drive</button>
           </div>
           <span
             id="actions-status"
@@ -178,6 +183,13 @@
             role="status"
             aria-live="polite"
           ></span>
+          <a
+            id="action-drive-link"
+            class="action-drive-link hidden"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Open Drive folder</a>
         </article>
 
         <article class="card result-card">
@@ -423,6 +435,33 @@
               <span class="field-label">From email</span>
               <input name="smtp_from_email" type="email" autocomplete="off" />
             </label>
+          </fieldset>
+
+          <fieldset class="form-group">
+            <legend>Google Workspace</legend>
+            <div class="google-status-row">
+              <span class="field-label">Google Drive:</span>
+              <span id="google-status-label" class="google-status-label">Checking…</span>
+            </div>
+            <div class="google-actions">
+              <button
+                type="button"
+                id="google-connect-btn"
+                class="btn btn-ghost"
+              >Connect Google Drive</button>
+              <button
+                type="button"
+                id="google-disconnect-btn"
+                class="btn btn-ghost"
+                disabled
+              >Disconnect Google Drive</button>
+            </div>
+            <span id="google-status-hint" class="field-hint">
+              Approval-only uploads. The app uses the narrow
+              <code>drive.file</code> scope and can only see files it
+              creates. Token + client secret stay on this machine and are
+              git-ignored.
+            </span>
           </fieldset>
 
           <fieldset class="form-group">

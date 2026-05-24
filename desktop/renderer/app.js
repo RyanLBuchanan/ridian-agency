@@ -36,6 +36,12 @@ const els = {
   actionOpenFolder: document.getElementById('action-open-folder'),
   actionCopyFolder: document.getElementById('action-copy-folder'),
   actionExportZip: document.getElementById('action-export-zip'),
+  actionUploadDrive: document.getElementById('action-upload-drive'),
+  actionDriveLink: document.getElementById('action-drive-link'),
+  googleConnectBtn: document.getElementById('google-connect-btn'),
+  googleDisconnectBtn: document.getElementById('google-disconnect-btn'),
+  googleStatusLabel: document.getElementById('google-status-label'),
+  googleStatusHint: document.getElementById('google-status-hint'),
   settingsOpenBtn: document.getElementById('settings-open-btn'),
   settingsModal: document.getElementById('settings-modal'),
   settingsForm: document.getElementById('settings-form'),
@@ -268,6 +274,10 @@ function setActionsStatus(text, kind) {
 function resetActionsStatus() {
   setActionsStatus('');
   document.querySelectorAll('.card-action-status').forEach((el) => writeStatus(el, ''));
+  if (els.actionDriveLink) {
+    els.actionDriveLink.classList.add('hidden');
+    els.actionDriveLink.removeAttribute('href');
+  }
 }
 
 function statusForButton(btn) {
@@ -678,6 +688,180 @@ function fillExample() {
   els.taskInput.focus();
 }
 
+/* ---------- Google Drive (status + connect + disconnect + upload) ---------- */
+
+let googleConnected = null;        // null = unknown, true/false once known
+let googleConnectedEmail = null;
+
+function setGoogleStatusUI(state) {
+  // state: { connected: bool, email: string|null, error?: string }
+  if (!els.googleStatusLabel) return;
+  googleConnected = !!state.connected;
+  googleConnectedEmail = state.email || null;
+
+  els.googleStatusLabel.classList.remove('is-connected', 'is-disconnected', 'is-err');
+
+  if (state.error) {
+    els.googleStatusLabel.classList.add('is-err');
+    els.googleStatusLabel.textContent = state.error;
+  } else if (state.connected) {
+    els.googleStatusLabel.classList.add('is-connected');
+    els.googleStatusLabel.textContent = state.email
+      ? `Connected as ${state.email}`
+      : 'Connected';
+  } else {
+    els.googleStatusLabel.classList.add('is-disconnected');
+    els.googleStatusLabel.textContent = 'Not connected';
+  }
+
+  if (els.googleConnectBtn) {
+    els.googleConnectBtn.disabled = !!state.busy;
+    els.googleConnectBtn.textContent = state.busy
+      ? 'Waiting for sign-in…'
+      : (state.connected ? 'Reconnect Google Drive' : 'Connect Google Drive');
+  }
+  if (els.googleDisconnectBtn) {
+    els.googleDisconnectBtn.disabled = !state.connected || !!state.busy;
+  }
+}
+
+async function loadGoogleStatus() {
+  setGoogleStatusUI({ connected: false, email: null, error: 'Checking…' });
+  try {
+    const res = await fetch(`${BACKEND}/google/status`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setGoogleStatusUI(data);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    setGoogleStatusUI({
+      connected: false,
+      email: null,
+      error: /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend not reachable.'
+        : `Status error: ${msg}`,
+    });
+  }
+}
+
+async function connectGoogleDrive() {
+  // Sets a busy state — the call may block until the user finishes consent
+  // in their browser. The backend runs the flow via asyncio.to_thread so
+  // other endpoints stay responsive while we wait.
+  setGoogleStatusUI({ connected: googleConnected, email: googleConnectedEmail, busy: true });
+  setSettingsStatus('A browser tab opened for Google sign-in. Complete it to continue…');
+  debugLog('google.connect.start');
+  try {
+    const res = await fetch(`${BACKEND}/google/connect`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    setGoogleStatusUI(data);
+    setSettingsStatus(
+      data.connected ? `Connected as ${data.email || 'your Google account'}.` : 'Connect did not complete.',
+      data.connected ? 'ok' : 'err'
+    );
+    debugLog('google.connect.ok', { connected: data.connected });
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    debugLog('google.connect.fail', { error: msg });
+    setGoogleStatusUI({ connected: false, email: null });
+    setSettingsStatus(
+      /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable. Start the FastAPI server first.'
+        : msg,
+      'err'
+    );
+  }
+}
+
+async function disconnectGoogleDrive() {
+  const ok = window.confirm('Disconnect Google Drive? The saved token will be deleted from this machine.');
+  if (!ok) return;
+  setGoogleStatusUI({ connected: googleConnected, email: googleConnectedEmail, busy: true });
+  try {
+    const res = await fetch(`${BACKEND}/google/disconnect`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    setGoogleStatusUI(data);
+    setSettingsStatus('Disconnected from Google Drive.', 'ok');
+    debugLog('google.disconnect.ok');
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    debugLog('google.disconnect.fail', { error: msg });
+    setSettingsStatus(`Disconnect failed: ${msg}`, 'err');
+    // Re-poll real status so the UI reflects reality.
+    loadGoogleStatus();
+  }
+}
+
+async function uploadArtifactsToDrive() {
+  if (!currentResult || !currentResult.artifact_folder) {
+    setActionsStatus('Run a workflow before uploading to Drive.', 'err');
+    return;
+  }
+  if (googleConnected === false) {
+    setActionsStatus('Google Drive is not connected. Open Settings to connect.', 'err');
+    return;
+  }
+  // If we genuinely don't know yet, do a quick fresh status check.
+  if (googleConnected === null) {
+    await loadGoogleStatus();
+    if (googleConnected === false) {
+      setActionsStatus('Google Drive is not connected. Open Settings to connect.', 'err');
+      return;
+    }
+  }
+
+  const ok = window.confirm("Upload this workflow's artifact folder to your connected Google Drive?");
+  if (!ok) return;
+
+  if (els.actionDriveLink) {
+    els.actionDriveLink.classList.add('hidden');
+    els.actionDriveLink.removeAttribute('href');
+  }
+  setActionsStatus('Uploading to Google Drive…');
+  if (els.actionUploadDrive) els.actionUploadDrive.disabled = true;
+  debugLog('google.upload.start', { folder: currentResult.artifact_folder });
+
+  try {
+    const res = await fetch(`${BACKEND}/google/upload-artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: currentResult.artifact_folder }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    const count = (data.uploaded_files || []).length;
+    setActionsStatus(
+      `Uploaded to Google Drive: ${count} file${count === 1 ? '' : 's'} in folder "${data.drive_folder_name}".`,
+      'ok'
+    );
+    if (els.actionDriveLink && data.drive_folder_url) {
+      els.actionDriveLink.href = data.drive_folder_url;
+      els.actionDriveLink.textContent = 'Open Drive folder';
+      els.actionDriveLink.classList.remove('hidden');
+    }
+    debugLog('google.upload.ok', { count, folder_name: data.drive_folder_name });
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    debugLog('google.upload.fail', { error: msg });
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      setBackendStatus(false);
+      setActionsStatus('Backend is not reachable. Start the FastAPI server first.', 'err');
+    } else {
+      setActionsStatus(msg, 'err');
+    }
+  } finally {
+    if (els.actionUploadDrive) els.actionUploadDrive.disabled = false;
+  }
+}
+
 /* ---------- Settings modal ---------- */
 
 const SETTINGS_FIELDS = [
@@ -776,6 +960,9 @@ function openSettings() {
     const first = els.settingsForm && els.settingsForm.elements.namedItem('operator_name');
     if (first && typeof first.focus === 'function') first.focus();
   });
+  // Refresh Google connection state every time Settings opens so the user
+  // always sees the current truth (e.g. after disconnecting elsewhere).
+  loadGoogleStatus();
 }
 
 function closeSettings() {
@@ -971,6 +1158,15 @@ if (els.sendEmailBtn) {
 if (els.actionOpenFolder) els.actionOpenFolder.addEventListener('click', openArtifactFolderAction);
 if (els.actionCopyFolder) els.actionCopyFolder.addEventListener('click', copyArtifactFolderAction);
 if (els.actionExportZip) els.actionExportZip.addEventListener('click', exportZipAction);
+if (els.actionUploadDrive) els.actionUploadDrive.addEventListener('click', uploadArtifactsToDrive);
+
+if (els.googleConnectBtn) els.googleConnectBtn.addEventListener('click', connectGoogleDrive);
+if (els.googleDisconnectBtn) els.googleDisconnectBtn.addEventListener('click', disconnectGoogleDrive);
+
+// Light initial probe so the Upload button knows whether to allow the click
+// before the user opens Settings. Errors are tolerated — the click handler
+// re-probes if state is unknown.
+loadGoogleStatus();
 
 // Delegate per-card action buttons (Open markdown / Open folder / Export DOCX-PPTX)
 if (els.resultsRegion) {

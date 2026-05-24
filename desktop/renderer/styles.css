@@ -724,6 +724,62 @@ body {
   font-weight: 600;
 }
 
+/* Google Drive link surfaced under the Actions card after a successful upload */
+.action-drive-link {
+  display: inline-block;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+  text-decoration: none;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--color-accent-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  align-self: flex-start;
+}
+
+.action-drive-link:hover {
+  background: #c7dbfd;
+  text-decoration: underline;
+}
+
+.action-drive-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+/* Google Workspace settings section */
+.google-status-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.google-status-label {
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+  font-weight: 600;
+}
+
+.google-status-label.is-connected {
+  color: var(--color-success);
+}
+
+.google-status-label.is-disconnected {
+  color: var(--color-muted-soft);
+}
+
+.google-status-label.is-err {
+  color: var(--color-error-text);
+}
+
+.google-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 /* Approval-based email send (Draft Email card) */
 .email-actions {
   display: flex;

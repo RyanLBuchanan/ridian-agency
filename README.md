@@ -168,49 +168,54 @@ git diff --cached --name-only | Select-String -Pattern "(\.env|local_settings\.j
 
 The Select-String should return nothing.
 
-## Future Google Workspace exports (planned, not built)
+## Google Workspace integration
 
-The current export layer is local-only:
+### Built today: Drive upload
 
-- **Local exports (built):** Open artifact folder in Explorer, open
-  individual artifact files in their default app, export the whole run
-  as a ZIP, export `business_document.md` as a real `.docx`, export
-  `slide_outline.md` as a real `.pptx`. All from `POST /artifacts/*`
-  endpoints that validate paths against the configured outputs
-  directory.
+After any workflow you can click **Upload to Google Drive** in the
+desktop Actions card. The app creates a new folder in your Drive
+(named after the local artifact folder) and uploads:
 
-A natural next step is uploading the same artifacts to the operator's
-Google Workspace account. The planned flow:
+- `task.txt`, `research_summary.md`, `business_document.md`,
+  `slide_outline.md`, `draft_email.md`
+- `business_document.docx` and `slide_outline.pptx` if you've exported them
+- The sibling `<basename>.zip` if you've exported it
 
-1. **Connect Google account (OAuth, one time).** A "Connect Google"
-   button in Settings opens a Google OAuth consent screen in the
-   system browser. The OAuth tokens land in
-   `apps/api/local_settings.json` (or a sibling file) and never reach
-   the renderer.
-2. **Approval-only uploads.** Same model as the email send button:
-   nothing uploads until the operator clicks an explicit approval
-   button in the GUI. No background sync, no auto-upload.
-3. **Per-artifact destinations:**
-   - **Upload folder to Drive** — `POST /artifacts/upload-drive` zips
-     the run and uploads to a configured Drive folder (or creates one
-     named after the run).
-   - **Create a Google Doc from `business_document.md`** —
-     `POST /artifacts/export-google-doc` converts the Markdown to a
-     real Google Doc.
-   - **Create a Google Slides deck from `slide_outline.md`** —
-     `POST /artifacts/export-google-slides` converts the slide outline
-     into a real deck with speaker notes.
-4. **Scopes:** narrow `drive.file` (only files the app created) plus
-   `documents` and `presentations`. Never `drive` (full Drive access).
-5. **Revocation:** a "Disconnect Google" button in Settings revokes
-   the token locally and removes it from `local_settings.json`.
+The OAuth client lives at `apps/api/google_credentials.json` (yours, from
+Google Cloud Console). The token lives at `apps/api/google_token.json`
+(written after consent). **Both files are git-ignored.** The OAuth scope
+is the narrow `https://www.googleapis.com/auth/drive.file` — the app can
+only see files it itself created in your Drive, never the rest.
 
-Until that ships, use the local exports above — you can drag the
-generated `.docx`, `.pptx`, or ZIP into Google Drive yourself.
+Endpoints (all local, loopback only):
 
-See `apps/api/app/services/export_service.py` for the local export
-implementation, and look for `TODO(google-workspace)` markers when
-that work begins.
+- `GET /google/status` — `{ connected, email }`. Never returns tokens.
+- `POST /google/connect` — starts the installed-app OAuth flow (opens
+  your system browser via `InstalledAppFlow.run_local_server`). Blocks
+  the calling request until consent finishes; uvicorn stays responsive
+  to other endpoints because the flow runs in `asyncio.to_thread`.
+- `POST /google/disconnect` — deletes `google_token.json`.
+- `POST /google/upload-artifacts` — validates the folder is inside
+  `outputs/`, creates a Drive folder, uploads allowlisted files,
+  returns the folder URL.
+
+See [QUICKSTART.md](QUICKSTART.md#google-drive-setup-optional) for the
+full setup (Google Cloud Console → OAuth client → consent → connect).
+
+### Planned: Google Docs / Slides conversion
+
+Native Drive uploads keep the `.docx` and `.pptx` as Office files. A
+natural next step is converting them to live Google Docs and Slides:
+
+- **Google Doc from `business_document.md`** — `POST /google/export-doc`
+  using Drive's `application/vnd.google-apps.document` import type.
+- **Google Slides from `slide_outline.md`** — `POST /google/export-slides`
+  using `application/vnd.google-apps.presentation`.
+
+Both stay approval-only, both stay on the `drive.file` scope. Look for
+`TODO(google-workspace)` in
+[apps/api/app/services/export_service.py](apps/api/app/services/export_service.py)
+when that work begins.
 
 ## Roadmap (intentionally not built yet)
 
