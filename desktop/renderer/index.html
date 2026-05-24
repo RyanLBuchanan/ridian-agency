@@ -297,7 +297,7 @@
           <div class="results-nav-items" id="results-nav-items" role="tablist"></div>
         </nav>
 
-        <article id="actions-card" class="card actions-card" aria-labelledby="actions-heading">
+        <article id="actions-card" data-result-panel="actions-card" class="card actions-card" aria-labelledby="actions-heading">
           <div class="card-head">
             <h2 id="actions-heading">Actions</h2>
           </div>
@@ -338,7 +338,7 @@
           >Open Drive folder</a>
         </article>
 
-        <article id="artifact-folder-card" class="card result-card">
+        <article id="artifact-folder-card" data-result-panel="artifact-folder-card" class="card result-card">
           <div class="card-head">
             <h2>Artifact folder</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">
@@ -357,7 +357,7 @@
         </article>
 
         <div id="results-business" class="results-mode">
-        <article id="research-card" class="card result-card">
+        <article id="research-card" data-result-panel="research-card" class="card result-card">
           <div class="card-head">
             <h2>Research summary</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="research_summary">
@@ -365,6 +365,12 @@
             </button>
           </div>
           <div class="result-body" data-field="research_summary"></div>
+          <div class="audio-controls" data-audio-card="research-card">
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to research summary">Listen</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled aria-label="Pause or resume audio">Pause</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled aria-label="Stop audio">Stop</button>
+            <span class="audio-status" role="status" aria-live="polite"></span>
+          </div>
           <div class="card-actions-row">
             <button
               type="button"
@@ -376,7 +382,7 @@
           </div>
         </article>
 
-        <article id="business-document-card" class="card result-card">
+        <article id="business-document-card" data-result-panel="business-document-card" class="card result-card">
           <div class="card-head">
             <h2>Business document</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="business_document">
@@ -384,6 +390,12 @@
             </button>
           </div>
           <div class="result-body" data-field="business_document"></div>
+          <div class="audio-controls" data-audio-card="business-document-card">
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to business document">Listen</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+            <span class="audio-status" role="status" aria-live="polite"></span>
+          </div>
           <div class="card-actions-row">
             <button
               type="button"
@@ -400,7 +412,7 @@
           </div>
         </article>
 
-        <article id="slide-outline-card" class="card result-card">
+        <article id="slide-outline-card" data-result-panel="slide-outline-card" class="card result-card">
           <div class="card-head">
             <h2>Slide outline</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="slide_outline">
@@ -408,6 +420,12 @@
             </button>
           </div>
           <div class="result-body" data-field="slide_outline"></div>
+          <div class="audio-controls" data-audio-card="slide-outline-card">
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to slide outline">Listen</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+            <span class="audio-status" role="status" aria-live="polite"></span>
+          </div>
           <div class="card-actions-row">
             <button
               type="button"
@@ -424,7 +442,7 @@
           </div>
         </article>
 
-        <article id="draft-email-card" class="card result-card">
+        <article id="draft-email-card" data-result-panel="draft-email-card" class="card result-card">
           <div class="card-head">
             <h2>Draft email</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="draft_email">
@@ -432,6 +450,12 @@
             </button>
           </div>
           <div class="result-body" data-field="draft_email"></div>
+          <div class="audio-controls" data-audio-card="draft-email-card">
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to draft email">Listen</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+            <span class="audio-status" role="status" aria-live="polite"></span>
+          </div>
           <div class="email-actions">
             <button id="send-email-btn" type="button" class="btn btn-primary">
               Approve &amp; Send Email to Me
@@ -456,7 +480,7 @@
         </div><!-- /#results-business -->
 
         <div id="results-social" class="results-mode hidden">
-          <article id="social-content-package-card" class="card result-card">
+          <article id="social-content-package-card" data-result-panel="social-content-package-card" class="card result-card">
             <div class="card-head">
               <h2>Content package</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="content_package">
@@ -465,6 +489,12 @@
             </div>
             <div class="review-marker">Review concept</div>
             <div class="result-body" data-field="content_package"></div>
+            <div class="audio-controls" data-audio-card="social-content-package-card">
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to content package">Listen</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+              <span class="audio-status" role="status" aria-live="polite"></span>
+            </div>
             <div class="card-actions-row">
               <button
                 type="button"
@@ -476,7 +506,7 @@
             </div>
           </article>
 
-          <article id="social-script-card" class="card result-card">
+          <article id="social-script-card" data-result-panel="social-script-card" class="card result-card">
             <div class="card-head">
               <h2>Script</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="script">
@@ -485,6 +515,12 @@
             </div>
             <div class="review-marker">Review script</div>
             <div class="result-body" data-field="script"></div>
+            <div class="audio-controls" data-audio-card="social-script-card">
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to script">Listen</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+              <span class="audio-status" role="status" aria-live="polite"></span>
+            </div>
             <div class="card-actions-row">
               <button
                 type="button"
@@ -496,7 +532,7 @@
             </div>
           </article>
 
-          <article id="social-caption-card" class="card result-card">
+          <article id="social-caption-card" data-result-panel="social-caption-card" class="card result-card">
             <div class="card-head">
               <h2>Caption package</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="caption_package">
@@ -505,6 +541,12 @@
             </div>
             <div class="review-marker">Review caption</div>
             <div class="result-body" data-field="caption_package"></div>
+            <div class="audio-controls" data-audio-card="social-caption-card">
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to caption package">Listen</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+              <span class="audio-status" role="status" aria-live="polite"></span>
+            </div>
             <div class="card-actions-row">
               <button
                 type="button"
@@ -516,7 +558,7 @@
             </div>
           </article>
 
-          <article id="social-checklist-card" class="card result-card">
+          <article id="social-checklist-card" data-result-panel="social-checklist-card" class="card result-card">
             <div class="card-head">
               <h2>Posting checklist</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="posting_checklist">
@@ -525,6 +567,12 @@
             </div>
             <div class="review-marker">Review posting checklist</div>
             <div class="result-body" data-field="posting_checklist"></div>
+            <div class="audio-controls" data-audio-card="social-checklist-card">
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to posting checklist">Listen</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+              <span class="audio-status" role="status" aria-live="polite"></span>
+            </div>
             <div class="card-actions-row">
               <button
                 type="button"

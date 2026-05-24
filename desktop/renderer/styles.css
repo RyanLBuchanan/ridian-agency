@@ -853,21 +853,33 @@ body {
   color: var(--color-accent-deep);
 }
 
-/* Cards used as scroll targets: leave room under the sticky header (64px)
-   AND the sticky nav (~52px) plus a small breathing buffer. Without this
-   the scrolled-to card's heading sits hidden behind the sticky chrome. */
-#actions-card,
-#artifact-folder-card,
-#research-card,
-#business-document-card,
-#slide-outline-card,
-#draft-email-card,
-#social-content-package-card,
-#social-script-card,
-#social-caption-card,
-#social-checklist-card {
-  scroll-margin-top: 128px;
+/* Audio controls (read-aloud) on text result panels */
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
 }
+
+.audio-btn {
+  font-size: var(--fs-xs);
+  padding: 0.3rem 0.7rem;
+}
+
+.audio-status {
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  line-height: 1.4;
+  margin-left: 0.25rem;
+}
+
+.audio-status.is-reading { color: var(--color-accent-deep); font-weight: 600; }
+.audio-status.is-paused { color: var(--color-warn-text); font-weight: 600; }
+.audio-status.is-stopped { color: var(--color-muted); font-weight: 600; }
+.audio-status.is-finished { color: var(--color-success); font-weight: 600; }
+.audio-status.is-empty { color: var(--color-error-text); font-weight: 600; }
 
 /* Actions card + per-card action rows */
 .actions-card {

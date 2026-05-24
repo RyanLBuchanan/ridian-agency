@@ -261,14 +261,17 @@ function renderResults(result) {
   document.querySelector('[data-field="business_document"]').innerHTML = renderMarkdown(result.business_document);
   document.querySelector('[data-field="slide_outline"]').innerHTML = renderMarkdown(result.slide_outline);
   document.querySelector('[data-field="draft_email"]').innerHTML = renderMarkdown(result.draft_email);
-  // Toggle which mode's result cards are visible
+  // Both mode containers stay visible — individual cards inside them are
+  // toggled by the tab logic. (We could hide one container entirely, but
+  // it makes no difference once every card is independently controlled.)
   if (els.resultsBusiness) els.resultsBusiness.classList.remove('hidden');
   if (els.resultsSocial) els.resultsSocial.classList.add('hidden');
   resetEmailStatus();
   resetActionsStatus();
+  _resetAllAudioStatuses();
   show(els.resultsRegion);
+  // Building the nav implicitly calls showResultPanel('actions-card').
   buildResultsNav('business');
-  els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------- Artifact actions (open / export) ----------
@@ -700,6 +703,7 @@ async function runWorkflow() {
 /* ---------- Clear / example ---------- */
 
 function clearAll() {
+  audioStop();
   els.taskInput.value = '';
   hide(els.errorRegion);
   hide(els.resultsRegion);
@@ -707,6 +711,7 @@ function clearAll() {
   resetEmailStatus();
   resetActionsStatus();
   hideResultsNav();
+  _resetAllAudioStatuses();
   currentResult = null;
   els.taskInput.focus();
 }
@@ -1166,97 +1171,260 @@ function fillTaskFromPrompt(text) {
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-/* ---------- Results navigator (sticky pill nav) ---------- */
+/* ---------- Local read-aloud (Web Speech Synthesis) ---------- */
+//
+// Per-panel Listen / Pause / Resume / Stop controls. Uses the browser's
+// built-in window.speechSynthesis — no API key, no network call, no audio
+// file generated. v1 deliberately keeps state simple: at most one panel
+// plays at a time. Switching tabs or clearing results stops audio.
 
-const NAV_ITEMS_BUSINESS = [
-  { label: 'Actions',          target: 'actions-card' },
-  { label: 'Artifacts',        target: 'artifact-folder-card' },
-  { label: 'Research',         target: 'research-card' },
-  { label: 'Business Document', target: 'business-document-card' },
-  { label: 'Slide Outline',    target: 'slide-outline-card' },
-  { label: 'Draft Email',      target: 'draft-email-card' },
+const audioState = {
+  panelId: null,                  // 'research-card', etc., or null
+  utterance: null,
+  status: 'idle',                 // 'idle' | 'reading' | 'paused'
+};
+
+function _getReadablePanelText(panelId) {
+  const card = document.getElementById(panelId);
+  if (!card) return '';
+  // Use the rendered text (textContent strips the markdown-to-HTML wrappers
+  // for us; the agent's `#`, `*`, `**`, etc. became real headings/lists
+  // when renderMarkdown ran). We just need to clean a little extra.
+  const body = card.querySelector('.result-body, .result-folder');
+  if (!body) return '';
+  let text = (body.textContent || '')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  // Strip any markdown link syntax that might have leaked through:
+  // [label](url) -> label
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+  return text;
+}
+
+function _audioContainerFor(panelId) {
+  return document.querySelector(`[data-audio-card="${panelId}"]`);
+}
+
+function _setAudioStatus(panelId, text, kind) {
+  const container = _audioContainerFor(panelId);
+  if (!container) return;
+  const span = container.querySelector('.audio-status');
+  if (!span) return;
+  span.textContent = text || '';
+  span.className = 'audio-status';
+  if (kind) span.classList.add(`is-${kind}`);
+}
+
+function _updateAudioButtons(panelId) {
+  const container = _audioContainerFor(panelId);
+  if (!container) return;
+  const isActive = audioState.panelId === panelId;
+  const isReading = isActive && audioState.status === 'reading';
+  const isPaused = isActive && audioState.status === 'paused';
+
+  const listenBtn = container.querySelector('[data-audio-action="listen"]');
+  const pauseBtn = container.querySelector('[data-audio-action="pause"]');
+  const stopBtn = container.querySelector('[data-audio-action="stop"]');
+
+  if (listenBtn) listenBtn.disabled = isReading || isPaused;
+  if (pauseBtn) {
+    pauseBtn.disabled = !isReading && !isPaused;
+    pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+    pauseBtn.setAttribute('aria-label', isPaused ? 'Resume audio' : 'Pause audio');
+  }
+  if (stopBtn) stopBtn.disabled = !isReading && !isPaused;
+}
+
+function _resetAllAudioStatuses() {
+  document.querySelectorAll('.audio-controls').forEach((container) => {
+    const span = container.querySelector('.audio-status');
+    if (span) {
+      span.textContent = '';
+      span.className = 'audio-status';
+    }
+    const panelId = container.getAttribute('data-audio-card');
+    if (panelId) _updateAudioButtons(panelId);
+  });
+}
+
+function audioListen(panelId) {
+  if (typeof window.speechSynthesis === 'undefined') {
+    _setAudioStatus(panelId, 'Audio not supported on this device.', 'empty');
+    return;
+  }
+  // Stop anything currently playing (might be on a different panel).
+  audioStop();
+
+  const text = _getReadablePanelText(panelId);
+  if (!text) {
+    _setAudioStatus(panelId, 'Nothing to read yet.', 'empty');
+    return;
+  }
+
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = 1.0;
+  utt.pitch = 1.0;
+  utt.onend = () => {
+    if (audioState.panelId !== panelId) return;
+    audioState.panelId = null;
+    audioState.utterance = null;
+    audioState.status = 'idle';
+    _updateAudioButtons(panelId);
+    _setAudioStatus(panelId, 'Finished.', 'finished');
+  };
+  utt.onerror = (e) => {
+    if (audioState.panelId !== panelId) return;
+    audioState.panelId = null;
+    audioState.utterance = null;
+    audioState.status = 'idle';
+    _updateAudioButtons(panelId);
+    // Some Chromium builds fire `onerror` with reason 'interrupted' when
+    // cancel() is called. That's not a user-facing error.
+    if (e && e.error === 'interrupted') return;
+    _setAudioStatus(panelId, 'Audio error.', 'empty');
+    debugLog('audio.error', { reason: e && e.error });
+  };
+
+  audioState.panelId = panelId;
+  audioState.utterance = utt;
+  audioState.status = 'reading';
+  try {
+    window.speechSynthesis.speak(utt);
+  } catch (err) {
+    audioState.panelId = null;
+    audioState.utterance = null;
+    audioState.status = 'idle';
+    _setAudioStatus(panelId, 'Audio failed to start.', 'empty');
+    debugLog('audio.speak_failed', { error: String(err) });
+    return;
+  }
+  _updateAudioButtons(panelId);
+  _setAudioStatus(panelId, 'Reading…', 'reading');
+}
+
+function audioPauseResume(panelId) {
+  if (audioState.panelId !== panelId) return;
+  if (audioState.status === 'reading') {
+    window.speechSynthesis.pause();
+    audioState.status = 'paused';
+    _updateAudioButtons(panelId);
+    _setAudioStatus(panelId, 'Paused.', 'paused');
+  } else if (audioState.status === 'paused') {
+    window.speechSynthesis.resume();
+    audioState.status = 'reading';
+    _updateAudioButtons(panelId);
+    _setAudioStatus(panelId, 'Reading…', 'reading');
+  }
+}
+
+function audioStop() {
+  if (typeof window.speechSynthesis === 'undefined') return;
+  if (!audioState.panelId) return;
+  const prev = audioState.panelId;
+  audioState.panelId = null;
+  audioState.utterance = null;
+  audioState.status = 'idle';
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  _updateAudioButtons(prev);
+  _setAudioStatus(prev, 'Stopped.', 'stopped');
+}
+
+function handleAudioClick(e) {
+  const btn = e.target.closest('[data-audio-action]');
+  if (!btn) return;
+  const container = btn.closest('[data-audio-card]');
+  if (!container) return;
+  const panelId = container.getAttribute('data-audio-card');
+  const action = btn.getAttribute('data-audio-action');
+  if (action === 'listen') audioListen(panelId);
+  else if (action === 'pause') audioPauseResume(panelId);
+  else if (action === 'stop') audioStop();
+}
+
+/* ---------- Tabbed results workspace ---------- */
+
+// One entry per tab, in the order they should appear in the nav. The
+// `panel` value matches both the card's id AND its data-result-panel.
+const TABS_BUSINESS = [
+  { label: 'Actions',           panel: 'actions-card' },
+  { label: 'Artifacts',         panel: 'artifact-folder-card' },
+  { label: 'Research',          panel: 'research-card' },
+  { label: 'Business Document', panel: 'business-document-card' },
+  { label: 'Slide Outline',     panel: 'slide-outline-card' },
+  { label: 'Draft Email',       panel: 'draft-email-card' },
 ];
 
-const NAV_ITEMS_SOCIAL = [
-  { label: 'Actions',          target: 'actions-card' },
-  { label: 'Artifacts',        target: 'artifact-folder-card' },
-  { label: 'Content Package',  target: 'social-content-package-card' },
-  { label: 'Script',           target: 'social-script-card' },
-  { label: 'Caption',          target: 'social-caption-card' },
-  { label: 'Checklist',        target: 'social-checklist-card' },
+const TABS_SOCIAL = [
+  { label: 'Actions',          panel: 'actions-card' },
+  { label: 'Artifacts',        panel: 'artifact-folder-card' },
+  { label: 'Content Package',  panel: 'social-content-package-card' },
+  { label: 'Script',           panel: 'social-script-card' },
+  { label: 'Caption',          panel: 'social-caption-card' },
+  { label: 'Checklist',        panel: 'social-checklist-card' },
 ];
 
-let navObserver = null;
+// Tracks which set of panels the current results workspace exposes.
+// Populated when results render; read by showResultPanel to know what to hide.
+let currentResultTabs = [];
+let currentResultPanel = null;
 
 function buildResultsNav(mode) {
   if (!els.resultsNav || !els.resultsNavItems) return;
 
-  const items = mode === 'social' ? NAV_ITEMS_SOCIAL : NAV_ITEMS_BUSINESS;
+  const items = mode === 'social' ? TABS_SOCIAL : TABS_BUSINESS;
+  currentResultTabs = items;
   els.resultsNavLabel.textContent =
     mode === 'social' ? 'Social Media Production Results' : 'Business Workflow Results';
 
   els.resultsNavItems.innerHTML = '';
-  items.forEach((item, i) => {
+  items.forEach((item) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'results-nav-pill' + (i === 0 ? ' is-active' : '');
+    btn.className = 'results-nav-pill';
     btn.setAttribute('role', 'tab');
-    btn.setAttribute('data-target', item.target);
-    btn.setAttribute('aria-label', `Jump to ${item.label}`);
+    btn.setAttribute('data-result-tab', item.panel);
+    btn.setAttribute('aria-label', `Show ${item.label}`);
     btn.textContent = item.label;
-    btn.addEventListener('click', () => scrollToCard(item.target));
+    btn.addEventListener('click', () => showResultPanel(item.panel));
     els.resultsNavItems.appendChild(btn);
   });
 
   els.resultsNav.classList.remove('hidden');
-  startNavObserver(items.map((i) => i.target));
+  // Always default to the Actions panel after a workflow completes.
+  showResultPanel('actions-card');
 }
 
 function hideResultsNav() {
   if (!els.resultsNav) return;
   els.resultsNav.classList.add('hidden');
   els.resultsNavItems.innerHTML = '';
-  if (navObserver) {
-    navObserver.disconnect();
-    navObserver = null;
-  }
+  currentResultTabs = [];
+  currentResultPanel = null;
 }
 
-function scrollToCard(targetId) {
-  const card = document.getElementById(targetId);
-  if (!card) return;
-  // scroll-margin-top on the card handles the header + nav offset.
-  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  // Optimistically mark this pill active — the observer will refine as
-  // the actual scroll settles.
-  document.querySelectorAll('.results-nav-pill').forEach((p) => {
-    p.classList.toggle('is-active', p.getAttribute('data-target') === targetId);
+// True tab logic: hide every panel for the active mode, then show only one.
+// No scrollIntoView, no anchor jump. Stops any currently-playing audio so
+// the operator doesn't hear narration from a panel they can no longer see.
+function showResultPanel(panelId) {
+  if (!currentResultTabs.length) return;
+  audioStop();
+
+  const valid = currentResultTabs.some((t) => t.panel === panelId);
+  const target = valid ? panelId : currentResultTabs[0].panel;
+  currentResultPanel = target;
+
+  // Toggle visibility on every panel in the current tab set.
+  currentResultTabs.forEach((tab) => {
+    const card = document.querySelector(`[data-result-panel="${tab.panel}"]`);
+    if (card) card.classList.toggle('hidden', tab.panel !== target);
   });
-}
 
-function startNavObserver(targetIds) {
-  if (navObserver) navObserver.disconnect();
-  // rootMargin: hide the top 140px (header + nav) and the bottom 60% of the
-  // viewport so a card is "active" only while it's actually in the
-  // upper-middle reading area.
-  navObserver = new IntersectionObserver(
-    (entries) => {
-      // Pick the entry highest on the page that's intersecting; if none,
-      // leave the current active alone.
-      const visible = entries
-        .filter((e) => e.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-      if (!visible.length) return;
-      const topId = visible[0].target.id;
-      document.querySelectorAll('.results-nav-pill').forEach((p) => {
-        p.classList.toggle('is-active', p.getAttribute('data-target') === topId);
-      });
-    },
-    { rootMargin: '-140px 0px -60% 0px', threshold: 0 }
-  );
-  targetIds.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) navObserver.observe(el);
+  // Update pill active state.
+  els.resultsNavItems.querySelectorAll('.results-nav-pill').forEach((p) => {
+    const isActive = p.getAttribute('data-result-tab') === target;
+    p.classList.toggle('is-active', isActive);
+    p.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
 }
 
@@ -1464,14 +1632,14 @@ function renderSocialResults(result) {
   document.querySelector('[data-field="script"]').innerHTML = renderMarkdown(result.script);
   document.querySelector('[data-field="caption_package"]').innerHTML = renderMarkdown(result.caption_package);
   document.querySelector('[data-field="posting_checklist"]').innerHTML = renderMarkdown(result.posting_checklist);
-  // Toggle which mode's result cards are visible
   if (els.resultsBusiness) els.resultsBusiness.classList.add('hidden');
   if (els.resultsSocial) els.resultsSocial.classList.remove('hidden');
   resetEmailStatus();
   resetActionsStatus();
+  _resetAllAudioStatuses();
   show(els.resultsRegion);
+  // Building the nav implicitly calls showResultPanel('actions-card').
   buildResultsNav('social');
-  els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function runSocialWorkflow() {
@@ -1548,6 +1716,7 @@ async function runSocialWorkflow() {
 }
 
 function clearSocialForm() {
+  audioStop();
   if (els.socialMediaNotes) els.socialMediaNotes.value = '';
   if (els.socialTopicNotes) els.socialTopicNotes.value = '';
   if (els.socialChannel) els.socialChannel.value = 'Open Gulf TikTok';
@@ -1561,6 +1730,7 @@ function clearSocialForm() {
   resetEmailStatus();
   resetActionsStatus();
   hideResultsNav();
+  _resetAllAudioStatuses();
   currentResult = null;
 }
 
@@ -1595,8 +1765,11 @@ if (els.googleDisconnectBtn) els.googleDisconnectBtn.addEventListener('click', d
 loadGoogleStatus();
 
 // Delegate per-card action buttons (Open markdown / Open folder / Export DOCX-PPTX)
+// AND per-panel audio controls. Both delegate off #results-region so we wire
+// each handler exactly once and they survive renderer rebuilds.
 if (els.resultsRegion) {
   els.resultsRegion.addEventListener('click', handleCardAction);
+  els.resultsRegion.addEventListener('click', handleAudioClick);
 }
 
 if (els.settingsOpenBtn) {
