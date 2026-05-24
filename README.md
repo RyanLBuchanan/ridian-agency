@@ -227,8 +227,8 @@ The Select-String should return nothing.
 ### Built today: Drive upload
 
 After any workflow you can click **Upload to Google Drive** in the
-desktop Actions card. The app creates a new folder in your Drive
-(named after the local artifact folder) and uploads:
+desktop Actions card. The app creates a per-run folder inside a stable
+hierarchy in your Drive and uploads:
 
 - `task.txt`, `research_summary.md`, `business_document.md`,
   `slide_outline.md`, `draft_email.md`
@@ -240,6 +240,60 @@ Google Cloud Console). The token lives at `apps/api/google_token.json`
 (written after consent). **Both files are git-ignored.** The OAuth scope
 is the narrow `https://www.googleapis.com/auth/drive.file` — the app can
 only see files it itself created in your Drive, never the rest.
+
+### Drive folder organization
+
+Uploads land inside a stable hierarchy so your Drive stays tidy as runs
+accumulate:
+
+```text
+My Drive/
+  Ridian Technologies/
+    Ridian Agency/
+      Business Workflows/
+        <timestamp>_<slug>/         <-- one folder per business run
+      Social Media/
+        Open Gulf/
+          TikTok/
+            <timestamp>_<slug>/
+          YouTube/
+            <timestamp>_<slug>/
+        Buns1562/
+          TikTok/
+            <timestamp>_<slug>/
+        Custom/
+          <timestamp>_<slug>/        <-- channels we don't recognize
+```
+
+How the destination is chosen for each upload:
+
+1. **Workflow type** is inferred from the files inside the local artifact
+   folder. Presence of `social_content_package.md` (or the other social
+   markers) → Social Media. Presence of `business_document.md` (or the
+   other business markers) → Business Workflows.
+2. For social runs, **channel** is read from the `Channel:` line in
+   `task.txt` (written by `social_media_workflow_service.py`). The
+   channel string is matched case-insensitively against the four known
+   patterns; anything else falls under `Social Media / Custom`.
+3. Parent folders are **idempotent** — the second upload of an Open Gulf
+   TikTok run reuses the same `Ridian Technologies / Ridian Agency /
+   Social Media / Open Gulf / TikTok` chain rather than creating
+   duplicates. (Limitation: with the narrow `drive.file` scope the app
+   can only see folders it itself created. If you create
+   "Ridian Technologies" by hand in your Drive, the app cannot see it
+   and will create its own. See the Limitations section below.)
+4. **Existing uploads at the Drive root from earlier versions are left
+   alone.** Only new uploads use the new hierarchy.
+
+The upload success message in the desktop window shows the full path so
+you know exactly where the run landed, for example:
+
+```text
+Uploaded 7 files to Google Drive: Ridian Technologies / Ridian Agency /
+Social Media / Open Gulf / TikTok / 20260524-132542_open-gulf-tiktok-…
+```
+
+The **Open Drive folder** link still opens the per-run folder directly.
 
 Endpoints (all local, loopback only):
 

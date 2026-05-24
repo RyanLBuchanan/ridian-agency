@@ -16,6 +16,7 @@ Security model:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -246,8 +247,159 @@ def _mime_for(path: Path) -> str:
     return _MIME_BY_SUFFIX.get(path.suffix.lower(), "application/octet-stream")
 
 
+# ---------------------------------------------------------------------------
+# Drive folder hierarchy (organize uploads under a stable tree)
+# ---------------------------------------------------------------------------
+
+# Files we use to detect the workflow type by presence inside the artifact folder.
+_SOCIAL_MARKERS = (
+    "social_content_package.md",
+    "script.md",
+    "caption_package.md",
+    "posting_checklist.md",
+)
+_BUSINESS_MARKERS = (
+    "research_summary.md",
+    "business_document.md",
+    "slide_outline.md",
+    "draft_email.md",
+)
+
+# Root path every upload lands under. Concrete subfolders are appended per workflow.
+_DRIVE_ROOT_PATH = ["Ridian Technologies", "Ridian Agency"]
+
+
+def _read_channel_from_task(folder: Path) -> str:
+    """Pull the ``Channel:`` line out of task.txt if present. Empty otherwise."""
+    task_file = folder / "task.txt"
+    if not task_file.exists():
+        return ""
+    try:
+        for line in task_file.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^\s*Channel\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+    except OSError as exc:
+        log.warning("google.task_read_failed type=%s", type(exc).__name__)
+    return ""
+
+
+def map_channel_to_path(channel: str) -> list[str]:
+    """Return the path-parts (under Ridian Agency) for a social media channel.
+
+    Unknown / blank channels are filed under Social Media / Custom so they
+    still land in the social hierarchy rather than at the root.
+    """
+    c = (channel or "").strip().lower()
+    if "open gulf" in c and "tiktok" in c:
+        return ["Social Media", "Open Gulf", "TikTok"]
+    if "open gulf" in c and "youtube" in c:
+        return ["Social Media", "Open Gulf", "YouTube"]
+    if "buns" in c and "tiktok" in c:
+        return ["Social Media", "Buns1562", "TikTok"]
+    if "custom" in c or not c:
+        return ["Social Media", "Custom"]
+    # Fallback for any other named channel we haven't mapped.
+    return ["Social Media", "Custom"]
+
+
+def infer_drive_destination(artifact_folder: Path) -> list[str]:
+    """Decide the full Drive folder path (under My Drive, excluding the run
+    folder itself). Always starts with the Ridian Technologies / Ridian Agency
+    root so even unknown workflow types stay categorized.
+    """
+    has_social = any((artifact_folder / f).is_file() for f in _SOCIAL_MARKERS)
+    has_business = any((artifact_folder / f).is_file() for f in _BUSINESS_MARKERS)
+
+    if has_social:
+        channel = _read_channel_from_task(artifact_folder)
+        return list(_DRIVE_ROOT_PATH) + map_channel_to_path(channel)
+    if has_business:
+        return list(_DRIVE_ROOT_PATH) + ["Business Workflows"]
+    # Unknown: file under Business Workflows as a sensible default.
+    log.info("google.infer_destination.unknown folder=%s -> Business Workflows", artifact_folder.name)
+    return list(_DRIVE_ROOT_PATH) + ["Business Workflows"]
+
+
+def find_or_create_folder(service, name: str, parent_id: Optional[str] = None) -> str:
+    """Return the Drive folder id for ``name`` under ``parent_id`` (or root).
+
+    Idempotent: if a folder of that name already exists *that the app can
+    see*, reuse it; otherwise create one. With the narrow ``drive.file``
+    scope the app can only see folders it itself created — see the
+    "Limitations" note in the module docstring.
+    """
+    # Escape backslashes and single quotes for the Drive query language.
+    safe_name = name.replace("\\", "\\\\").replace("'", "\\'")
+    q_parts = [
+        f"name = '{safe_name}'",
+        f"mimeType = '{FOLDER_MIME}'",
+        "trashed = false",
+    ]
+    q_parts.append(f"'{parent_id}' in parents" if parent_id else "'root' in parents")
+    q = " and ".join(q_parts)
+
+    try:
+        res = (
+            service.files()
+            .list(
+                q=q,
+                spaces="drive",
+                fields="files(id, name)",
+                pageSize=10,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", "?")
+        log.warning("google.folder_lookup_failed name=%s status=%s", name, status)
+        raise GoogleDriveError(
+            f"Drive folder lookup failed (HTTP {status}).", status=502
+        ) from exc
+
+    files = res.get("files", [])
+    if files:
+        return files[0]["id"]
+
+    body = {"name": name, "mimeType": FOLDER_MIME}
+    if parent_id:
+        body["parents"] = [parent_id]
+    try:
+        created = service.files().create(body=body, fields="id").execute()
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", "?")
+        log.warning("google.folder_create_failed name=%s status=%s", name, status)
+        raise GoogleDriveError(
+            f"Drive folder create failed (HTTP {status}).", status=502
+        ) from exc
+    return created["id"]
+
+
+def ensure_drive_path(service, path_parts: list[str]) -> tuple[Optional[str], list[str]]:
+    """Walk ``path_parts`` top-down, creating missing folders.
+
+    Returns ``(final_parent_id, names_actually_used)``. If ``path_parts`` is
+    empty the final parent is None (i.e. My Drive root).
+    """
+    parent_id: Optional[str] = None
+    names: list[str] = []
+    for name in path_parts:
+        parent_id = find_or_create_folder(service, name, parent_id)
+        names.append(name)
+    return parent_id, names
+
+
 def upload_artifact_folder(folder_str: str) -> dict:
-    """Create a Drive folder + upload allowlisted files. Never auto-fires."""
+    """Create a Drive folder + upload allowlisted files. Never auto-fires.
+
+    Uploads into a stable Drive hierarchy:
+
+        My Drive / Ridian Technologies / Ridian Agency / <category>
+
+    where ``<category>`` is "Business Workflows", or for social media runs
+    "Social Media / <brand> / <platform>" inferred from the local artifact
+    files and the ``Channel:`` line in ``task.txt``.
+    """
     folder = _resolve_artifact_folder(folder_str)
     creds = _load_credentials()
     if not creds or not creds.valid:
@@ -258,11 +410,22 @@ def upload_artifact_folder(folder_str: str) -> dict:
 
     service = _build_service(creds)
 
+    # Resolve (and create if needed) the parent hierarchy. Idempotent —
+    # repeated uploads to the same category reuse the same folders rather
+    # than spawning duplicates.
+    drive_path_parts = infer_drive_destination(folder)
+    parent_id, parent_names = ensure_drive_path(service, drive_path_parts)
+
+    # Create the per-run folder INSIDE the resolved parent.
     try:
         drive_folder = (
             service.files()
             .create(
-                body={"name": folder.name, "mimeType": FOLDER_MIME},
+                body={
+                    "name": folder.name,
+                    "mimeType": FOLDER_MIME,
+                    "parents": [parent_id] if parent_id else [],
+                },
                 fields="id, name, webViewLink",
             )
             .execute()
@@ -321,9 +484,11 @@ def upload_artifact_folder(folder_str: str) -> dict:
             status=502,
         )
 
+    drive_path_str = " / ".join(parent_names + [folder_name])
+
     log.info(
-        "google.upload_complete drive_folder=%s uploaded=%d failed=%d",
-        folder_name,
+        "google.upload_complete drive_path=%s uploaded=%d failed=%d",
+        drive_path_str,
         len(uploaded),
         len(upload_errors),
     )
@@ -331,6 +496,7 @@ def upload_artifact_folder(folder_str: str) -> dict:
     return {
         "status": "success",
         "drive_folder_name": folder_name,
-        "uploaded_files": uploaded,
         "drive_folder_url": folder_url,
+        "drive_path": drive_path_str,
+        "uploaded_files": uploaded,
     }

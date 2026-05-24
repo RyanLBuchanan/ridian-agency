@@ -71,6 +71,10 @@ const els = {
   socialTopicNotes: document.getElementById('social-topic-notes'),
   socialRunBtn: document.getElementById('social-run-btn'),
   socialClearBtn: document.getElementById('social-clear-btn'),
+  // Results navigator
+  resultsNav: document.getElementById('results-nav'),
+  resultsNavItems: document.getElementById('results-nav-items'),
+  resultsNavLabel: document.getElementById('results-nav-label'),
 };
 
 let cachedSettings = null;
@@ -263,6 +267,7 @@ function renderResults(result) {
   resetEmailStatus();
   resetActionsStatus();
   show(els.resultsRegion);
+  buildResultsNav('business');
   els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -701,6 +706,7 @@ function clearAll() {
   hide(els.status);
   resetEmailStatus();
   resetActionsStatus();
+  hideResultsNav();
   currentResult = null;
   els.taskInput.focus();
 }
@@ -860,16 +866,16 @@ async function uploadArtifactsToDrive() {
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
     const count = (data.uploaded_files || []).length;
-    setActionsStatus(
-      `Uploaded to Google Drive: ${count} file${count === 1 ? '' : 's'} in folder "${data.drive_folder_name}".`,
-      'ok'
-    );
+    const where = data.drive_path
+      ? `Uploaded ${count} file${count === 1 ? '' : 's'} to Google Drive: ${data.drive_path}`
+      : `Uploaded ${count} file${count === 1 ? '' : 's'} to Google Drive in folder "${data.drive_folder_name}".`;
+    setActionsStatus(where, 'ok');
     if (els.actionDriveLink && data.drive_folder_url) {
       els.actionDriveLink.href = data.drive_folder_url;
       els.actionDriveLink.textContent = 'Open Drive folder';
       els.actionDriveLink.classList.remove('hidden');
     }
-    debugLog('google.upload.ok', { count, folder_name: data.drive_folder_name });
+    debugLog('google.upload.ok', { count, drive_path: data.drive_path });
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     debugLog('google.upload.fail', { error: msg });
@@ -1160,6 +1166,100 @@ function fillTaskFromPrompt(text) {
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+/* ---------- Results navigator (sticky pill nav) ---------- */
+
+const NAV_ITEMS_BUSINESS = [
+  { label: 'Actions',          target: 'actions-card' },
+  { label: 'Artifacts',        target: 'artifact-folder-card' },
+  { label: 'Research',         target: 'research-card' },
+  { label: 'Business Document', target: 'business-document-card' },
+  { label: 'Slide Outline',    target: 'slide-outline-card' },
+  { label: 'Draft Email',      target: 'draft-email-card' },
+];
+
+const NAV_ITEMS_SOCIAL = [
+  { label: 'Actions',          target: 'actions-card' },
+  { label: 'Artifacts',        target: 'artifact-folder-card' },
+  { label: 'Content Package',  target: 'social-content-package-card' },
+  { label: 'Script',           target: 'social-script-card' },
+  { label: 'Caption',          target: 'social-caption-card' },
+  { label: 'Checklist',        target: 'social-checklist-card' },
+];
+
+let navObserver = null;
+
+function buildResultsNav(mode) {
+  if (!els.resultsNav || !els.resultsNavItems) return;
+
+  const items = mode === 'social' ? NAV_ITEMS_SOCIAL : NAV_ITEMS_BUSINESS;
+  els.resultsNavLabel.textContent =
+    mode === 'social' ? 'Social Media Production Results' : 'Business Workflow Results';
+
+  els.resultsNavItems.innerHTML = '';
+  items.forEach((item, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'results-nav-pill' + (i === 0 ? ' is-active' : '');
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('data-target', item.target);
+    btn.setAttribute('aria-label', `Jump to ${item.label}`);
+    btn.textContent = item.label;
+    btn.addEventListener('click', () => scrollToCard(item.target));
+    els.resultsNavItems.appendChild(btn);
+  });
+
+  els.resultsNav.classList.remove('hidden');
+  startNavObserver(items.map((i) => i.target));
+}
+
+function hideResultsNav() {
+  if (!els.resultsNav) return;
+  els.resultsNav.classList.add('hidden');
+  els.resultsNavItems.innerHTML = '';
+  if (navObserver) {
+    navObserver.disconnect();
+    navObserver = null;
+  }
+}
+
+function scrollToCard(targetId) {
+  const card = document.getElementById(targetId);
+  if (!card) return;
+  // scroll-margin-top on the card handles the header + nav offset.
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Optimistically mark this pill active — the observer will refine as
+  // the actual scroll settles.
+  document.querySelectorAll('.results-nav-pill').forEach((p) => {
+    p.classList.toggle('is-active', p.getAttribute('data-target') === targetId);
+  });
+}
+
+function startNavObserver(targetIds) {
+  if (navObserver) navObserver.disconnect();
+  // rootMargin: hide the top 140px (header + nav) and the bottom 60% of the
+  // viewport so a card is "active" only while it's actually in the
+  // upper-middle reading area.
+  navObserver = new IntersectionObserver(
+    (entries) => {
+      // Pick the entry highest on the page that's intersecting; if none,
+      // leave the current active alone.
+      const visible = entries
+        .filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (!visible.length) return;
+      const topId = visible[0].target.id;
+      document.querySelectorAll('.results-nav-pill').forEach((p) => {
+        p.classList.toggle('is-active', p.getAttribute('data-target') === topId);
+      });
+    },
+    { rootMargin: '-140px 0px -60% 0px', threshold: 0 }
+  );
+  targetIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) navObserver.observe(el);
+  });
+}
+
 /* ---------- Social Media Production ---------- */
 
 // Each prompt carries a partial field-fill set so clicking it pre-configures
@@ -1370,6 +1470,7 @@ function renderSocialResults(result) {
   resetEmailStatus();
   resetActionsStatus();
   show(els.resultsRegion);
+  buildResultsNav('social');
   els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1459,6 +1560,7 @@ function clearSocialForm() {
   hide(els.status);
   resetEmailStatus();
   resetActionsStatus();
+  hideResultsNav();
   currentResult = null;
 }
 

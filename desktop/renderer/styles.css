@@ -776,6 +776,99 @@ body {
   margin: 1rem 0;
 }
 
+/* Sticky Results Navigator (pills above the results, below the header) */
+.results-nav {
+  position: sticky;
+  top: var(--header-height);
+  z-index: 50; /* below modal (z=100), above content */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0; /* allow inner overflow-x to actually scroll */
+}
+
+.results-nav-label {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.results-nav-items {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+  /* Hide horizontal scrollbar visually when not needed; show a thin one when it is */
+  scrollbar-width: thin;
+}
+
+.results-nav-items::-webkit-scrollbar {
+  height: 6px;
+}
+
+.results-nav-items::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 3px;
+}
+
+.results-nav-pill {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.results-nav-pill:hover {
+  background: var(--color-bg-soft);
+  border-color: var(--color-muted-soft);
+  color: var(--color-text-strong);
+}
+
+.results-nav-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.results-nav-pill.is-active {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-deep);
+}
+
+/* Cards used as scroll targets: leave room under the sticky header (64px)
+   AND the sticky nav (~52px) plus a small breathing buffer. Without this
+   the scrolled-to card's heading sits hidden behind the sticky chrome. */
+#actions-card,
+#artifact-folder-card,
+#research-card,
+#business-document-card,
+#slide-outline-card,
+#draft-email-card,
+#social-content-package-card,
+#social-script-card,
+#social-caption-card,
+#social-checklist-card {
+  scroll-margin-top: 128px;
+}
+
 /* Actions card + per-card action rows */
 .actions-card {
   background:

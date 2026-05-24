@@ -278,9 +278,32 @@ The file is git-ignored — it will not be committed.
 1. Run any workflow.
 2. In the **Actions** card, click **Upload to Google Drive**.
 3. Confirm the prompt.
-4. Watch the status: *"Uploading to Google Drive…"* → *"Uploaded to
-   Google Drive: N files in folder "&lt;name&gt;""*.
-5. Click **Open Drive folder** to view it in your browser.
+4. Watch the status: *"Uploading to Google Drive…"* → *"Uploaded N files
+   to Google Drive: Ridian Technologies / Ridian Agency / … / &lt;run&gt;"*.
+5. Click **Open Drive folder** to view the run folder in your browser.
+
+### Where uploads land in your Drive
+
+Files are organized under a stable hierarchy so your Drive stays clean:
+
+```text
+My Drive/
+  Ridian Technologies/
+    Ridian Agency/
+      Business Workflows/      <- business workflow runs go here
+      Social Media/
+        Open Gulf/
+          TikTok/                <- Open Gulf TikTok runs
+          YouTube/               <- Open Gulf YouTube runs
+        Buns1562/
+          TikTok/                <- Buns TikTok runs
+        Custom/                  <- custom or unrecognized channels
+```
+
+Parent folders are reused across uploads (no duplicates). The destination
+is chosen automatically based on the artifact files and the `Channel:`
+line in `task.txt`. Older uploads from before this update remain at the
+Drive root — nothing is moved automatically.
 
 ### Disconnect
 

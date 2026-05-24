@@ -169,8 +169,9 @@ class GoogleUploadRequest(BaseModel):
 class GoogleUploadResponse(BaseModel):
     status: str
     drive_folder_name: str
-    uploaded_files: list[str]
     drive_folder_url: str
+    drive_path: str = ""  # "Ridian Technologies / Ridian Agency / ... / <run>"
+    uploaded_files: list[str]
 
 
 class SocialMediaRequest(BaseModel):

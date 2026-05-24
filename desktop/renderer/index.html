@@ -288,7 +288,16 @@
       </section>
 
       <section id="results-region" class="results hidden" aria-label="Results">
-        <article class="card actions-card" aria-labelledby="actions-heading">
+        <nav
+          id="results-nav"
+          class="results-nav hidden"
+          aria-label="Jump to results section"
+        >
+          <span class="results-nav-label" id="results-nav-label">Results</span>
+          <div class="results-nav-items" id="results-nav-items" role="tablist"></div>
+        </nav>
+
+        <article id="actions-card" class="card actions-card" aria-labelledby="actions-heading">
           <div class="card-head">
             <h2 id="actions-heading">Actions</h2>
           </div>
@@ -329,7 +338,7 @@
           >Open Drive folder</a>
         </article>
 
-        <article class="card result-card">
+        <article id="artifact-folder-card" class="card result-card">
           <div class="card-head">
             <h2>Artifact folder</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">
@@ -348,7 +357,7 @@
         </article>
 
         <div id="results-business" class="results-mode">
-        <article class="card result-card">
+        <article id="research-card" class="card result-card">
           <div class="card-head">
             <h2>Research summary</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="research_summary">
@@ -367,7 +376,7 @@
           </div>
         </article>
 
-        <article class="card result-card">
+        <article id="business-document-card" class="card result-card">
           <div class="card-head">
             <h2>Business document</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="business_document">
@@ -391,7 +400,7 @@
           </div>
         </article>
 
-        <article class="card result-card">
+        <article id="slide-outline-card" class="card result-card">
           <div class="card-head">
             <h2>Slide outline</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="slide_outline">
@@ -415,7 +424,7 @@
           </div>
         </article>
 
-        <article class="card result-card">
+        <article id="draft-email-card" class="card result-card">
           <div class="card-head">
             <h2>Draft email</h2>
             <button class="btn btn-ghost copy-btn" type="button" data-target="draft_email">
@@ -447,7 +456,7 @@
         </div><!-- /#results-business -->
 
         <div id="results-social" class="results-mode hidden">
-          <article class="card result-card">
+          <article id="social-content-package-card" class="card result-card">
             <div class="card-head">
               <h2>Content package</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="content_package">
@@ -467,7 +476,7 @@
             </div>
           </article>
 
-          <article class="card result-card">
+          <article id="social-script-card" class="card result-card">
             <div class="card-head">
               <h2>Script</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="script">
@@ -487,7 +496,7 @@
             </div>
           </article>
 
-          <article class="card result-card">
+          <article id="social-caption-card" class="card result-card">
             <div class="card-head">
               <h2>Caption package</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="caption_package">
@@ -507,7 +516,7 @@
             </div>
           </article>
 
-          <article class="card result-card">
+          <article id="social-checklist-card" class="card result-card">
             <div class="card-head">
               <h2>Posting checklist</h2>
               <button class="btn btn-ghost copy-btn" type="button" data-target="posting_checklist">
