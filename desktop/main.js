@@ -4,20 +4,33 @@
 // over plain fetch — no IPC needed.
 
 const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
 
+// Use the bundled icon if it exists; otherwise Electron picks a default.
+// generate_icon.py produces both icon.png (BrowserWindow) and icon.ico (Windows shortcut).
+const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
+const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
+
+// Stable AppUserModelID so Windows groups our taskbar entries and applies
+// the icon correctly when the shortcut is launched.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.ridiantechnologies.ridian-agency');
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     title: 'Ridian Agency',
-    width: 1100,
-    height: 820,
-    minWidth: 720,
-    minHeight: 560,
+    width: 1280,
+    height: 860,
+    minWidth: 880,
+    minHeight: 600,
     backgroundColor: '#f7f8fa',
     autoHideMenuBar: true,
     show: false,
+    ...ICON_OPTION,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

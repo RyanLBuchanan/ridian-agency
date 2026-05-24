@@ -40,6 +40,62 @@ panel, and run your first workflow.
   never shown to the renderer after they're saved. The Settings panel
   shows `*_configured: true` flags instead.
 
+## Desktop layout
+
+The window is a real desktop console with a persistent left sidebar and
+a main workspace:
+
+- **Sidebar (left)** — brand block, **+ New workflow**, the two workflow
+  modes (Business / Social Media Production), an **Outputs** list that
+  appears once a run is selected, a **Recent runs** list (loaded from
+  the local `outputs/` folder so old runs survive restarts), and
+  **Settings** at the bottom.
+- **Workspace (right)** — header with the current run's title plus
+  Backend / Drive status pills. The body switches between **Welcome**
+  (first launch), the active workflow's **input form**, the **running**
+  spinner, and the **run results**.
+
+After a workflow completes, the input form collapses into a compact
+**Current run summary** at the top of the workspace, with **Edit task /
+Run again / New workflow** controls. Output panels become tabs in the
+sidebar — clicking a tab swaps the one visible panel; nothing scrolls.
+
+Recent runs persist across app restarts via the backend's
+`/projects/recent` and `/projects/load` endpoints (allowlisted files
+only, path-validated against `outputs/`).
+
+## Desktop shortcut + taskbar pinning
+
+To launch Ridian Agency by clicking a real desktop icon (and to pin it
+to the Windows taskbar):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Create-Ridian-Agency-Shortcut.ps1
+```
+
+(Or right-click `scripts\Create-Ridian-Agency-Shortcut.ps1` → **Run with
+PowerShell**.) A **Ridian Agency** shortcut appears on your Desktop with
+the bundled icon.
+
+To pin it to the taskbar:
+
+1. Double-click the shortcut to launch.
+2. Right-click the Ridian Agency icon in the taskbar.
+3. Pick **Pin to taskbar**.
+
+From then on, clicking the pinned icon launches both the backend and the
+desktop window.
+
+The icon files live at `desktop/assets/icon.png` (BrowserWindow) and
+`desktop/assets/icon.ico` (Windows shortcut). Replace either with your
+own brand asset whenever you're ready — Electron and the shortcut script
+will pick up the new icon automatically. Re-generate the placeholder
+with:
+
+```powershell
+.\.venv\Scripts\python.exe desktop\assets\generate_icon.py
+```
+
 ## Two workflow modes
 
 The desktop app has a **Workflow mode** selector at the top:
@@ -326,6 +382,18 @@ Both stay approval-only, both stay on the `drive.file` scope. Look for
 when that work begins.
 
 ## Roadmap (intentionally not built yet)
+
+### Future integrations
+
+- **Google Calendar** — create approved content calendar events after
+  a Social Media Production run.
+- **Microsoft 365** — Outlook Calendar (event creation), Outlook Mail
+  (draft email send, parallel to the SMTP path), OneDrive (artifact
+  export, parallel to the Google Drive path).
+- Both would reuse the same approval-only model the SMTP and Drive
+  paths already use — nothing auto-sends or auto-syncs.
+
+### Other planned work
 
 - Direct platform-API posting (TikTok, YouTube, Instagram). For now,
   Ridian Agency produces review-ready content packages and you publish

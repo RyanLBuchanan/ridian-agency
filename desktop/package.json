@@ -1,6 +1,7 @@
 {
   "name": "ridian-agency-desktop",
-  "version": "0.1.0",
+  "productName": "Ridian Agency",
+  "version": "0.2.0",
   "private": true,
   "description": "Electron desktop GUI for the Ridian Agency local backend.",
   "main": "main.js",

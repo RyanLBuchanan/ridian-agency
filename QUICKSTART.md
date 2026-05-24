@@ -149,6 +149,32 @@ the date/time plus a slug of the task. Inside:
 The exact path is also shown in the **Artifact folder** card after each
 run, and in Settings under "Output location".
 
+## Desktop shortcut and taskbar pinning
+
+Once setup is done, you can launch Ridian Agency by clicking a real
+desktop icon (instead of digging up the `.bat` in File Explorer).
+
+From PowerShell at the repo root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Create-Ridian-Agency-Shortcut.ps1
+```
+
+A **Ridian Agency** shortcut appears on your Desktop with the bundled
+icon. To pin it to the Windows taskbar:
+
+1. Double-click the desktop shortcut to launch.
+2. Right-click the Ridian Agency icon in the taskbar.
+3. Pick **Pin to taskbar**.
+
+Going forward, clicking the pinned icon launches both the FastAPI
+backend and the desktop window in one click.
+
+The icon files are at `desktop/assets/icon.png` (window chrome) and
+`desktop/assets/icon.ico` (Windows shortcut). They're placeholders —
+replace either with your own brand asset whenever you're ready; Electron
+and the shortcut script will pick up the new icon automatically.
+
 ## 9. Stopping the app
 
 1. Close the **Ridian Agency** desktop window.

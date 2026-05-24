@@ -36,6 +36,7 @@ from .services.export_service import (  # noqa: E402
     open_artifact_folder,
 )
 from .services import google_drive_service  # noqa: E402
+from .services import project_service  # noqa: E402
 from .services.social_media_workflow_service import (  # noqa: E402
     SocialMediaInput,
     run_social_media_workflow,
@@ -193,6 +194,38 @@ class SocialMediaResponse(BaseModel):
     posting_checklist: str
 
 
+class RecentProject(BaseModel):
+    artifact_folder: str
+    name: str
+    workflow: str
+    channel: str = ""
+    mtime_iso: str
+
+
+class RecentProjectsResponse(BaseModel):
+    projects: list[RecentProject]
+
+
+class LoadProjectResponse(BaseModel):
+    """Compatible with both workflow response shapes — renderer reads
+    whichever fields are present for the detected workflow type."""
+    artifact_folder: str
+    name: str
+    workflow: str
+    channel: str = ""
+    task: str = ""
+    # Business
+    research_summary: str = ""
+    business_document: str = ""
+    slide_outline: str = ""
+    draft_email: str = ""
+    # Social
+    content_package: str = ""
+    script: str = ""
+    caption_package: str = ""
+    posting_checklist: str = ""
+
+
 def _settings_view_with_outputs() -> SettingsView:
     s = settings_service.public_view()
     s["outputs_path"] = str(outputs_dir())
@@ -282,6 +315,29 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
         caption_package=result.caption_package,
         posting_checklist=result.posting_checklist,
     )
+
+
+# ---------------------------------------------------------------------------
+# Recent projects — sidebar listing + reopen-without-rerun
+# ---------------------------------------------------------------------------
+
+
+@app.get("/projects/recent", response_model=RecentProjectsResponse)
+async def projects_recent(limit: int = 30) -> RecentProjectsResponse:
+    """List recent run folders under outputs/ with workflow + channel metadata."""
+    items = project_service.list_recent_projects(limit=limit)
+    return RecentProjectsResponse(projects=[RecentProject(**i) for i in items])
+
+
+@app.get("/projects/load", response_model=LoadProjectResponse)
+async def projects_load(artifact_folder: str) -> LoadProjectResponse:
+    """Reopen a prior run: read its allowlisted Markdown files back into a
+    response the renderer can render without re-calling the model."""
+    try:
+        data = project_service.load_project(artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return LoadProjectResponse(**data)
 
 
 @app.get("/settings", response_model=SettingsView)

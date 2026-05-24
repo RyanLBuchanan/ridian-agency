@@ -7,593 +7,560 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <div class="container header-row">
-        <div class="brand">
+    <div class="app-shell">
+      <!-- ============================================================ -->
+      <!--                          SIDEBAR                              -->
+      <!-- ============================================================ -->
+      <aside class="sidebar" aria-label="Workspace navigation">
+        <header class="sidebar-brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <span class="brand-text">
             <span class="brand-name">Ridian Agency</span>
             <span class="brand-sub">Desktop Console</span>
           </span>
-        </div>
-        <div class="header-right">
-          <div
-            id="backend-pill"
-            class="backend-pill is-unknown"
-            role="status"
-            aria-live="polite"
-            title="Backend status"
-          >
-            <span class="status-dot" aria-hidden="true"></span>
-            <span id="backend-pill-label" class="status-label">Checking backend…</span>
-          </div>
+        </header>
+
+        <div class="sidebar-section sidebar-primary">
           <button
-            id="settings-open-btn"
+            id="sidebar-new-workflow-btn"
             type="button"
-            class="btn btn-ghost btn-compact"
-            aria-haspopup="dialog"
-            aria-controls="settings-modal"
-          >
-            Settings
-          </button>
-        </div>
-      </div>
-    </header>
+            class="sidebar-btn sidebar-btn-primary"
+          >+ New workflow</button>
 
-    <main class="container main">
-      <section class="hero">
-        <h1>Run a business task through the agency</h1>
-        <p class="lead">
-          Submit a task and the agency will produce a market research summary,
-          a polished business document, a slide outline, and a draft email.
-          Each run is saved to the local <code>outputs/</code> folder.
-        </p>
-      </section>
-
-      <section
-        id="backend-down-banner"
-        class="banner banner-warn hidden"
-        role="alert"
-      >
-        <div class="banner-title">Backend is not running.</div>
-        <div class="banner-body">
-          Start the FastAPI server first, then this status will turn green.
-          The easiest way is to close this window and double-click
-          <code>Start-Ridian-Agency.bat</code> at the repo root. See
-          <code>QUICKSTART.md</code> if you have not done initial setup.
-        </div>
-      </section>
-
-      <section
-        id="openai-missing-banner"
-        class="banner banner-warn hidden"
-        role="alert"
-      >
-        <div class="banner-title">OpenAI API key is not configured.</div>
-        <div class="banner-body">
-          Open <strong>Settings</strong> (top right) to add your key before
-          running workflows. Get a key at
-          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
-        </div>
-      </section>
-
-      <section class="card mode-card" aria-labelledby="mode-heading">
-        <h2 id="mode-heading" class="sr-only">Workflow mode</h2>
-        <div class="mode-tabs" role="tablist" aria-label="Workflow mode">
-          <button
-            type="button"
-            class="mode-tab is-active"
-            role="tab"
-            aria-selected="true"
-            data-mode="business"
-          >Business Workflow</button>
-          <button
-            type="button"
-            class="mode-tab"
-            role="tab"
-            aria-selected="false"
-            data-mode="social"
-          >Social Media Production</button>
-        </div>
-      </section>
-
-      <div id="mode-business" class="mode-panel">
-      <section class="card prompts-card" aria-labelledby="prompts-heading">
-        <div class="prompts-head">
-          <h2 id="prompts-heading">Suggested productivity prompts</h2>
-          <p class="prompts-sub">
-            Choose a starter task, customize it, then run the workflow.
-          </p>
-        </div>
-        <div
-          class="prompts-tabs"
-          role="tablist"
-          aria-label="Prompt categories"
-        ></div>
-        <div class="prompts-panels"></div>
-        <p class="prompts-foot">
-          Or write your own — the textarea accepts any task.
-        </p>
-      </section>
-
-      <section class="card task-card" aria-labelledby="task-heading">
-        <div class="card-head">
-          <h2 id="task-heading">Task</h2>
-          <button id="example-btn" type="button" class="btn btn-ghost">
-            Use example task
-          </button>
-        </div>
-        <label class="sr-only" for="task-input">Business task</label>
-        <textarea
-          id="task-input"
-          rows="6"
-          placeholder="Describe the business task. Example: Research practical AI consulting opportunities for small businesses in Gulf Shores, Orange Beach, Foley, and Fairhope Alabama."
-        ></textarea>
-        <div class="card-actions">
-          <button id="run-btn" type="button" class="btn btn-primary">
-            Run workflow
-          </button>
-          <button id="clear-btn" type="button" class="btn btn-ghost">
-            Clear &amp; reset
-          </button>
-        </div>
-      </section>
-      </div><!-- /#mode-business -->
-
-      <div id="mode-social" class="mode-panel hidden">
-        <section class="card prompts-card" aria-labelledby="social-prompts-heading">
-          <div class="prompts-head">
-            <h2 id="social-prompts-heading">Suggested social media prompts</h2>
-            <p class="prompts-sub">
-              Click a prompt to pre-fill channel, format, and notes below.
-              Edit anything before running.
-            </p>
-          </div>
-          <div
-            class="prompts-tabs"
-            id="social-prompts-tabs"
-            role="tablist"
-            aria-label="Social media prompt categories"
-          ></div>
-          <div class="prompts-panels" id="social-prompts-panels"></div>
-          <p class="prompts-foot">
-            Or just fill the form yourself — everything is editable.
-          </p>
-        </section>
-
-        <section class="card social-form-card" aria-labelledby="social-heading">
-          <div class="card-head">
-            <h2 id="social-heading">Social Media Production</h2>
-          </div>
-
-          <div class="social-grid">
-            <label class="field">
-              <span class="field-label">Channel / Brand</span>
-              <select id="social-channel" name="channel">
-                <option value="Open Gulf TikTok">Open Gulf TikTok</option>
-                <option value="Open Gulf YouTube">Open Gulf YouTube</option>
-                <option value="Buns TikTok">Buns TikTok</option>
-                <option value="Custom">Custom</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span class="field-label">Starting point</span>
-              <select id="social-starting-point" name="starting_point">
-                <option value="Generate ideas from scratch">Generate ideas from scratch</option>
-                <option value="I have a topic" selected>I have a topic</option>
-                <option value="I have rough notes">I have rough notes</option>
-                <option value="I have existing footage or a thumbnail">I have existing footage or a thumbnail</option>
-                <option value="I have a transcript">I have a transcript</option>
-                <option value="I have a finished script and need posting assets">I have a finished script and need posting assets</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span class="field-label">Content format</span>
-              <select id="social-content-format" name="content_format">
-                <option value="Short-form video" selected>Short-form video</option>
-                <option value="Long-form YouTube video">Long-form YouTube video</option>
-                <option value="Repurposed clip">Repurposed clip</option>
-                <option value="Caption/post only">Caption/post only</option>
-                <option value="Content calendar">Content calendar</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span class="field-label">Goal</span>
-              <select id="social-goal" name="goal">
-                <option value="Educate" selected>Educate</option>
-                <option value="Entertain">Entertain</option>
-                <option value="Inspire curiosity">Inspire curiosity</option>
-                <option value="Build trust">Build trust</option>
-                <option value="Drive traffic to website">Drive traffic to website</option>
-                <option value="Promote a service">Promote a service</option>
-                <option value="Grow audience">Grow audience</option>
-                <option value="Other">Other</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span class="field-label">Desired output depth</span>
-              <select id="social-output-depth" name="output_depth">
-                <option value="Quick post package" selected>Quick post package</option>
-                <option value="Full production package">Full production package</option>
-                <option value="Weekly content plan">Weekly content plan</option>
-              </select>
-            </label>
-          </div>
-
-          <label class="field">
-            <span class="field-label">Media / footage notes</span>
-            <textarea
-              id="social-media-notes"
-              name="media_notes"
-              rows="3"
-              placeholder="Describe the video, photo, thumbnail, clip, or footage you already have. Example: Buns is sitting in the window staring dramatically at birds while I narrate like he is a tiny CEO."
-            ></textarea>
-          </label>
-
-          <label class="field">
-            <span class="field-label">Topic / idea / notes</span>
-            <textarea
-              id="social-topic-notes"
-              name="topic_notes"
-              rows="4"
-              placeholder="Enter your topic, rough notes, transcript, or concept. Leave blank if you want ideas from scratch."
-            ></textarea>
-          </label>
-
-          <div class="card-actions">
-            <button id="social-run-btn" type="button" class="btn btn-primary">
-              Run social workflow
+          <div class="sidebar-mode-group" role="group" aria-label="Workflow mode">
+            <button
+              id="sidebar-mode-business"
+              type="button"
+              class="sidebar-mode-btn is-active"
+              data-mode="business"
+            >
+              <span class="sidebar-mode-icon">B</span>
+              <span class="sidebar-mode-label">Business Workflow</span>
             </button>
-            <button id="social-clear-btn" type="button" class="btn btn-ghost">
-              Clear &amp; reset
+            <button
+              id="sidebar-mode-social"
+              type="button"
+              class="sidebar-mode-btn"
+              data-mode="social"
+            >
+              <span class="sidebar-mode-icon">S</span>
+              <span class="sidebar-mode-label">Social Media Production</span>
             </button>
           </div>
-        </section>
-      </div><!-- /#mode-social -->
-
-      <section
-        id="status-region"
-        class="status hidden"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="status-inner">
-          <span class="spinner" aria-hidden="true"></span>
-          <div>
-            <div class="status-title">Workflow running…</div>
-            <div class="status-sub" id="status-sub">
-              This typically takes <strong>60&ndash;90 seconds</strong>. The
-              five agents run in sequence: research &rarr; writer &rarr;
-              reviewer &rarr; presentation &rarr; email.
-            </div>
-            <div class="status-timer">
-              Elapsed: <span id="elapsed">0s</span>
-            </div>
-          </div>
         </div>
-      </section>
 
-      <section
-        id="error-region"
-        class="error hidden"
-        role="alert"
-        aria-live="assertive"
-      >
-        <div class="error-title">Something went wrong</div>
-        <div id="error-message" class="error-message"></div>
-      </section>
-
-      <section id="results-region" class="results hidden" aria-label="Results">
         <nav
-          id="results-nav"
-          class="results-nav hidden"
-          aria-label="Jump to results section"
+          id="sidebar-outputs"
+          class="sidebar-section sidebar-outputs hidden"
+          aria-label="Outputs for current run"
         >
-          <span class="results-nav-label" id="results-nav-label">Results</span>
-          <div class="results-nav-items" id="results-nav-items" role="tablist"></div>
+          <h3 class="sidebar-section-title">Outputs</h3>
+          <ul id="sidebar-outputs-list" class="sidebar-list" role="tablist"></ul>
         </nav>
 
-        <article id="actions-card" data-result-panel="actions-card" class="card actions-card" aria-labelledby="actions-heading">
-          <div class="card-head">
-            <h2 id="actions-heading">Actions</h2>
+        <nav class="sidebar-section sidebar-runs" aria-label="Recent runs">
+          <h3 class="sidebar-section-title">Recent runs</h3>
+          <ul id="sidebar-runs-list" class="sidebar-list"></ul>
+          <div id="sidebar-runs-empty" class="sidebar-empty">
+            No runs yet. Pick a workflow and run one.
           </div>
-          <div class="actions-row">
-            <button
-              id="action-open-folder"
-              type="button"
-              class="btn btn-primary"
-            >Open artifact folder</button>
-            <button
-              id="action-copy-folder"
-              type="button"
-              class="btn btn-ghost"
-            >Copy folder path</button>
-            <button
-              id="action-export-zip"
-              type="button"
-              class="btn btn-ghost"
-            >Export all as ZIP</button>
-            <button
-              id="action-upload-drive"
-              type="button"
-              class="btn btn-ghost"
-            >Upload to Google Drive</button>
-          </div>
-          <span
-            id="actions-status"
-            class="actions-status"
-            role="status"
-            aria-live="polite"
-          ></span>
-          <a
-            id="action-drive-link"
-            class="action-drive-link hidden"
-            href="#"
-            target="_blank"
-            rel="noopener noreferrer"
-          >Open Drive folder</a>
-        </article>
+        </nav>
 
-        <article id="artifact-folder-card" data-result-panel="artifact-folder-card" class="card result-card">
-          <div class="card-head">
-            <h2>Artifact folder</h2>
-            <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">
-              Copy
-            </button>
-          </div>
-          <pre class="result-folder" data-field="artifact_folder"></pre>
-          <div class="card-actions-row">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="open-folder"
-            >Open folder</button>
-            <span class="card-action-status" role="status" aria-live="polite"></span>
-          </div>
-        </article>
+        <div class="sidebar-footer">
+          <button
+            id="sidebar-settings-btn"
+            type="button"
+            class="sidebar-btn"
+            aria-haspopup="dialog"
+            aria-controls="settings-modal"
+          >Settings</button>
+        </div>
+      </aside>
 
-        <div id="results-business" class="results-mode">
-        <article id="research-card" data-result-panel="research-card" class="card result-card">
-          <div class="card-head">
-            <h2>Research summary</h2>
-            <button class="btn btn-ghost copy-btn" type="button" data-target="research_summary">
-              Copy
-            </button>
+      <!-- ============================================================ -->
+      <!--                         WORKSPACE                             -->
+      <!-- ============================================================ -->
+      <main class="workspace" aria-label="Workspace">
+        <header class="workspace-header">
+          <div class="workspace-title-area">
+            <h1 id="workspace-title" class="workspace-title">Welcome</h1>
+            <p id="workspace-subtitle" class="workspace-subtitle">
+              Pick a workflow on the left to begin.
+            </p>
           </div>
-          <div class="result-body" data-field="research_summary"></div>
-          <div class="audio-controls" data-audio-card="research-card">
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to research summary">Listen</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled aria-label="Pause or resume audio">Pause</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled aria-label="Stop audio">Stop</button>
-            <span class="audio-status" role="status" aria-live="polite"></span>
-          </div>
-          <div class="card-actions-row">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="open-file"
-              data-filename="research_summary.md"
-            >Open markdown file</button>
-            <span class="card-action-status" role="status" aria-live="polite"></span>
-          </div>
-        </article>
-
-        <article id="business-document-card" data-result-panel="business-document-card" class="card result-card">
-          <div class="card-head">
-            <h2>Business document</h2>
-            <button class="btn btn-ghost copy-btn" type="button" data-target="business_document">
-              Copy
-            </button>
-          </div>
-          <div class="result-body" data-field="business_document"></div>
-          <div class="audio-controls" data-audio-card="business-document-card">
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to business document">Listen</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-            <span class="audio-status" role="status" aria-live="polite"></span>
-          </div>
-          <div class="card-actions-row">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="open-file"
-              data-filename="business_document.md"
-            >Open markdown file</button>
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="export-docx"
-            >Export as DOCX</button>
-            <span class="card-action-status" role="status" aria-live="polite"></span>
-          </div>
-        </article>
-
-        <article id="slide-outline-card" data-result-panel="slide-outline-card" class="card result-card">
-          <div class="card-head">
-            <h2>Slide outline</h2>
-            <button class="btn btn-ghost copy-btn" type="button" data-target="slide_outline">
-              Copy
-            </button>
-          </div>
-          <div class="result-body" data-field="slide_outline"></div>
-          <div class="audio-controls" data-audio-card="slide-outline-card">
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to slide outline">Listen</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-            <span class="audio-status" role="status" aria-live="polite"></span>
-          </div>
-          <div class="card-actions-row">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="open-file"
-              data-filename="slide_outline.md"
-            >Open markdown file</button>
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="export-pptx"
-            >Export as PPTX</button>
-            <span class="card-action-status" role="status" aria-live="polite"></span>
-          </div>
-        </article>
-
-        <article id="draft-email-card" data-result-panel="draft-email-card" class="card result-card">
-          <div class="card-head">
-            <h2>Draft email</h2>
-            <button class="btn btn-ghost copy-btn" type="button" data-target="draft_email">
-              Copy
-            </button>
-          </div>
-          <div class="result-body" data-field="draft_email"></div>
-          <div class="audio-controls" data-audio-card="draft-email-card">
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to draft email">Listen</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-            <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-            <span class="audio-status" role="status" aria-live="polite"></span>
-          </div>
-          <div class="email-actions">
-            <button id="send-email-btn" type="button" class="btn btn-primary">
-              Approve &amp; Send Email to Me
-            </button>
-            <span
-              id="send-email-status"
-              class="email-status"
+          <div class="workspace-status-pills">
+            <div
+              id="backend-pill"
+              class="status-pill is-unknown"
               role="status"
               aria-live="polite"
-            ></span>
+              title="Backend status"
+            >
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="backend-pill-label" class="status-label">Checking…</span>
+            </div>
+            <div
+              id="google-pill"
+              class="status-pill is-unknown hidden"
+              role="status"
+              aria-live="polite"
+              title="Google Drive status"
+            >
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="google-pill-label" class="status-label">Drive…</span>
+            </div>
           </div>
-          <div class="card-actions-row">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              data-action="open-file"
-              data-filename="draft_email.md"
-            >Open markdown file</button>
-            <span class="card-action-status" role="status" aria-live="polite"></span>
-          </div>
-        </article>
-        </div><!-- /#results-business -->
+        </header>
 
-        <div id="results-social" class="results-mode hidden">
-          <article id="social-content-package-card" data-result-panel="social-content-package-card" class="card result-card">
-            <div class="card-head">
-              <h2>Content package</h2>
-              <button class="btn btn-ghost copy-btn" type="button" data-target="content_package">
-                Copy
-              </button>
+        <div class="workspace-body">
+          <!-- Banners (sit above all states) -->
+          <section
+            id="backend-down-banner"
+            class="banner banner-warn hidden"
+            role="alert"
+          >
+            <div class="banner-title">Backend is not running.</div>
+            <div class="banner-body">
+              Close this window and double-click
+              <code>Start-Ridian-Agency.bat</code> at the repo root. See
+              <code>QUICKSTART.md</code> if you haven't done initial setup.
             </div>
-            <div class="review-marker">Review concept</div>
-            <div class="result-body" data-field="content_package"></div>
-            <div class="audio-controls" data-audio-card="social-content-package-card">
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to content package">Listen</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-              <span class="audio-status" role="status" aria-live="polite"></span>
-            </div>
-            <div class="card-actions-row">
-              <button
-                type="button"
-                class="btn btn-ghost"
-                data-action="open-file"
-                data-filename="social_content_package.md"
-              >Open markdown file</button>
-              <span class="card-action-status" role="status" aria-live="polite"></span>
-            </div>
-          </article>
+          </section>
 
-          <article id="social-script-card" data-result-panel="social-script-card" class="card result-card">
-            <div class="card-head">
-              <h2>Script</h2>
-              <button class="btn btn-ghost copy-btn" type="button" data-target="script">
-                Copy
-              </button>
+          <section
+            id="openai-missing-banner"
+            class="banner banner-warn hidden"
+            role="alert"
+          >
+            <div class="banner-title">OpenAI API key is not configured.</div>
+            <div class="banner-body">
+              Open <strong>Settings</strong> (bottom left) to add your key before
+              running workflows. Get a key at
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
             </div>
-            <div class="review-marker">Review script</div>
-            <div class="result-body" data-field="script"></div>
-            <div class="audio-controls" data-audio-card="social-script-card">
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to script">Listen</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-              <span class="audio-status" role="status" aria-live="polite"></span>
-            </div>
-            <div class="card-actions-row">
-              <button
-                type="button"
-                class="btn btn-ghost"
-                data-action="open-file"
-                data-filename="script.md"
-              >Open markdown file</button>
-              <span class="card-action-status" role="status" aria-live="polite"></span>
-            </div>
-          </article>
+          </section>
 
-          <article id="social-caption-card" data-result-panel="social-caption-card" class="card result-card">
-            <div class="card-head">
-              <h2>Caption package</h2>
-              <button class="btn btn-ghost copy-btn" type="button" data-target="caption_package">
-                Copy
-              </button>
-            </div>
-            <div class="review-marker">Review caption</div>
-            <div class="result-body" data-field="caption_package"></div>
-            <div class="audio-controls" data-audio-card="social-caption-card">
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to caption package">Listen</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-              <span class="audio-status" role="status" aria-live="polite"></span>
-            </div>
-            <div class="card-actions-row">
-              <button
-                type="button"
-                class="btn btn-ghost"
-                data-action="open-file"
-                data-filename="caption_package.md"
-              >Open markdown file</button>
-              <span class="card-action-status" role="status" aria-live="polite"></span>
-            </div>
-          </article>
+          <!-- ======================== WELCOME STATE ======================== -->
+          <section id="view-welcome" class="workspace-view">
+            <div class="welcome">
+              <h2 class="welcome-title">Pick a workflow to begin</h2>
+              <p class="welcome-lead">
+                Ridian Agency turns a brief into a polished package you can
+                review, export, and publish. Everything runs on your
+                computer; the model calls go to OpenAI.
+              </p>
 
-          <article id="social-checklist-card" data-result-panel="social-checklist-card" class="card result-card">
-            <div class="card-head">
-              <h2>Posting checklist</h2>
-              <button class="btn btn-ghost copy-btn" type="button" data-target="posting_checklist">
-                Copy
-              </button>
+              <div class="welcome-cards">
+                <button type="button" class="welcome-card" data-mode="business">
+                  <span class="welcome-card-eyebrow">Business Workflow</span>
+                  <span class="welcome-card-title">Research → document → slides → email</span>
+                  <span class="welcome-card-desc">
+                    A five-agent pipeline that produces a research summary,
+                    business document, slide outline, and a draft email.
+                  </span>
+                </button>
+                <button type="button" class="welcome-card" data-mode="social">
+                  <span class="welcome-card-eyebrow">Social Media Production</span>
+                  <span class="welcome-card-title">Channel-aware content package</span>
+                  <span class="welcome-card-desc">
+                    Content concept, script, caption, posting checklist.
+                    Open Gulf, Buns, or any custom channel.
+                  </span>
+                </button>
+              </div>
             </div>
-            <div class="review-marker">Review posting checklist</div>
-            <div class="result-body" data-field="posting_checklist"></div>
-            <div class="audio-controls" data-audio-card="social-checklist-card">
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to posting checklist">Listen</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
-              <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
-              <span class="audio-status" role="status" aria-live="polite"></span>
-            </div>
-            <div class="card-actions-row">
-              <button
-                type="button"
-                class="btn btn-ghost"
-                data-action="open-file"
-                data-filename="posting_checklist.md"
-              >Open markdown file</button>
-              <span class="card-action-status" role="status" aria-live="polite"></span>
-            </div>
-          </article>
-        </div><!-- /#results-social -->
-      </section>
-    </main>
+          </section>
 
-    <footer class="site-footer">
-      <div class="container footer-row">
-        <span>Ridian Agency &middot; local desktop console</span>
-        <span class="muted">Powered by the OpenAI Agents SDK</span>
-      </div>
-    </footer>
+          <!-- ======================== INPUT (BUSINESS) ======================== -->
+          <section id="view-input-business" class="workspace-view hidden">
+            <section class="card prompts-card" aria-labelledby="prompts-heading">
+              <div class="prompts-head">
+                <h2 id="prompts-heading">Suggested productivity prompts</h2>
+                <p class="prompts-sub">
+                  Choose a starter task, customize it, then run the workflow.
+                </p>
+              </div>
+              <div class="prompts-tabs" role="tablist" aria-label="Prompt categories"></div>
+              <div class="prompts-panels"></div>
+              <p class="prompts-foot">
+                Or write your own — the textarea accepts any task.
+              </p>
+            </section>
 
+            <section class="card task-card" aria-labelledby="task-heading">
+              <div class="card-head">
+                <h2 id="task-heading">Task</h2>
+                <button id="example-btn" type="button" class="btn btn-ghost">
+                  Use example task
+                </button>
+              </div>
+              <label class="sr-only" for="task-input">Business task</label>
+              <textarea
+                id="task-input"
+                rows="6"
+                placeholder="Describe the business task. Example: Research practical AI consulting opportunities for small businesses in Gulf Shores, Orange Beach, Foley, and Fairhope Alabama."
+              ></textarea>
+              <div class="card-actions">
+                <button id="run-btn" type="button" class="btn btn-primary">
+                  Run workflow
+                </button>
+                <button id="clear-btn" type="button" class="btn btn-ghost">
+                  Clear &amp; reset
+                </button>
+              </div>
+            </section>
+          </section>
+
+          <!-- ======================== INPUT (SOCIAL) ======================== -->
+          <section id="view-input-social" class="workspace-view hidden">
+            <section class="card prompts-card" aria-labelledby="social-prompts-heading">
+              <div class="prompts-head">
+                <h2 id="social-prompts-heading">Suggested social media prompts</h2>
+                <p class="prompts-sub">
+                  Click a prompt to pre-fill channel, format, and notes below.
+                  Edit anything before running.
+                </p>
+              </div>
+              <div
+                class="prompts-tabs"
+                id="social-prompts-tabs"
+                role="tablist"
+                aria-label="Social media prompt categories"
+              ></div>
+              <div class="prompts-panels" id="social-prompts-panels"></div>
+              <p class="prompts-foot">
+                Or just fill the form yourself — everything is editable.
+              </p>
+            </section>
+
+            <section class="card social-form-card" aria-labelledby="social-heading">
+              <div class="card-head">
+                <h2 id="social-heading">Social Media Production</h2>
+              </div>
+
+              <div class="social-grid">
+                <label class="field">
+                  <span class="field-label">Channel / Brand</span>
+                  <select id="social-channel" name="channel">
+                    <option value="Open Gulf TikTok">Open Gulf TikTok</option>
+                    <option value="Open Gulf YouTube">Open Gulf YouTube</option>
+                    <option value="Buns TikTok">Buns TikTok</option>
+                    <option value="Custom">Custom</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Starting point</span>
+                  <select id="social-starting-point" name="starting_point">
+                    <option value="Generate ideas from scratch">Generate ideas from scratch</option>
+                    <option value="I have a topic" selected>I have a topic</option>
+                    <option value="I have rough notes">I have rough notes</option>
+                    <option value="I have existing footage or a thumbnail">I have existing footage or a thumbnail</option>
+                    <option value="I have a transcript">I have a transcript</option>
+                    <option value="I have a finished script and need posting assets">I have a finished script and need posting assets</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Content format</span>
+                  <select id="social-content-format" name="content_format">
+                    <option value="Short-form video" selected>Short-form video</option>
+                    <option value="Long-form YouTube video">Long-form YouTube video</option>
+                    <option value="Repurposed clip">Repurposed clip</option>
+                    <option value="Caption/post only">Caption/post only</option>
+                    <option value="Content calendar">Content calendar</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Goal</span>
+                  <select id="social-goal" name="goal">
+                    <option value="Educate" selected>Educate</option>
+                    <option value="Entertain">Entertain</option>
+                    <option value="Inspire curiosity">Inspire curiosity</option>
+                    <option value="Build trust">Build trust</option>
+                    <option value="Drive traffic to website">Drive traffic to website</option>
+                    <option value="Promote a service">Promote a service</option>
+                    <option value="Grow audience">Grow audience</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Desired output depth</span>
+                  <select id="social-output-depth" name="output_depth">
+                    <option value="Quick post package" selected>Quick post package</option>
+                    <option value="Full production package">Full production package</option>
+                    <option value="Weekly content plan">Weekly content plan</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Media / footage notes</span>
+                <textarea
+                  id="social-media-notes"
+                  name="media_notes"
+                  rows="3"
+                  placeholder="Describe any existing footage, photo, thumbnail, or clip."
+                ></textarea>
+              </label>
+
+              <label class="field">
+                <span class="field-label">Topic / idea / notes</span>
+                <textarea
+                  id="social-topic-notes"
+                  name="topic_notes"
+                  rows="4"
+                  placeholder="Enter your topic, rough notes, transcript, or concept. Leave blank if you want ideas from scratch."
+                ></textarea>
+              </label>
+
+              <div class="card-actions">
+                <button id="social-run-btn" type="button" class="btn btn-primary">
+                  Run social workflow
+                </button>
+                <button id="social-clear-btn" type="button" class="btn btn-ghost">
+                  Clear &amp; reset
+                </button>
+              </div>
+            </section>
+          </section>
+
+          <!-- ======================== RUNNING ======================== -->
+          <section
+            id="status-region"
+            class="status workspace-view hidden"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="status-inner">
+              <span class="spinner" aria-hidden="true"></span>
+              <div>
+                <div class="status-title">Workflow running…</div>
+                <div class="status-sub" id="status-sub">
+                  This typically takes <strong>60&ndash;90 seconds</strong>. The
+                  five agents run in sequence: research &rarr; writer &rarr;
+                  reviewer &rarr; presentation &rarr; email.
+                </div>
+                <div class="status-timer">
+                  Elapsed: <span id="elapsed">0s</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ======================== ERROR ======================== -->
+          <section
+            id="error-region"
+            class="error workspace-view hidden"
+            role="alert"
+            aria-live="assertive"
+          >
+            <div class="error-title">Something went wrong</div>
+            <div id="error-message" class="error-message"></div>
+          </section>
+
+          <!-- ======================== RUN (results) ======================== -->
+          <section id="view-run" class="workspace-view hidden">
+            <article id="run-summary" class="card run-summary">
+              <!-- Filled by JS: title, badges, task preview, action buttons -->
+            </article>
+
+            <div id="result-panel-area" class="result-panel-area">
+              <!-- Shared cards -->
+              <article id="actions-card" data-result-panel="actions-card" class="card actions-card" aria-labelledby="actions-heading">
+                <div class="card-head">
+                  <h2 id="actions-heading">Actions</h2>
+                </div>
+                <div class="actions-row">
+                  <button id="action-open-folder" type="button" class="btn btn-primary">Open artifact folder</button>
+                  <button id="action-copy-folder" type="button" class="btn btn-ghost">Copy folder path</button>
+                  <button id="action-export-zip" type="button" class="btn btn-ghost">Export all as ZIP</button>
+                  <button id="action-upload-drive" type="button" class="btn btn-ghost">Upload to Google Drive</button>
+                </div>
+                <span id="actions-status" class="actions-status" role="status" aria-live="polite"></span>
+                <a id="action-drive-link" class="action-drive-link hidden" href="#" target="_blank" rel="noopener noreferrer">Open Drive folder</a>
+              </article>
+
+              <article id="artifact-folder-card" data-result-panel="artifact-folder-card" class="card result-card hidden">
+                <div class="card-head">
+                  <h2>Artifact folder</h2>
+                  <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">Copy</button>
+                </div>
+                <pre class="result-folder" data-field="artifact_folder"></pre>
+                <div class="card-actions-row">
+                  <button type="button" class="btn btn-ghost" data-action="open-folder">Open folder</button>
+                  <span class="card-action-status" role="status" aria-live="polite"></span>
+                </div>
+              </article>
+
+              <!-- ===== Business result cards ===== -->
+              <div id="results-business" class="results-mode">
+                <article id="research-card" data-result-panel="research-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Research summary</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="research_summary">Copy</button>
+                  </div>
+                  <div class="result-body" data-field="research_summary"></div>
+                  <div class="audio-controls" data-audio-card="research-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to research summary">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="research_summary.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="business-document-card" data-result-panel="business-document-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Business document</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="business_document">Copy</button>
+                  </div>
+                  <div class="result-body" data-field="business_document"></div>
+                  <div class="audio-controls" data-audio-card="business-document-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to business document">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="business_document.md">Open markdown file</button>
+                    <button type="button" class="btn btn-ghost" data-action="export-docx">Export as DOCX</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="slide-outline-card" data-result-panel="slide-outline-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Slide outline</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="slide_outline">Copy</button>
+                  </div>
+                  <div class="result-body" data-field="slide_outline"></div>
+                  <div class="audio-controls" data-audio-card="slide-outline-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to slide outline">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="slide_outline.md">Open markdown file</button>
+                    <button type="button" class="btn btn-ghost" data-action="export-pptx">Export as PPTX</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="draft-email-card" data-result-panel="draft-email-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Draft email</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="draft_email">Copy</button>
+                  </div>
+                  <div class="result-body" data-field="draft_email"></div>
+                  <div class="audio-controls" data-audio-card="draft-email-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to draft email">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="email-actions">
+                    <button id="send-email-btn" type="button" class="btn btn-primary">
+                      Approve &amp; Send Email to Me
+                    </button>
+                    <span id="send-email-status" class="email-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="draft_email.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+              </div><!-- /#results-business -->
+
+              <!-- ===== Social result cards ===== -->
+              <div id="results-social" class="results-mode hidden">
+                <article id="social-content-package-card" data-result-panel="social-content-package-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Content package</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="content_package">Copy</button>
+                  </div>
+                  <div class="review-marker">Review concept</div>
+                  <div class="result-body" data-field="content_package"></div>
+                  <div class="audio-controls" data-audio-card="social-content-package-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to content package">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="social_content_package.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="social-script-card" data-result-panel="social-script-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Script</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="script">Copy</button>
+                  </div>
+                  <div class="review-marker">Review script</div>
+                  <div class="result-body" data-field="script"></div>
+                  <div class="audio-controls" data-audio-card="social-script-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to script">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="script.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="social-caption-card" data-result-panel="social-caption-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Caption package</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="caption_package">Copy</button>
+                  </div>
+                  <div class="review-marker">Review caption</div>
+                  <div class="result-body" data-field="caption_package"></div>
+                  <div class="audio-controls" data-audio-card="social-caption-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to caption package">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="caption_package.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+
+                <article id="social-checklist-card" data-result-panel="social-checklist-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Posting checklist</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="posting_checklist">Copy</button>
+                  </div>
+                  <div class="review-marker">Review posting checklist</div>
+                  <div class="result-body" data-field="posting_checklist"></div>
+                  <div class="audio-controls" data-audio-card="social-checklist-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to posting checklist">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="posting_checklist.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+              </div><!-- /#results-social -->
+            </div><!-- /#result-panel-area -->
+          </section><!-- /#view-run -->
+        </div><!-- /.workspace-body -->
+      </main><!-- /.workspace -->
+    </div><!-- /.app-shell -->
+
+    <!-- ============================================================ -->
+    <!--                        SETTINGS MODAL                         -->
+    <!-- ============================================================ -->
     <div
       id="settings-modal"
       class="modal-overlay hidden"
@@ -618,26 +585,15 @@
             <legend>AI provider</legend>
             <label class="field">
               <span class="field-label">OpenAI API key</span>
-              <input
-                name="openai_api_key"
-                type="password"
-                autocomplete="new-password"
-                placeholder=""
-              />
+              <input name="openai_api_key" type="password" autocomplete="new-password" />
               <span id="settings-openai-key-hint" class="field-hint"></span>
             </label>
             <label class="field">
               <span class="field-label">Model</span>
-              <input
-                name="openai_model"
-                type="text"
-                autocomplete="off"
-                placeholder="gpt-4o-mini"
-              />
+              <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-4o-mini" />
               <span class="field-hint">
                 The OpenAI model every agent uses. Defaults to
-                <code>gpt-4o-mini</code>. Changes take effect on the next
-                workflow run.
+                <code>gpt-4o-mini</code>. Changes take effect on the next workflow run.
               </span>
             </label>
           </fieldset>
@@ -662,57 +618,18 @@
             <legend>Default email recipient</legend>
             <label class="field">
               <span class="field-label">Default recipient</span>
-              <input
-                name="default_to_email"
-                type="email"
-                autocomplete="off"
-                placeholder="you@yourdomain.com"
-              />
-              <span class="field-hint">
-                Used when no recipient is supplied at send time.
-              </span>
+              <input name="default_to_email" type="email" autocomplete="off" placeholder="you@yourdomain.com" />
+              <span class="field-hint">Used when no recipient is supplied at send time.</span>
             </label>
           </fieldset>
 
           <fieldset class="form-group">
             <legend>SMTP credentials</legend>
-            <label class="field">
-              <span class="field-label">SMTP host</span>
-              <input
-                name="smtp_host"
-                type="text"
-                autocomplete="off"
-                placeholder="smtp.gmail.com"
-              />
-            </label>
-            <label class="field">
-              <span class="field-label">SMTP port</span>
-              <input
-                name="smtp_port"
-                type="text"
-                inputmode="numeric"
-                autocomplete="off"
-                placeholder="587"
-              />
-            </label>
-            <label class="field">
-              <span class="field-label">SMTP username</span>
-              <input name="smtp_username" type="email" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span class="field-label">SMTP password</span>
-              <input
-                name="smtp_password"
-                type="password"
-                autocomplete="new-password"
-                placeholder=""
-              />
-              <span id="settings-password-hint" class="field-hint"></span>
-            </label>
-            <label class="field">
-              <span class="field-label">From email</span>
-              <input name="smtp_from_email" type="email" autocomplete="off" />
-            </label>
+            <label class="field"><span class="field-label">SMTP host</span><input name="smtp_host" type="text" autocomplete="off" placeholder="smtp.gmail.com" /></label>
+            <label class="field"><span class="field-label">SMTP port</span><input name="smtp_port" type="text" inputmode="numeric" autocomplete="off" placeholder="587" /></label>
+            <label class="field"><span class="field-label">SMTP username</span><input name="smtp_username" type="email" autocomplete="off" /></label>
+            <label class="field"><span class="field-label">SMTP password</span><input name="smtp_password" type="password" autocomplete="new-password" /><span id="settings-password-hint" class="field-hint"></span></label>
+            <label class="field"><span class="field-label">From email</span><input name="smtp_from_email" type="email" autocomplete="off" /></label>
           </fieldset>
 
           <fieldset class="form-group">
@@ -722,17 +639,8 @@
               <span id="google-status-label" class="google-status-label">Checking…</span>
             </div>
             <div class="google-actions">
-              <button
-                type="button"
-                id="google-connect-btn"
-                class="btn btn-ghost"
-              >Connect Google Drive</button>
-              <button
-                type="button"
-                id="google-disconnect-btn"
-                class="btn btn-ghost"
-                disabled
-              >Disconnect Google Drive</button>
+              <button type="button" id="google-connect-btn" class="btn btn-ghost">Connect Google Drive</button>
+              <button type="button" id="google-disconnect-btn" class="btn btn-ghost" disabled>Disconnect Google Drive</button>
             </div>
             <span id="google-status-hint" class="field-hint">
               Approval-only uploads. The app uses the narrow
@@ -747,38 +655,18 @@
             <div class="readonly-row">
               <span class="field-label">Artifacts folder</span>
               <code id="settings-outputs-path" class="readonly-value">—</code>
-              <span class="field-hint">
-                Set the <code>OUTPUTS_DIR</code> env var to override.
-              </span>
+              <span class="field-hint">Set the <code>OUTPUTS_DIR</code> env var to override.</span>
             </div>
           </fieldset>
 
-          <div
-            id="settings-status"
-            class="modal-status"
-            role="status"
-            aria-live="polite"
-          ></div>
+          <div id="settings-status" class="modal-status" role="status" aria-live="polite"></div>
         </form>
 
         <footer class="modal-foot">
-          <button
-            id="settings-test-email-btn"
-            type="button"
-            class="btn btn-ghost"
-          >Test email settings</button>
+          <button id="settings-test-email-btn" type="button" class="btn btn-ghost">Test email settings</button>
           <span class="modal-foot-spacer"></span>
-          <button
-            id="settings-cancel-btn"
-            type="button"
-            class="btn btn-ghost"
-          >Cancel</button>
-          <button
-            id="settings-save-btn"
-            type="submit"
-            form="settings-form"
-            class="btn btn-primary"
-          >Save settings</button>
+          <button id="settings-cancel-btn" type="button" class="btn btn-ghost">Cancel</button>
+          <button id="settings-save-btn" type="submit" form="settings-form" class="btn btn-primary">Save settings</button>
         </footer>
       </div>
     </div>
