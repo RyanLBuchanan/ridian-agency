@@ -36,6 +36,10 @@ from .services.export_service import (  # noqa: E402
     open_artifact_folder,
 )
 from .services import google_drive_service  # noqa: E402
+from .services.social_media_workflow_service import (  # noqa: E402
+    SocialMediaInput,
+    run_social_media_workflow,
+)
 from .services.workflow_service import run_workflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
@@ -169,6 +173,25 @@ class GoogleUploadResponse(BaseModel):
     drive_folder_url: str
 
 
+class SocialMediaRequest(BaseModel):
+    channel: str = Field(..., min_length=1)
+    starting_point: str = Field("", description="What the operator has on hand.")
+    content_format: str = Field("", description="Short-form / long-form / etc.")
+    media_notes: str = Field("", description="Description of existing footage or thumbnail.")
+    topic_notes: str = Field("", description="Topic, rough notes, transcript, or concept.")
+    goal: str = Field("", description="Educate / entertain / drive traffic / etc.")
+    output_depth: str = Field("", description="Quick / full / weekly plan.")
+
+
+class SocialMediaResponse(BaseModel):
+    status: str
+    artifact_folder: str
+    content_package: str
+    script: str
+    caption_package: str
+    posting_checklist: str
+
+
 def _settings_view_with_outputs() -> SettingsView:
     s = settings_service.public_view()
     s["outputs_path"] = str(outputs_dir())
@@ -212,6 +235,51 @@ async def workflows_run(payload: WorkflowRequest) -> WorkflowResponse:
         business_document=result.business_document,
         slide_outline=result.slide_outline,
         draft_email=result.draft_email,
+    )
+
+
+@app.post("/workflows/social-media/run", response_model=SocialMediaResponse)
+async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMediaResponse:
+    """Run the Social Media Production workflow.
+
+    Produces a four-section package (Content / Script / Caption / Posting
+    Checklist) saved to ``outputs/<timestamp>_<slug>/``. The agent reads
+    OPENAI_API_KEY and OPENAI_MODEL via settings_service the same way the
+    business workflow does.
+    """
+    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+        )
+
+    log.info("social_workflow.start channel=%r format=%r depth=%r",
+             payload.channel, payload.content_format, payload.output_depth)
+
+    try:
+        result = await run_social_media_workflow(
+            SocialMediaInput(
+                channel=payload.channel,
+                starting_point=payload.starting_point,
+                content_format=payload.content_format,
+                media_notes=payload.media_notes,
+                topic_notes=payload.topic_notes,
+                goal=payload.goal,
+                output_depth=payload.output_depth,
+            )
+        )
+    except Exception as exc:
+        log.exception("social_workflow.failed")
+        raise HTTPException(status_code=500, detail=f"social workflow failed: {exc}") from exc
+
+    log.info("social_workflow.complete folder=%s", result.artifact_folder)
+    return SocialMediaResponse(
+        status="complete",
+        artifact_folder=str(result.artifact_folder),
+        content_package=result.content_package,
+        script=result.script,
+        caption_package=result.caption_package,
+        posting_checklist=result.posting_checklist,
     )
 
 

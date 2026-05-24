@@ -77,6 +77,27 @@
         </div>
       </section>
 
+      <section class="card mode-card" aria-labelledby="mode-heading">
+        <h2 id="mode-heading" class="sr-only">Workflow mode</h2>
+        <div class="mode-tabs" role="tablist" aria-label="Workflow mode">
+          <button
+            type="button"
+            class="mode-tab is-active"
+            role="tab"
+            aria-selected="true"
+            data-mode="business"
+          >Business Workflow</button>
+          <button
+            type="button"
+            class="mode-tab"
+            role="tab"
+            aria-selected="false"
+            data-mode="social"
+          >Social Media Production</button>
+        </div>
+      </section>
+
+      <div id="mode-business" class="mode-panel">
       <section class="card prompts-card" aria-labelledby="prompts-heading">
         <div class="prompts-head">
           <h2 id="prompts-heading">Suggested productivity prompts</h2>
@@ -117,6 +138,122 @@
           </button>
         </div>
       </section>
+      </div><!-- /#mode-business -->
+
+      <div id="mode-social" class="mode-panel hidden">
+        <section class="card prompts-card" aria-labelledby="social-prompts-heading">
+          <div class="prompts-head">
+            <h2 id="social-prompts-heading">Suggested social media prompts</h2>
+            <p class="prompts-sub">
+              Click a prompt to pre-fill channel, format, and notes below.
+              Edit anything before running.
+            </p>
+          </div>
+          <div
+            class="prompts-tabs"
+            id="social-prompts-tabs"
+            role="tablist"
+            aria-label="Social media prompt categories"
+          ></div>
+          <div class="prompts-panels" id="social-prompts-panels"></div>
+          <p class="prompts-foot">
+            Or just fill the form yourself — everything is editable.
+          </p>
+        </section>
+
+        <section class="card social-form-card" aria-labelledby="social-heading">
+          <div class="card-head">
+            <h2 id="social-heading">Social Media Production</h2>
+          </div>
+
+          <div class="social-grid">
+            <label class="field">
+              <span class="field-label">Channel / Brand</span>
+              <select id="social-channel" name="channel">
+                <option value="Open Gulf TikTok">Open Gulf TikTok</option>
+                <option value="Open Gulf YouTube">Open Gulf YouTube</option>
+                <option value="Buns TikTok">Buns TikTok</option>
+                <option value="Custom">Custom</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Starting point</span>
+              <select id="social-starting-point" name="starting_point">
+                <option value="Generate ideas from scratch">Generate ideas from scratch</option>
+                <option value="I have a topic" selected>I have a topic</option>
+                <option value="I have rough notes">I have rough notes</option>
+                <option value="I have existing footage or a thumbnail">I have existing footage or a thumbnail</option>
+                <option value="I have a transcript">I have a transcript</option>
+                <option value="I have a finished script and need posting assets">I have a finished script and need posting assets</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Content format</span>
+              <select id="social-content-format" name="content_format">
+                <option value="Short-form video" selected>Short-form video</option>
+                <option value="Long-form YouTube video">Long-form YouTube video</option>
+                <option value="Repurposed clip">Repurposed clip</option>
+                <option value="Caption/post only">Caption/post only</option>
+                <option value="Content calendar">Content calendar</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Goal</span>
+              <select id="social-goal" name="goal">
+                <option value="Educate" selected>Educate</option>
+                <option value="Entertain">Entertain</option>
+                <option value="Inspire curiosity">Inspire curiosity</option>
+                <option value="Build trust">Build trust</option>
+                <option value="Drive traffic to website">Drive traffic to website</option>
+                <option value="Promote a service">Promote a service</option>
+                <option value="Grow audience">Grow audience</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Desired output depth</span>
+              <select id="social-output-depth" name="output_depth">
+                <option value="Quick post package" selected>Quick post package</option>
+                <option value="Full production package">Full production package</option>
+                <option value="Weekly content plan">Weekly content plan</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span class="field-label">Media / footage notes</span>
+            <textarea
+              id="social-media-notes"
+              name="media_notes"
+              rows="3"
+              placeholder="Describe the video, photo, thumbnail, clip, or footage you already have. Example: Buns is sitting in the window staring dramatically at birds while I narrate like he is a tiny CEO."
+            ></textarea>
+          </label>
+
+          <label class="field">
+            <span class="field-label">Topic / idea / notes</span>
+            <textarea
+              id="social-topic-notes"
+              name="topic_notes"
+              rows="4"
+              placeholder="Enter your topic, rough notes, transcript, or concept. Leave blank if you want ideas from scratch."
+            ></textarea>
+          </label>
+
+          <div class="card-actions">
+            <button id="social-run-btn" type="button" class="btn btn-primary">
+              Run social workflow
+            </button>
+            <button id="social-clear-btn" type="button" class="btn btn-ghost">
+              Clear &amp; reset
+            </button>
+          </div>
+        </section>
+      </div><!-- /#mode-social -->
 
       <section
         id="status-region"
@@ -128,7 +265,7 @@
           <span class="spinner" aria-hidden="true"></span>
           <div>
             <div class="status-title">Workflow running…</div>
-            <div class="status-sub">
+            <div class="status-sub" id="status-sub">
               This typically takes <strong>60&ndash;90 seconds</strong>. The
               five agents run in sequence: research &rarr; writer &rarr;
               reviewer &rarr; presentation &rarr; email.
@@ -210,6 +347,7 @@
           </div>
         </article>
 
+        <div id="results-business" class="results-mode">
         <article class="card result-card">
           <div class="card-head">
             <h2>Research summary</h2>
@@ -306,6 +444,89 @@
             <span class="card-action-status" role="status" aria-live="polite"></span>
           </div>
         </article>
+        </div><!-- /#results-business -->
+
+        <div id="results-social" class="results-mode hidden">
+          <article class="card result-card">
+            <div class="card-head">
+              <h2>Content package</h2>
+              <button class="btn btn-ghost copy-btn" type="button" data-target="content_package">
+                Copy
+              </button>
+            </div>
+            <div class="review-marker">Review concept</div>
+            <div class="result-body" data-field="content_package"></div>
+            <div class="card-actions-row">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                data-action="open-file"
+                data-filename="social_content_package.md"
+              >Open markdown file</button>
+              <span class="card-action-status" role="status" aria-live="polite"></span>
+            </div>
+          </article>
+
+          <article class="card result-card">
+            <div class="card-head">
+              <h2>Script</h2>
+              <button class="btn btn-ghost copy-btn" type="button" data-target="script">
+                Copy
+              </button>
+            </div>
+            <div class="review-marker">Review script</div>
+            <div class="result-body" data-field="script"></div>
+            <div class="card-actions-row">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                data-action="open-file"
+                data-filename="script.md"
+              >Open markdown file</button>
+              <span class="card-action-status" role="status" aria-live="polite"></span>
+            </div>
+          </article>
+
+          <article class="card result-card">
+            <div class="card-head">
+              <h2>Caption package</h2>
+              <button class="btn btn-ghost copy-btn" type="button" data-target="caption_package">
+                Copy
+              </button>
+            </div>
+            <div class="review-marker">Review caption</div>
+            <div class="result-body" data-field="caption_package"></div>
+            <div class="card-actions-row">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                data-action="open-file"
+                data-filename="caption_package.md"
+              >Open markdown file</button>
+              <span class="card-action-status" role="status" aria-live="polite"></span>
+            </div>
+          </article>
+
+          <article class="card result-card">
+            <div class="card-head">
+              <h2>Posting checklist</h2>
+              <button class="btn btn-ghost copy-btn" type="button" data-target="posting_checklist">
+                Copy
+              </button>
+            </div>
+            <div class="review-marker">Review posting checklist</div>
+            <div class="result-body" data-field="posting_checklist"></div>
+            <div class="card-actions-row">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                data-action="open-file"
+                data-filename="posting_checklist.md"
+              >Open markdown file</button>
+              <span class="card-action-status" role="status" aria-live="polite"></span>
+            </div>
+          </article>
+        </div><!-- /#results-social -->
       </section>
     </main>
 

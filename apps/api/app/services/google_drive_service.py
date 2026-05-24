@@ -42,12 +42,18 @@ TOKEN_PATH = _API_DIR / "google_token.json"
 # export_service, minus task.txt's exclusion (we DO want task.txt on Drive).
 UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "task.txt",
+    # Business workflow
     "research_summary.md",
     "business_document.md",
     "slide_outline.md",
     "draft_email.md",
     "business_document.docx",
     "slide_outline.pptx",
+    # Social Media Production workflow
+    "social_content_package.md",
+    "script.md",
+    "caption_package.md",
+    "posting_checklist.md",
 )
 
 _MIME_BY_SUFFIX = {

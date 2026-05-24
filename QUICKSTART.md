@@ -181,6 +181,57 @@ Other providers work the same way; common settings:
 | Outlook / Office 365 | smtp.office365.com | 587  |
 | Fastmail           | smtp.fastmail.com   | 465  |
 
+## Social Media Production mode
+
+Ridian Agency has two workflow modes. The selector lives at the top of
+the desktop window, just below the header.
+
+- **Business Workflow** — the default. Research summary → business
+  document → slide outline → draft email.
+- **Social Media Production** — turns a brief into a four-section
+  content package (content concept, script, caption package, posting
+  checklist) for Open Gulf TikTok, Open Gulf YouTube, Buns TikTok, or
+  a custom channel.
+
+### How to use it
+
+1. Click **Social Media Production** in the mode tabs.
+2. Click one of the **Suggested social media prompts** at the top to
+   pre-fill the form — or fill the form yourself:
+   - Channel / Brand
+   - Starting point (idea / topic / notes / footage / transcript / script)
+   - Content format (short-form video, long-form YouTube, repurposed
+     clip, caption only, content calendar)
+   - Media notes (describe any existing footage or thumbnail)
+   - Topic notes (your idea, rough notes, or concept)
+   - Goal (educate, entertain, drive traffic, etc.)
+   - Desired output depth (quick post, full production, weekly plan)
+3. Click **Run social workflow**. ~30-90 seconds.
+4. Review the four result cards. Each card carries a *Review concept /
+   script / caption / posting checklist* marker — read every section
+   before publishing anywhere.
+5. Copy any section to clipboard, or click **Open markdown file** to
+   pop the file in your default editor.
+
+### Files saved per run
+
+Under `outputs/<timestamp>_<slug>/`:
+
+- `social_content_package.md`
+- `script.md`
+- `caption_package.md`
+- `posting_checklist.md`
+- `task.txt` (the brief you submitted)
+
+The Actions card (Open folder, Copy path, Export ZIP, Upload to Google
+Drive) works the same for social runs as it does for business runs.
+
+### Important: posting is manual
+
+Ridian Agency **never auto-posts**. Direct platform-API posting to
+TikTok, YouTube, or Instagram is not built. You review every section,
+edit anything you want, and publish yourself.
+
 ## Google Drive setup (optional)
 
 You can upload the artifact folder for any run to your own Google Drive,

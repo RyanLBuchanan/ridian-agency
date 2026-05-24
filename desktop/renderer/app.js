@@ -54,9 +54,27 @@ const els = {
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
   openaiMissingBanner: document.getElementById('openai-missing-banner'),
+  // Workflow mode + Social Media Production
+  statusSub: document.getElementById('status-sub'),
+  modeBusinessPanel: document.getElementById('mode-business'),
+  modeSocialPanel: document.getElementById('mode-social'),
+  resultsBusiness: document.getElementById('results-business'),
+  resultsSocial: document.getElementById('results-social'),
+  socialPromptsTabs: document.getElementById('social-prompts-tabs'),
+  socialPromptsPanels: document.getElementById('social-prompts-panels'),
+  socialChannel: document.getElementById('social-channel'),
+  socialStartingPoint: document.getElementById('social-starting-point'),
+  socialContentFormat: document.getElementById('social-content-format'),
+  socialGoal: document.getElementById('social-goal'),
+  socialOutputDepth: document.getElementById('social-output-depth'),
+  socialMediaNotes: document.getElementById('social-media-notes'),
+  socialTopicNotes: document.getElementById('social-topic-notes'),
+  socialRunBtn: document.getElementById('social-run-btn'),
+  socialClearBtn: document.getElementById('social-clear-btn'),
 };
 
 let cachedSettings = null;
+let currentMode = 'business'; // 'business' | 'social'
 
 const DEFAULT_EMAIL_SUBJECT = 'Ridian Agency Draft Email Output';
 
@@ -239,6 +257,9 @@ function renderResults(result) {
   document.querySelector('[data-field="business_document"]').innerHTML = renderMarkdown(result.business_document);
   document.querySelector('[data-field="slide_outline"]').innerHTML = renderMarkdown(result.slide_outline);
   document.querySelector('[data-field="draft_email"]').innerHTML = renderMarkdown(result.draft_email);
+  // Toggle which mode's result cards are visible
+  if (els.resultsBusiness) els.resultsBusiness.classList.remove('hidden');
+  if (els.resultsSocial) els.resultsSocial.classList.add('hidden');
   resetEmailStatus();
   resetActionsStatus();
   show(els.resultsRegion);
@@ -634,6 +655,7 @@ async function runWorkflow() {
   resetActionsStatus();
 
   setRunning(true);
+  setRunningStatusForMode('business');
   show(els.status);
   startElapsed();
 
@@ -1138,6 +1160,308 @@ function fillTaskFromPrompt(text) {
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+/* ---------- Social Media Production ---------- */
+
+// Each prompt carries a partial field-fill set so clicking it pre-configures
+// the form for that channel/scenario. Fields not listed are left alone so
+// users can keep an in-progress value.
+const SOCIAL_PROMPT_CATEGORIES = [
+  {
+    id: 'open-gulf-tiktok',
+    label: 'Open Gulf TikTok',
+    prompts: [
+      {
+        text: 'Create a warm, cinematic TikTok explaining one practical AI productivity idea for everyday professionals.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Practical AI productivity idea for everyday professionals. Cinematic, warm tone.' },
+      },
+      {
+        text: 'Create a short Open Gulf TikTok about how AI is changing education without sounding alarmist or hype-driven.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'How AI is changing education. Grounded, calm, non-alarmist. Educator-friendly.' },
+      },
+      {
+        text: 'Create a reflective TikTok script about why people feel overwhelmed by AI and how to start calmly.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Why people feel overwhelmed by AI, and a calm starting point. Reflective.' },
+      },
+    ],
+  },
+  {
+    id: 'open-gulf-youtube',
+    label: 'Open Gulf YouTube',
+    prompts: [
+      {
+        text: 'Create a long-form YouTube outline for Open Gulf explaining practical AI productivity for beginners.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'Practical AI productivity for beginners. Long-form outline.' },
+      },
+      {
+        text: 'Create a YouTube tutorial structure showing how a small business owner can use AI to save time.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'Tutorial: how a small business owner can use AI to save time. Step-by-step.' },
+      },
+      {
+        text: 'Create a long-form video plan about the future of learning, AI tutors, and human-centered education.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'The future of learning, AI tutors, and human-centered education. Long-form plan.' },
+      },
+    ],
+  },
+  {
+    id: 'buns-tiktok',
+    label: 'Buns TikTok',
+    prompts: [
+      {
+        text: 'Create a funny TikTok concept for Buns, a black tuxedo cat with dramatic, charming, mischievous energy.',
+        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Funny TikTok concept for Buns, a black tuxedo cat. Dramatic, charming, mischievous energy.' },
+      },
+      {
+        text: 'Create a cozy, wholesome Buns TikTok script based on a cat quietly watching the world from a window.',
+        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Cozy, wholesome Buns TikTok. Quietly watching the world from a window.' },
+      },
+      {
+        text: 'Create a playful "Buns as tiny CEO" TikTok with voiceover, captions, and edit notes.',
+        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Buns as tiny CEO. Playful voiceover, captions, edit notes.' },
+      },
+    ],
+  },
+  {
+    id: 'existing-footage',
+    label: 'Existing Footage',
+    prompts: [
+      {
+        text: 'Turn this existing clip description into a TikTok post package with hook, text overlays, voiceover, caption, and hashtags.',
+        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video', media_notes: '(Describe your existing clip here — visuals, what is on screen, mood, any audio.)' },
+      },
+      {
+        text: 'Analyze this thumbnail or video description and propose the best short-form angle.',
+        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Repurposed clip', media_notes: '(Describe the thumbnail or video — composition, subject, mood.)' },
+      },
+      {
+        text: 'Create a social post package from existing footage without generating new topic ideas.',
+        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video', media_notes: '(Describe the footage in detail. The agent will not invent new topics — it works with what you have.)' },
+      },
+    ],
+  },
+  {
+    id: 'weekly-planning',
+    label: 'Weekly Planning',
+    prompts: [
+      {
+        text: 'Create a 7-day content plan for Open Gulf TikTok focused on AI productivity, education, and human-centered technology.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: '7-day Open Gulf TikTok plan: AI productivity, education, human-centered technology.' },
+      },
+      {
+        text: 'Create a 7-day content plan for Buns TikTok balancing funny, cozy, and personality-driven posts.',
+        fields: { channel: 'Buns TikTok', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: '7-day Buns TikTok plan: balance funny, cozy, personality-driven.' },
+      },
+      {
+        text: 'Create a combined weekly posting plan for Open Gulf TikTok, Open Gulf YouTube, and Buns TikTok.',
+        fields: { channel: 'Custom', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: 'Combined weekly plan across Open Gulf TikTok, Open Gulf YouTube, and Buns TikTok.' },
+      },
+    ],
+  },
+];
+
+const SOCIAL_FIELD_MAP = {
+  channel: 'socialChannel',
+  starting_point: 'socialStartingPoint',
+  content_format: 'socialContentFormat',
+  goal: 'socialGoal',
+  output_depth: 'socialOutputDepth',
+  media_notes: 'socialMediaNotes',
+  topic_notes: 'socialTopicNotes',
+};
+
+function applySocialPromptFields(fields) {
+  for (const [key, value] of Object.entries(fields)) {
+    const elKey = SOCIAL_FIELD_MAP[key];
+    const el = elKey && els[elKey];
+    if (el) el.value = value;
+  }
+}
+
+function buildSocialPromptLibrary() {
+  const tabsEl = els.socialPromptsTabs;
+  const panelsEl = els.socialPromptsPanels;
+  if (!tabsEl || !panelsEl) return;
+
+  SOCIAL_PROMPT_CATEGORIES.forEach((cat, i) => {
+    const isFirst = i === 0;
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'prompt-tab' + (isFirst ? ' is-active' : '');
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', isFirst ? 'true' : 'false');
+    tab.setAttribute('data-social-cat', cat.id);
+    tab.textContent = cat.label;
+    tab.addEventListener('click', () => activateSocialCategory(cat.id));
+    tabsEl.appendChild(tab);
+
+    const panel = document.createElement('div');
+    panel.className = 'prompts-grid' + (isFirst ? '' : ' hidden');
+    panel.setAttribute('data-social-cat-panel', cat.id);
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-label', cat.label);
+
+    cat.prompts.forEach((p) => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'prompt-pill';
+      pill.textContent = p.text;
+      pill.addEventListener('click', () => {
+        applySocialPromptFields(p.fields);
+        if (els.socialTopicNotes) {
+          els.socialTopicNotes.focus({ preventScroll: true });
+        }
+        const card = (els.socialTopicNotes || els.socialChannel).closest('.card');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      panel.appendChild(pill);
+    });
+
+    panelsEl.appendChild(panel);
+  });
+}
+
+function activateSocialCategory(id) {
+  document.querySelectorAll('[data-social-cat]').forEach((t) => {
+    const active = t.getAttribute('data-social-cat') === id;
+    t.classList.toggle('is-active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-social-cat-panel]').forEach((p) => {
+    p.classList.toggle('hidden', p.getAttribute('data-social-cat-panel') !== id);
+  });
+}
+
+const SOCIAL_RESULT_FIELDS = ['content_package', 'script', 'caption_package', 'posting_checklist'];
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-tab').forEach((t) => {
+    const active = t.getAttribute('data-mode') === mode;
+    t.classList.toggle('is-active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (els.modeBusinessPanel) els.modeBusinessPanel.classList.toggle('hidden', mode !== 'business');
+  if (els.modeSocialPanel) els.modeSocialPanel.classList.toggle('hidden', mode !== 'social');
+  // Reset any in-flight running banner / errors when switching modes.
+  hide(els.errorRegion);
+}
+
+function setRunningStatusForMode(mode) {
+  if (!els.statusSub) return;
+  if (mode === 'social') {
+    els.statusSub.innerHTML =
+      'This typically takes <strong>30&ndash;90 seconds</strong>. The social media agent builds a four-section package: content, script, caption, posting checklist.';
+  } else {
+    els.statusSub.innerHTML =
+      'This typically takes <strong>60&ndash;90 seconds</strong>. The five agents run in sequence: research &rarr; writer &rarr; reviewer &rarr; presentation &rarr; email.';
+  }
+}
+
+function renderSocialResults(result) {
+  currentResult = result;
+  document.querySelector('[data-field="artifact_folder"]').textContent = result.artifact_folder;
+  document.querySelector('[data-field="content_package"]').innerHTML = renderMarkdown(result.content_package);
+  document.querySelector('[data-field="script"]').innerHTML = renderMarkdown(result.script);
+  document.querySelector('[data-field="caption_package"]').innerHTML = renderMarkdown(result.caption_package);
+  document.querySelector('[data-field="posting_checklist"]').innerHTML = renderMarkdown(result.posting_checklist);
+  // Toggle which mode's result cards are visible
+  if (els.resultsBusiness) els.resultsBusiness.classList.add('hidden');
+  if (els.resultsSocial) els.resultsSocial.classList.remove('hidden');
+  resetEmailStatus();
+  resetActionsStatus();
+  show(els.resultsRegion);
+  els.resultsRegion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function runSocialWorkflow() {
+  const payload = {
+    channel: (els.socialChannel && els.socialChannel.value) || '',
+    starting_point: (els.socialStartingPoint && els.socialStartingPoint.value) || '',
+    content_format: (els.socialContentFormat && els.socialContentFormat.value) || '',
+    media_notes: (els.socialMediaNotes && els.socialMediaNotes.value) || '',
+    topic_notes: (els.socialTopicNotes && els.socialTopicNotes.value) || '',
+    goal: (els.socialGoal && els.socialGoal.value) || '',
+    output_depth: (els.socialOutputDepth && els.socialOutputDepth.value) || '',
+  };
+
+  if (!payload.channel) {
+    showError('Choose a Channel / Brand before running the social workflow.');
+    return;
+  }
+  if (backendUp === false) {
+    showError('Backend is not running. Start the FastAPI server first.');
+    return;
+  }
+  if (openaiKeyConfigured === false) {
+    showError('OpenAI API key is not configured. Open Settings to add your key before running workflows.');
+    return;
+  }
+
+  hide(els.errorRegion);
+  hide(els.resultsRegion);
+  SOCIAL_RESULT_FIELDS.forEach((f) => {
+    const el = document.querySelector(`[data-field="${f}"]`);
+    if (el) el.textContent = '';
+  });
+  resetEmailStatus();
+  resetActionsStatus();
+
+  els.socialRunBtn.disabled = true;
+  els.socialRunBtn.textContent = 'Running…';
+  els.socialClearBtn.disabled = true;
+  setRunningStatusForMode('social');
+  show(els.status);
+  startElapsed();
+
+  try {
+    const res = await fetch(`${BACKEND}/workflows/social-media/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+      } catch (_) {}
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    renderSocialResults(data);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      showError('Backend is not reachable. Start the FastAPI server first.');
+      setBackendStatus(false);
+    } else {
+      showError(msg);
+    }
+  } finally {
+    els.socialRunBtn.disabled = false;
+    els.socialRunBtn.textContent = 'Run social workflow';
+    els.socialClearBtn.disabled = false;
+    hide(els.status);
+    stopElapsed();
+  }
+}
+
+function clearSocialForm() {
+  if (els.socialMediaNotes) els.socialMediaNotes.value = '';
+  if (els.socialTopicNotes) els.socialTopicNotes.value = '';
+  if (els.socialChannel) els.socialChannel.value = 'Open Gulf TikTok';
+  if (els.socialStartingPoint) els.socialStartingPoint.value = 'I have a topic';
+  if (els.socialContentFormat) els.socialContentFormat.value = 'Short-form video';
+  if (els.socialGoal) els.socialGoal.value = 'Educate';
+  if (els.socialOutputDepth) els.socialOutputDepth.value = 'Quick post package';
+  hide(els.errorRegion);
+  hide(els.resultsRegion);
+  hide(els.status);
+  resetEmailStatus();
+  resetActionsStatus();
+  currentResult = null;
+}
+
 /* ---------- Wire up ---------- */
 
 els.runBtn.addEventListener('click', runWorkflow);
@@ -1196,5 +1520,28 @@ if (els.settingsModal) {
 }
 
 buildPromptLibrary();
+buildSocialPromptLibrary();
+
+// Mode tabs
+document.querySelectorAll('.mode-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const mode = tab.getAttribute('data-mode');
+    if (mode === 'business' || mode === 'social') setMode(mode);
+  });
+});
+
+if (els.socialRunBtn) els.socialRunBtn.addEventListener('click', runSocialWorkflow);
+if (els.socialClearBtn) els.socialClearBtn.addEventListener('click', clearSocialForm);
+
+// Ctrl/Cmd+Enter inside the social topic textarea runs the social workflow.
+if (els.socialTopicNotes) {
+  els.socialTopicNotes.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      runSocialWorkflow();
+    }
+  });
+}
+
 wireCopyButtons();
 startHealthPolling();

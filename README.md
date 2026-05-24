@@ -40,6 +40,60 @@ panel, and run your first workflow.
   never shown to the renderer after they're saved. The Settings panel
   shows `*_configured: true` flags instead.
 
+## Two workflow modes
+
+The desktop app has a **Workflow mode** selector at the top:
+
+- **Business Workflow** — the original five-agent pipeline (research →
+  writer → reviewer → presentation → email) that produces a research
+  summary, business document, slide outline, and a draft email.
+- **Social Media Production** — a single-agent guided workflow that
+  turns a brief (channel, starting point, format, notes, goal, depth)
+  into a four-section package: content concept, script, caption package,
+  and a posting checklist. Built for Open Gulf (TikTok + YouTube), Buns
+  (TikTok), and custom channels.
+
+Both modes save artifacts under `outputs/<timestamp>_<slug>/`. The
+artifact actions (Open folder, Copy path, Export ZIP, Upload to Google
+Drive) work for either mode's runs.
+
+### Social Media Production — supported channels & outputs
+
+| Channel | Outputs in the Content Package section |
+| --- | --- |
+| Open Gulf TikTok | Angle · 3 hooks · 30-60s script summary · shot list · text overlays · visual style · CTA · repurpose |
+| Open Gulf YouTube | 3 titles · thumbnail concepts · long-form outline · intro hook · segment talking points · B-roll · description · chapters · Shorts cut-downs · CTA |
+| Buns TikTok | Concept · 3 hooks · voiceover · shot list · captions · edit notes · optional recurring series |
+| Custom | Sensible defaults — angle, hooks, format-appropriate body, edit notes, CTA |
+
+Three depth options:
+
+- **Quick post package** — ~250-400 words per section.
+- **Full production package** — detailed shot lists, multiple thumbnail
+  concepts, fuller scripts.
+- **Weekly content plan** — a 7-day plan with daily topic, platform,
+  hook, format, filming notes, caption direction, CTA, and repurpose
+  opportunities.
+
+The "Starting point" dropdown lets the operator say *I have existing
+footage* / *transcript* / *finished script*. In those cases the agent
+**does not invent new topics** — it interprets the supplied material
+and proposes the best angle, hook options, edit sequence, and overlays
+for what's already there.
+
+### Posting is manual (by design)
+
+Ridian Agency **does not post anywhere automatically.** It produces
+review-ready content packages and saves them locally. You read every
+section, edit as needed, then publish yourself in TikTok / YouTube /
+Instagram / wherever. Each social card shows a *Review concept* /
+*Review script* / *Review caption* / *Review posting checklist* marker
+as a visual reminder.
+
+Direct platform-API posting (TikTok, YouTube, Instagram) is on the
+roadmap but intentionally not built — see the section at the end of
+this README.
+
 ## Settings live in the desktop GUI
 
 You don't need to edit environment variables for normal use. Launch the
@@ -219,9 +273,17 @@ when that work begins.
 
 ## Roadmap (intentionally not built yet)
 
-- Google Workspace upload (see the section above)
-- Database / persistent run history
-- User auth, Microsoft OAuth
-- Real web-search tool wired into the research agent
-- Streaming responses
-- Bundling Python with the desktop app for true single-installer distribution
+- Direct platform-API posting (TikTok, YouTube, Instagram). For now,
+  Ridian Agency produces review-ready content packages and you publish
+  yourself.
+- Google Docs / Slides conversion via Drive's import mime types (the
+  Drive folder upload is built; direct conversion to live Docs/Slides
+  is next).
+- Multi-step approval cascade for Social Media Production (today the
+  full four-section package is generated in one run; v2 would gate each
+  section behind explicit operator approval).
+- Database / persistent run history.
+- User auth, Microsoft OAuth.
+- Real web-search tool wired into the research agent.
+- Streaming responses.
+- Bundling Python with the desktop app for true single-installer distribution.

@@ -39,6 +39,7 @@ log = logging.getLogger("ridian.export")
 ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
     {
         "task.txt",
+        # Business workflow artifacts
         "research_summary.md",
         "business_document.md",
         "slide_outline.md",
@@ -46,6 +47,11 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         # Files we generate ourselves and want to be openable.
         "business_document.docx",
         "slide_outline.pptx",
+        # Social Media Production workflow artifacts
+        "social_content_package.md",
+        "script.md",
+        "caption_package.md",
+        "posting_checklist.md",
     }
 )
 

@@ -272,6 +272,126 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* Workflow mode tabs (Business / Social) */
+.mode-card {
+  padding: var(--space-2) var(--space-3);
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.mode-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--color-muted);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+}
+
+.mode-tab:hover:not(.is-active) {
+  background: var(--color-bg-soft);
+  color: var(--color-text-strong);
+}
+
+.mode-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.mode-tab.is-active {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-deep);
+}
+
+.mode-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Social Media Production form */
+.social-form-card textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 88px;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  line-height: 1.55;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.social-form-card textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.social-form-card select {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 0.55rem 0.75rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.social-form-card select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.social-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .social-grid { grid-template-columns: 1fr; }
+}
+
+/* Results mode container (toggle business vs social cards) */
+.results-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Review marker pill on social result cards — visual reminder of v2
+   approval cascade. */
+.review-marker {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent-deep);
+  background: var(--color-accent-soft);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.65rem;
+}
+
 /* Prompt library */
 .prompts-card {
   gap: var(--space-3);
