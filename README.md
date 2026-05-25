@@ -77,11 +77,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Create-Ridian-Agency
 PowerShell**.) A **Ridian Agency** shortcut appears on your Desktop with
 the bundled icon.
 
-To pin it to the taskbar:
+To pin it to the taskbar (do this in the right order or Windows pins
+the running process instead of the shortcut):
 
-1. Double-click the shortcut to launch.
-2. Right-click the Ridian Agency icon in the taskbar.
-3. Pick **Pin to taskbar**.
+1. **If a Ridian Agency icon is already pinned**, right-click it →
+   **Unpin from taskbar** first. Otherwise you'll end up with two.
+2. **Recommended:** drag the **Ridian Agency** shortcut from the Desktop
+   directly onto your taskbar. Windows pins the `.lnk`, so clicking the
+   pinned icon always re-invokes `Start-Ridian-Agency.bat`.
+3. **Alternative:** double-click the Desktop shortcut to launch, then
+   right-click the running Ridian Agency icon in the taskbar →
+   **Pin to taskbar**. This relies on Windows matching the running
+   process's AppUserModelID (`com.ridiantechnologies.ridianagency`,
+   set by `desktop/main.js`) to the same AUMID on the `.lnk`.
+
+If you see "generic Electron" launching from your pinned icon, it means
+Windows pinned an Electron instance from before the AUMID was set, or
+pinned the running process when the `.lnk` itself wasn't AUMID-tagged.
+Unpin and re-pin using step 2 above.
 
 From then on, clicking the pinned icon launches both the backend and the
 desktop window.

@@ -15,9 +15,12 @@ const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
 
 // Stable AppUserModelID so Windows groups our taskbar entries and applies
-// the icon correctly when the shortcut is launched.
+// the icon correctly when the shortcut is launched. MUST match the AUMID
+// the desktop shortcut writes via scripts/Create-Ridian-Agency-Shortcut.ps1
+// — otherwise pinning the running app produces a separate "generic Electron"
+// taskbar entry instead of relaunching through Start-Ridian-Agency.bat.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.ridiantechnologies.ridian-agency');
+  app.setAppUserModelId('com.ridiantechnologies.ridianagency');
 }
 
 function createWindow() {

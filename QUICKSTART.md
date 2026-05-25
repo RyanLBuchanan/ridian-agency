@@ -161,11 +161,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Create-Ridian-Agency
 ```
 
 A **Ridian Agency** shortcut appears on your Desktop with the bundled
-icon. To pin it to the Windows taskbar:
+icon. To pin it to the Windows taskbar — **order matters**:
 
-1. Double-click the desktop shortcut to launch.
-2. Right-click the Ridian Agency icon in the taskbar.
-3. Pick **Pin to taskbar**.
+1. **If a Ridian Agency icon is already pinned to the taskbar**,
+   right-click it → **Unpin from taskbar** first.
+2. **Recommended (always works):** drag the **Ridian Agency** shortcut
+   from your Desktop straight onto the taskbar. Windows pins the `.lnk`
+   itself, so clicking the pinned icon always re-invokes
+   `Start-Ridian-Agency.bat` (which starts the backend + desktop window).
+3. **Alternative:** double-click the Desktop shortcut to launch, then
+   right-click the running Ridian Agency icon in the taskbar →
+   **Pin to taskbar**. This works as long as Windows can match the
+   running app's AppUserModelID to the shortcut's; if it can't, you'll
+   see "generic Electron" launching from the pinned icon. If that
+   happens, unpin and use step 2 instead.
 
 Going forward, clicking the pinned icon launches both the FastAPI
 backend and the desktop window in one click.

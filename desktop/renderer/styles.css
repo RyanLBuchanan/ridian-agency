@@ -359,6 +359,38 @@ body {
   min-height: var(--workspace-header-h);
 }
 
+.workspace-back-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  margin-right: 0.6rem;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.workspace-back-btn:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent);
+}
+
+.workspace-back-btn:active { transform: translateX(-1px); }
+
+.workspace-back-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
 .workspace-title-area {
   min-width: 0;
   flex: 1;

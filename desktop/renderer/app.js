@@ -177,6 +177,7 @@ const els = {
   // workspace header
   workspaceTitle: document.getElementById('workspace-title'),
   workspaceSubtitle: document.getElementById('workspace-subtitle'),
+  workspaceBackBtn: document.getElementById('workspace-back-btn'),
   backendPill: document.getElementById('backend-pill'),
   backendLabel: document.getElementById('backend-pill-label'),
   googlePill: document.getElementById('google-pill'),
@@ -402,6 +403,11 @@ function setWorkspaceView(view) {
   }
   hide(els.sidebarOutputs); // shown only inside 'run'
   if (view === 'run') show(els.sidebarOutputs);
+
+  // Back arrow appears on every non-welcome view.
+  if (els.workspaceBackBtn) {
+    els.workspaceBackBtn.classList.toggle('hidden', view === 'welcome');
+  }
 }
 
 function updateWorkspaceHeader(title, subtitle) {
@@ -413,6 +419,36 @@ function setMode(mode) {
   currentMode = mode;
   els.sidebarModeBusiness && els.sidebarModeBusiness.classList.toggle('is-active', mode === 'business');
   els.sidebarModeSocial && els.sidebarModeSocial.classList.toggle('is-active', mode === 'social');
+}
+
+// Returns true if the active input form has user-typed draft text we
+// should warn about before navigating away. Dropdown state doesn't count
+// (they're always set), only the freeform textareas.
+function hasUnsavedFormText() {
+  if (currentView !== 'input') return false;
+  if (currentMode === 'business') {
+    return !!(els.taskInput && els.taskInput.value.trim());
+  }
+  if (currentMode === 'social') {
+    const a = els.socialTopicNotes && els.socialTopicNotes.value.trim();
+    const b = els.socialMediaNotes && els.socialMediaNotes.value.trim();
+    return !!(a || b);
+  }
+  return false;
+}
+
+function goBackToWelcome() {
+  if (currentView === 'welcome') return;
+  audioStop();
+  if (hasUnsavedFormText()) {
+    const ok = window.confirm(
+      'Return to the welcome screen? Your current unsaved form text will remain available if you come back during this session.'
+    );
+    if (!ok) return;
+  }
+  // Don't touch form values, recent runs, or generated outputs — the user
+  // can navigate forward again and pick up where they left off.
+  setWorkspaceView('welcome');
 }
 
 /* ============================================================ */
@@ -1658,6 +1694,11 @@ if (els.sidebarModeBusiness) {
 }
 if (els.sidebarModeSocial) {
   els.sidebarModeSocial.addEventListener('click', () => { setMode('social'); setWorkspaceView('input'); });
+}
+
+// Workspace back arrow
+if (els.workspaceBackBtn) {
+  els.workspaceBackBtn.addEventListener('click', goBackToWelcome);
 }
 
 // New Workflow button
