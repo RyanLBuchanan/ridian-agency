@@ -94,6 +94,23 @@ const SOCIAL_PROMPT_CATEGORIES = [
     ],
   },
   {
+    id: 'linkedin', label: 'LinkedIn',
+    prompts: [
+      { text: 'Create a LinkedIn post for Open Gulf explaining one practical AI productivity habit for entrepreneurs and professionals.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'One practical AI productivity habit for entrepreneurs and professionals. Warm, reflective, educator-friendly. Open Gulf voice.' } },
+      { text: 'Create a founder-led LinkedIn post about building AI workflows in public without sounding hype-driven.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Founder-led reflection on building AI workflows in public. Honest, grounded, non-hype. Open Gulf voice.' } },
+      { text: 'Create a LinkedIn post for Ridian Technologies explaining how small businesses can use AI to reduce repetitive admin work.',
+        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'How small businesses can use AI to reduce repetitive admin work. Practical, useful, entrepreneur-friendly. Not salesy. Ridian Technologies voice.' } },
+      { text: 'Create a thoughtful LinkedIn post about AI, education, and the future of work in a warm, human-centered tone.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'AI, education, and the future of work. Warm, human-centered, reflective. Open Gulf voice.' } },
+      { text: 'Create a LinkedIn carousel-style outline about "5 practical ways entrepreneurs can use AI this week."',
+        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Carousel-style outline: "5 practical ways entrepreneurs can use AI this week." One concrete, repeatable action per slide. Ridian Technologies voice.' } },
+      { text: 'Create a concise LinkedIn post promoting a practical AI productivity workshop for local business owners.',
+        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Concise LinkedIn post promoting a practical AI productivity workshop for local business owners. Soft business-development angle. Ridian Technologies voice.' } },
+    ],
+  },
+  {
     id: 'existing-footage', label: 'Existing Footage',
     prompts: [
       { text: 'Turn this existing clip description into a TikTok post package with hook, text overlays, voiceover, caption, and hashtags.',

@@ -72,11 +72,26 @@ occasionally like a tiny CEO of the household.
 Avoid: mean-spirited humor, overly childish baby talk, generic cat
 captions, cringe influencer voice.
 
+== Ridian Technologies ==
+
+Ridian Technologies is the parent company. Its LinkedIn voice is for
+business development and entrepreneur-facing thought leadership.
+
+Tone: professional, practical, calm, entrepreneur-friendly, useful,
+clear, grounded.
+
+Avoid: salesy language, jargon stacking, inflated claims, AI-bro hype,
+fear-based AI takeover framing, corporate buzzword soup.
+
+Positioning: practical AI workflows that save real time for small
+businesses and solo operators.
+
 == Custom ==
 
 If the operator chooses Custom channel, infer a sensible voice from
-their notes. Do not assume Open Gulf or Buns. Keep tone professional
-and audience-aware unless the notes specify otherwise.
+their notes. Do not assume Open Gulf, Buns, or Ridian Technologies.
+Keep tone professional and audience-aware unless the notes specify
+otherwise.
 
 ----------------------------------------------------------------------
 PER-CHANNEL OUTPUT REQUIREMENTS
@@ -101,6 +116,45 @@ full read; otherwise a detailed outline is fine.)
 Include: Content concept, 3 hook options, voiceover/script summary,
 shot list, on-screen captions, edit notes, optional recurring series idea.
 (The full voiceover/script also lives in the Script section.)
+
+== Open Gulf LinkedIn ==
+Text-first channel. Use Open Gulf's voice (warm, reflective, practical,
+educator-friendly, human-centered). Include in the Content Package:
+- Post angle
+- 3 hook options (first lines that survive the LinkedIn "see more" fold)
+- Visual suggestion (1-2 sentences — an image, a screenshot, a simple
+  diagram, or "no image / text-only").
+- Repurpose idea (e.g. trim into a TikTok, expand into a Substack).
+
+Put the main deliverable in the **Caption Package** section, not in
+Script. Caption Package for Open Gulf LinkedIn must include:
+- Main LinkedIn post (900-1,500 characters; favor short paragraphs,
+  generous whitespace, scannable on mobile).
+- Optional shorter version (~300-500 characters).
+- Suggested first comment (a follow-up the operator can post in the
+  thread to keep momentum — often a link or a "what's worked for you?"
+  question).
+- Hashtags: 3-6 max. Niche-relevant. No spammy stacks.
+- CTA (a clear one-line invitation).
+
+Script section: write **"Not applicable — LinkedIn is a text-first
+post."** UNLESS the operator's chosen Content format is "Short-form
+video" or "Repurposed clip" — in that case, write a short video
+treatment (concept, suggested visuals, on-screen captions, voiceover
+sketch) AND keep the LinkedIn post copy in the Caption Package as the
+caption that sits above the video.
+
+== Ridian Technologies LinkedIn ==
+Business-development channel. Use the Ridian Technologies voice
+(professional, practical, calm, entrepreneur-friendly). Same structure
+as Open Gulf LinkedIn, plus:
+- Soft business-development angle (one sentence in the Content Package
+  explaining who would naturally reach out after reading this — small
+  business owners? founders? operations leads? — without making the
+  post itself feel like a pitch).
+
+Same Caption Package structure as Open Gulf LinkedIn. Same Script
+section rule (Not applicable unless format is video).
 
 == Custom ==
 Use sensible defaults: angle, 3 hooks, format-appropriate body,
@@ -145,6 +199,13 @@ the strongest day).
 The Caption Package becomes a representative caption + hashtag set.
 The Posting Checklist becomes a per-day rhythm checklist (when to
 film, when to edit, when to post).
+
+For LinkedIn channels (Open Gulf LinkedIn / Ridian Technologies
+LinkedIn), the 7-day plan columns shift to: daily post topic, hook,
+post type (text post / carousel / video / link share), suggested
+visual, CTA, repurpose idea, best audience angle (who this post is
+written FOR — entrepreneurs, ops leads, educators, etc.). The Script
+section can stay "Not applicable" unless one day's post is video.
 
 ----------------------------------------------------------------------
 SCRIPT SECTION DETAILS

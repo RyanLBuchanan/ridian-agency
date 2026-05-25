@@ -295,8 +295,12 @@ def map_channel_to_path(channel: str) -> list[str]:
         return ["Social Media", "Open Gulf", "TikTok"]
     if "open gulf" in c and "youtube" in c:
         return ["Social Media", "Open Gulf", "YouTube"]
+    if "open gulf" in c and "linkedin" in c:
+        return ["Social Media", "Open Gulf", "LinkedIn"]
     if "buns" in c and "tiktok" in c:
         return ["Social Media", "Buns1562", "TikTok"]
+    if "ridian technologies" in c and "linkedin" in c:
+        return ["Social Media", "Ridian Technologies", "LinkedIn"]
     if "custom" in c or not c:
         return ["Social Media", "Custom"]
     # Fallback for any other named channel we haven't mapped.

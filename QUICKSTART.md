@@ -225,8 +225,18 @@ the desktop window, just below the header.
   document → slide outline → draft email.
 - **Social Media Production** — turns a brief into a four-section
   content package (content concept, script, caption package, posting
-  checklist) for Open Gulf TikTok, Open Gulf YouTube, Buns TikTok, or
-  a custom channel.
+  checklist) for Open Gulf TikTok, Open Gulf YouTube, **Open Gulf
+  LinkedIn**, Buns TikTok, **Ridian Technologies LinkedIn**, or a
+  custom channel.
+
+For the two LinkedIn channels the output is **text-first**: the main
+900–1,500-character LinkedIn post lives in the Caption Package section,
+along with an optional shorter version, a suggested first comment,
+3–6 hashtags, and a CTA. The Script section says *"Not applicable"*
+unless the format is short-form video. Voice is warm + reflective
+(Open Gulf) or professional + practical (Ridian Technologies) — never
+salesy or hype-driven. **Posting is manual** — Ridian Agency does not
+post to LinkedIn for you; you copy and paste from the Caption Package.
 
 ### How to use it
 

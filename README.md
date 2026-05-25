@@ -132,7 +132,9 @@ Drive) work for either mode's runs.
 | --- | --- |
 | Open Gulf TikTok | Angle · 3 hooks · 30-60s script summary · shot list · text overlays · visual style · CTA · repurpose |
 | Open Gulf YouTube | 3 titles · thumbnail concepts · long-form outline · intro hook · segment talking points · B-roll · description · chapters · Shorts cut-downs · CTA |
+| Open Gulf LinkedIn | Post angle · 3 hooks · visual suggestion · repurpose idea. Text-first; the **main 900-1,500-char LinkedIn post** lives in the Caption Package section (along with an optional shorter version, suggested first comment, 3-6 hashtags, CTA). Script section says "Not applicable" unless format is video. |
 | Buns TikTok | Concept · 3 hooks · voiceover · shot list · captions · edit notes · optional recurring series |
+| Ridian Technologies LinkedIn | Same structure as Open Gulf LinkedIn, plus a one-line **soft business-development angle** identifying who would naturally reach out after reading. Voice is professional/practical/calm, never salesy. |
 | Custom | Sensible defaults — angle, hooks, format-appropriate body, edit notes, CTA |
 
 Three depth options:
@@ -327,8 +329,13 @@ My Drive/
             <timestamp>_<slug>/
           YouTube/
             <timestamp>_<slug>/
+          LinkedIn/
+            <timestamp>_<slug>/
         Buns1562/
           TikTok/
+            <timestamp>_<slug>/
+        Ridian Technologies/
+          LinkedIn/
             <timestamp>_<slug>/
         Custom/
           <timestamp>_<slug>/        <-- channels we don't recognize
