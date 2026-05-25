@@ -9,6 +9,9 @@ venv/
 # Local settings (contains SMTP password)
 apps/api/local_settings.json
 
+# Per-machine sidebar "hidden runs" filter (not secrets, just user preference)
+apps/api/hidden_projects.json
+
 # Google Drive OAuth (never commit either file)
 apps/api/google_credentials.json
 apps/api/google_token.json

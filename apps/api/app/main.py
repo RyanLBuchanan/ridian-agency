@@ -200,10 +200,24 @@ class RecentProject(BaseModel):
     workflow: str
     channel: str = ""
     mtime_iso: str
+    pinned: bool = False
 
 
 class RecentProjectsResponse(BaseModel):
     projects: list[RecentProject]
+
+
+class ProjectFolderRequest(BaseModel):
+    artifact_folder: str = Field(..., min_length=1)
+
+
+class ProjectActionResponse(BaseModel):
+    ok: bool
+    name: str
+    # Both hide/unhide and pin/unpin reuse this response model; the
+    # field that's not relevant for a given call is omitted (default 0).
+    hidden_count: int = 0
+    pinned_count: int = 0
 
 
 class LoadProjectResponse(BaseModel):
@@ -323,10 +337,64 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
 
 
 @app.get("/projects/recent", response_model=RecentProjectsResponse)
-async def projects_recent(limit: int = 30) -> RecentProjectsResponse:
-    """List recent run folders under outputs/ with workflow + channel metadata."""
-    items = project_service.list_recent_projects(limit=limit)
+async def projects_recent(limit: int = 30, include_hidden: bool = False) -> RecentProjectsResponse:
+    """List recent run folders. Hidden runs filtered out by default."""
+    items = project_service.list_recent_projects(limit=limit, include_hidden=include_hidden)
     return RecentProjectsResponse(projects=[RecentProject(**i) for i in items])
+
+
+@app.get("/projects/hidden", response_model=RecentProjectsResponse)
+async def projects_hidden() -> RecentProjectsResponse:
+    """List the run folders the user has hidden from the sidebar.
+
+    Folders are not deleted by hiding — this just returns whichever
+    on-disk runs are currently marked hidden so the GUI can offer to
+    restore them.
+    """
+    items = project_service.list_hidden_projects()
+    return RecentProjectsResponse(projects=[RecentProject(**i) for i in items])
+
+
+@app.post("/projects/hide", response_model=ProjectActionResponse)
+async def projects_hide(payload: ProjectFolderRequest) -> ProjectActionResponse:
+    """Mark a run folder as hidden in the sidebar. Folder stays on disk."""
+    try:
+        data = project_service.hide_project(payload.artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return ProjectActionResponse(**data)
+
+
+@app.post("/projects/unhide", response_model=ProjectActionResponse)
+async def projects_unhide(payload: ProjectFolderRequest) -> ProjectActionResponse:
+    """Remove a run folder from the hidden list so it shows up again."""
+    try:
+        data = project_service.unhide_project(payload.artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return ProjectActionResponse(**data)
+
+
+@app.post("/projects/pin", response_model=ProjectActionResponse)
+async def projects_pin(payload: ProjectFolderRequest) -> ProjectActionResponse:
+    """Pin a run folder so it sorts to the top of Recent runs.
+
+    Mutually exclusive with hide: pinning a hidden folder unhides it."""
+    try:
+        data = project_service.pin_project(payload.artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return ProjectActionResponse(**data)
+
+
+@app.post("/projects/unpin", response_model=ProjectActionResponse)
+async def projects_unpin(payload: ProjectFolderRequest) -> ProjectActionResponse:
+    """Remove a run folder from the pinned list."""
+    try:
+        data = project_service.unpin_project(payload.artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return ProjectActionResponse(**data)
 
 
 @app.get("/projects/load", response_model=LoadProjectResponse)

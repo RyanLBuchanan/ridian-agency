@@ -60,13 +60,38 @@
 
         <nav class="sidebar-section sidebar-runs" aria-label="Recent runs">
           <h3 class="sidebar-section-title">Recent runs</h3>
+          <label class="sr-only" for="sidebar-runs-search">Search recent runs</label>
+          <input
+            id="sidebar-runs-search"
+            type="search"
+            class="sidebar-runs-search"
+            placeholder="Search runs…"
+            autocomplete="off"
+            spellcheck="false"
+          />
           <ul id="sidebar-runs-list" class="sidebar-list"></ul>
-          <div id="sidebar-runs-empty" class="sidebar-empty">
-            No runs yet. Pick a workflow and run one.
-          </div>
+          <!-- Single dynamic empty-state region; JS picks the message based on
+               recent-count / hidden-count / search query. Keeps the markup
+               simple while letting messaging stay contextual. -->
+          <div id="sidebar-runs-empty-state" class="sidebar-empty hidden"></div>
+          <button
+            id="sidebar-hidden-toggle"
+            type="button"
+            class="sidebar-hidden-toggle hidden"
+            aria-expanded="false"
+            aria-controls="sidebar-hidden-list"
+          >Show hidden runs (0)</button>
+          <ul id="sidebar-hidden-list" class="sidebar-hidden-list hidden"></ul>
         </nav>
 
         <div class="sidebar-footer">
+          <button
+            id="sidebar-tips-btn"
+            type="button"
+            class="sidebar-btn sidebar-btn-secondary"
+            aria-haspopup="dialog"
+            aria-controls="tips-modal"
+          >Quick tips</button>
           <button
             id="sidebar-settings-btn"
             type="button"
@@ -150,6 +175,22 @@
           <!-- ======================== WELCOME STATE ======================== -->
           <section id="view-welcome" class="workspace-view">
             <div class="welcome">
+              <div id="welcome-tip" class="welcome-tip hidden" role="note">
+                <div class="welcome-tip-icon" aria-hidden="true">💡</div>
+                <div class="welcome-tip-body">
+                  <strong>Quick orientation.</strong> Pick a workflow card below to begin.
+                  As runs accumulate they'll appear in <strong>Recent runs</strong> on the
+                  left — hover over any of them to pin (★) or hide (×).
+                  Your OpenAI key, SMTP, and Google Drive live in
+                  <strong>Settings</strong> at the bottom of the sidebar.
+                </div>
+                <button
+                  id="welcome-tip-dismiss"
+                  type="button"
+                  class="welcome-tip-dismiss"
+                  aria-label="Dismiss welcome tip"
+                >Got it</button>
+              </div>
               <h2 class="welcome-title">Pick a workflow to begin</h2>
               <p class="welcome-lead">
                 Ridian Agency turns a brief into a polished package you can
@@ -383,7 +424,35 @@
                   <button id="action-upload-drive" type="button" class="btn btn-ghost">Upload to Google Drive</button>
                 </div>
                 <span id="actions-status" class="actions-status" role="status" aria-live="polite"></span>
-                <a id="action-drive-link" class="action-drive-link hidden" href="#" target="_blank" rel="noopener noreferrer">Open Drive folder</a>
+
+                <!-- Richer success card shown only after a successful Drive upload. -->
+                <div id="drive-success-card" class="drive-success-card hidden" role="status" aria-live="polite">
+                  <div class="drive-success-head">
+                    <span class="drive-success-icon" aria-hidden="true">✓</span>
+                    <div class="drive-success-body">
+                      <div class="drive-success-title">Uploaded to Google Drive</div>
+                      <div class="drive-success-meta">
+                        <span id="drive-success-count">0 files</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="drive-success-path" id="drive-success-path" title=""></div>
+                  <div class="drive-success-actions">
+                    <a
+                      id="action-drive-link"
+                      class="btn btn-primary btn-compact"
+                      href="#"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >Open Drive folder</a>
+                    <button
+                      id="drive-success-copy"
+                      type="button"
+                      class="btn btn-ghost btn-compact"
+                    >Copy Drive link</button>
+                    <span id="drive-success-copy-status" class="drive-success-copy-status" aria-live="polite"></span>
+                  </div>
+                </div>
               </article>
 
               <article id="artifact-folder-card" data-result-panel="artifact-folder-card" class="card result-card hidden">
@@ -564,6 +633,66 @@
         </div><!-- /.workspace-body -->
       </main><!-- /.workspace -->
     </div><!-- /.app-shell -->
+
+    <!-- ============================================================ -->
+    <!--                         TIPS MODAL                            -->
+    <!-- ============================================================ -->
+    <div
+      id="tips-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tips-title"
+      aria-hidden="true"
+    >
+      <div class="modal-card modal-card-narrow" role="document">
+        <header class="modal-head">
+          <h2 id="tips-title">Quick tips</h2>
+          <button
+            id="tips-close-btn"
+            type="button"
+            class="modal-close"
+            aria-label="Close quick tips"
+          >×</button>
+        </header>
+        <div class="modal-body tips-body">
+          <ol class="tips-list">
+            <li>
+              <strong>Pick a workflow.</strong>
+              Business Workflow or Social Media Production from the sidebar.
+            </li>
+            <li>
+              <strong>Run it.</strong>
+              Type a task or click one of the suggested prompts, then press
+              <em>Run workflow</em> (or <em>Ctrl + Enter</em> in the textarea).
+            </li>
+            <li>
+              <strong>Review outputs.</strong>
+              Once the run completes, the sidebar lists each output —
+              click any tab to view that section.
+            </li>
+            <li>
+              <strong>Approve before sending.</strong>
+              Exports, Google Drive upload, and email send never auto-fire.
+              You click the button each time.
+            </li>
+            <li>
+              <strong>Outputs stay local.</strong>
+              Every run is saved to <code>outputs/</code> on your machine.
+              Click <em>Open artifact folder</em> on the Actions tab to find it.
+            </li>
+          </ol>
+          <p class="tips-foot">
+            Hover a Recent run to <strong>★ pin</strong> or <strong>× hide</strong> it.
+            Click the <strong>←</strong> arrow at the top to return to the workflow picker.
+          </p>
+        </div>
+        <footer class="modal-foot">
+          <span class="modal-foot-spacer"></span>
+          <button id="tips-done-btn" type="button" class="btn btn-primary">Got it</button>
+        </footer>
+      </div>
+    </div>
 
     <!-- ============================================================ -->
     <!--                        SETTINGS MODAL                         -->

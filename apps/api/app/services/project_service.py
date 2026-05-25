@@ -19,6 +19,7 @@ backend uses:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -58,6 +59,13 @@ _BUSINESS_MARKERS = (
     "draft_email.md",
 )
 
+# Sibling of .env / local_settings.json. Stores per-machine sidebar
+# preferences (hidden + pinned). Git-ignored. Folders themselves are
+# never deleted — this is purely a render-time filter / order.
+HIDDEN_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "hidden_projects.json"
+)
+
 
 class ProjectError(Exception):
     """Raised when a project lookup is invalid. Maps to an HTTP status."""
@@ -73,7 +81,12 @@ class ProjectError(Exception):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_project_folder(folder_str: str) -> Path:
+def _validate_folder_inside_outputs(folder_str: str) -> Path:
+    """Resolve + reject path traversal / outputs root. Existence NOT required.
+
+    Used by unhide so a stale entry referencing a deleted folder can still
+    be cleared from the hidden list.
+    """
     if not folder_str or not isinstance(folder_str, str):
         raise ProjectError("artifact_folder is required.", status=400)
     try:
@@ -90,15 +103,22 @@ def _resolve_project_folder(folder_str: str) -> Path:
         raise ProjectError(
             "Folder is not inside the configured outputs directory.", status=400
         ) from exc
-    if not candidate.exists():
-        raise ProjectError("Artifact folder does not exist.", status=404)
-    if not candidate.is_dir():
-        raise ProjectError("Artifact path is not a directory.", status=400)
     if candidate.resolve() == outputs:
         raise ProjectError(
             "Refusing to operate on the outputs root. Provide a per-run folder.",
             status=400,
         )
+    return candidate
+
+
+def _resolve_project_folder(folder_str: str) -> Path:
+    """Same as _validate_folder_inside_outputs, but also requires the folder
+    to exist on disk and be a directory. Use this for load / hide."""
+    candidate = _validate_folder_inside_outputs(folder_str)
+    if not candidate.exists():
+        raise ProjectError("Artifact folder does not exist.", status=404)
+    if not candidate.is_dir():
+        raise ProjectError("Artifact path is not a directory.", status=400)
     return candidate
 
 
@@ -153,17 +173,135 @@ def _project_meta(folder: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def list_recent_projects(limit: int = 30) -> list[dict]:
-    """List recent run folders, newest first, capped at ``limit``."""
+def _load_prefs() -> tuple[set[str], set[str]]:
+    """Read the sidebar prefs file. Returns ``(hidden_basenames, pinned_basenames)``."""
+    if not HIDDEN_PATH.exists():
+        return set(), set()
+    try:
+        data = json.loads(HIDDEN_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("projects.prefs_load_failed type=%s", type(exc).__name__)
+        return set(), set()
+    if not isinstance(data, dict):
+        return set(), set()
+    hidden_raw = data.get("hidden_folders")
+    pinned_raw = data.get("pinned_folders")
+    hidden = {str(x) for x in hidden_raw if isinstance(x, str)} if isinstance(hidden_raw, list) else set()
+    pinned = {str(x) for x in pinned_raw if isinstance(x, str)} if isinstance(pinned_raw, list) else set()
+    return hidden, pinned
+
+
+def _save_prefs(hidden: set[str], pinned: set[str]) -> None:
+    HIDDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HIDDEN_PATH.write_text(
+        json.dumps(
+            {"hidden_folders": sorted(hidden), "pinned_folders": sorted(pinned)},
+            indent=2, sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    log.info("projects.prefs_saved hidden=%d pinned=%d", len(hidden), len(pinned))
+
+
+def _load_hidden() -> set[str]:
+    return _load_prefs()[0]
+
+
+def hide_project(folder_str: str) -> dict:
+    """Mark a per-run folder as hidden from the sidebar. Folder stays on disk.
+    Also removes the folder from the pinned set (mutual exclusion)."""
+    folder = _resolve_project_folder(folder_str)
+    hidden, pinned = _load_prefs()
+    hidden.add(folder.name)
+    pinned.discard(folder.name)
+    _save_prefs(hidden, pinned)
+    return {"ok": True, "name": folder.name, "hidden_count": len(hidden)}
+
+
+def unhide_project(folder_str: str) -> dict:
+    """Remove a folder from the hidden list. Folder doesn't have to exist."""
+    folder = _validate_folder_inside_outputs(folder_str)
+    hidden, pinned = _load_prefs()
+    hidden.discard(folder.name)
+    _save_prefs(hidden, pinned)
+    return {"ok": True, "name": folder.name, "hidden_count": len(hidden)}
+
+
+def pin_project(folder_str: str) -> dict:
+    """Mark a per-run folder as pinned (sorts to top of Recent runs).
+    Also removes the folder from the hidden set (mutual exclusion)."""
+    folder = _resolve_project_folder(folder_str)
+    hidden, pinned = _load_prefs()
+    pinned.add(folder.name)
+    hidden.discard(folder.name)
+    _save_prefs(hidden, pinned)
+    return {"ok": True, "name": folder.name, "pinned_count": len(pinned)}
+
+
+def unpin_project(folder_str: str) -> dict:
+    """Remove a folder from the pinned list. Folder doesn't have to exist."""
+    folder = _validate_folder_inside_outputs(folder_str)
+    hidden, pinned = _load_prefs()
+    pinned.discard(folder.name)
+    _save_prefs(hidden, pinned)
+    return {"ok": True, "name": folder.name, "pinned_count": len(pinned)}
+
+
+def list_recent_projects(limit: int = 30, include_hidden: bool = False) -> list[dict]:
+    """List recent run folders, pinned-first then newest-first, capped at ``limit``.
+
+    Hidden folders are filtered out unless ``include_hidden=True``.
+    Each returned item carries ``pinned: bool`` so the renderer can mark it.
+    """
     outputs = outputs_dir()
     if not outputs.exists():
         return []
+
+    hidden, pinned = _load_prefs()
+    if include_hidden:
+        hidden = set()
 
     items: list[dict] = []
     for sub in outputs.iterdir():
         if not sub.is_dir():
             continue
         if sub.name.startswith("."):
+            continue
+        if sub.name in hidden:
+            continue
+        try:
+            meta = _project_meta(sub)
+        except (OSError, PermissionError) as exc:
+            log.warning(
+                "project.meta_failed name=%s type=%s", sub.name, type(exc).__name__
+            )
+            continue
+        meta["pinned"] = sub.name in pinned
+        items.append(meta)
+
+    # Two stable passes: newest-first overall, then pinned-first.
+    # Python's sort is stable, so the second pass preserves mtime-desc
+    # ordering within each pinned/unpinned bucket.
+    items.sort(key=lambda x: x.get("mtime_iso", ""), reverse=True)
+    items.sort(key=lambda x: 0 if x.get("pinned") else 1)
+    return items[:limit]
+
+
+def list_hidden_projects() -> list[dict]:
+    """List the run folders currently marked hidden (and still on disk)."""
+    outputs = outputs_dir()
+    if not outputs.exists():
+        return []
+
+    hidden = _load_hidden()
+    if not hidden:
+        return []
+
+    items: list[dict] = []
+    for sub in outputs.iterdir():
+        if not sub.is_dir():
+            continue
+        if sub.name not in hidden:
             continue
         try:
             items.append(_project_meta(sub))
@@ -173,7 +311,7 @@ def list_recent_projects(limit: int = 30) -> list[dict]:
             )
 
     items.sort(key=lambda x: x.get("mtime_iso", ""), reverse=True)
-    return items[:limit]
+    return items
 
 
 def load_project(folder_str: str) -> dict:

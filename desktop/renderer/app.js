@@ -171,8 +171,17 @@ const els = {
   sidebarOutputs: document.getElementById('sidebar-outputs'),
   sidebarOutputsList: document.getElementById('sidebar-outputs-list'),
   sidebarRunsList: document.getElementById('sidebar-runs-list'),
-  sidebarRunsEmpty: document.getElementById('sidebar-runs-empty'),
+  sidebarRunsEmptyState: document.getElementById('sidebar-runs-empty-state'),
+  sidebarRunsSearch: document.getElementById('sidebar-runs-search'),
+  sidebarHiddenToggle: document.getElementById('sidebar-hidden-toggle'),
+  sidebarHiddenList: document.getElementById('sidebar-hidden-list'),
   sidebarSettingsBtn: document.getElementById('sidebar-settings-btn'),
+  sidebarTipsBtn: document.getElementById('sidebar-tips-btn'),
+  tipsModal: document.getElementById('tips-modal'),
+  tipsCloseBtn: document.getElementById('tips-close-btn'),
+  tipsDoneBtn: document.getElementById('tips-done-btn'),
+  welcomeTip: document.getElementById('welcome-tip'),
+  welcomeTipDismiss: document.getElementById('welcome-tip-dismiss'),
 
   // workspace header
   workspaceTitle: document.getElementById('workspace-title'),
@@ -236,6 +245,11 @@ const els = {
   actionExportZip: document.getElementById('action-export-zip'),
   actionUploadDrive: document.getElementById('action-upload-drive'),
   actionDriveLink: document.getElementById('action-drive-link'),
+  driveSuccessCard: document.getElementById('drive-success-card'),
+  driveSuccessCount: document.getElementById('drive-success-count'),
+  driveSuccessPath: document.getElementById('drive-success-path'),
+  driveSuccessCopy: document.getElementById('drive-success-copy'),
+  driveSuccessCopyStatus: document.getElementById('drive-success-copy-status'),
 
   // email
   sendEmailBtn: document.getElementById('send-email-btn'),
@@ -269,6 +283,9 @@ let currentRunMeta = null;           // {channel, starting_point, ...} for socia
 let cachedSettings = null;
 let recentRuns = [];                 // [{artifact_folder, name, workflow, channel, mtime_iso}]
 let activeRunFolder = null;          // string — which sidebar run is highlighted
+let hiddenRuns = [];                 // [{artifact_folder, name, workflow, channel, mtime_iso}]
+let hiddenRunsExpanded = false;      // disclosure state for the hidden section
+let recentRunsSearch = '';           // current filter text for Recent runs
 
 /* ============================================================ */
 /*                          HELPERS                              */
@@ -408,6 +425,8 @@ function setWorkspaceView(view) {
   if (els.workspaceBackBtn) {
     els.workspaceBackBtn.classList.toggle('hidden', view === 'welcome');
   }
+  // Welcome tip is visible only on Welcome (and only if not dismissed).
+  refreshWelcomeTip();
 }
 
 function updateWorkspaceHeader(title, subtitle) {
@@ -419,6 +438,26 @@ function setMode(mode) {
   currentMode = mode;
   els.sidebarModeBusiness && els.sidebarModeBusiness.classList.toggle('is-active', mode === 'business');
   els.sidebarModeSocial && els.sidebarModeSocial.classList.toggle('is-active', mode === 'social');
+}
+
+// First-launch welcome tip. Hidden once dismissed; the localStorage flag
+// keeps it gone across app restarts. Visible only inside the Welcome view.
+const WELCOME_TIP_KEY = 'ridian.welcomeTipDismissed';
+
+function refreshWelcomeTip() {
+  if (!els.welcomeTip) return;
+  let dismissed = false;
+  try { dismissed = window.localStorage.getItem(WELCOME_TIP_KEY) === 'true'; } catch (_) {}
+  if (dismissed || currentView !== 'welcome') {
+    els.welcomeTip.classList.add('hidden');
+  } else {
+    els.welcomeTip.classList.remove('hidden');
+  }
+}
+
+function dismissWelcomeTip() {
+  try { window.localStorage.setItem(WELCOME_TIP_KEY, 'true'); } catch (_) {}
+  if (els.welcomeTip) els.welcomeTip.classList.add('hidden');
 }
 
 // Returns true if the active input form has user-typed draft text we
@@ -457,45 +496,338 @@ function goBackToWelcome() {
 
 async function loadRecentRunsFromBackend() {
   try {
-    const res = await fetch(`${BACKEND}/projects/recent?limit=30`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    recentRuns = data.projects || [];
+    const [recentRes, hiddenRes] = await Promise.all([
+      fetch(`${BACKEND}/projects/recent?limit=30`),
+      fetch(`${BACKEND}/projects/hidden`),
+    ]);
+    if (recentRes.ok) {
+      const data = await recentRes.json();
+      recentRuns = data.projects || [];
+    } else {
+      recentRuns = [];
+    }
+    if (hiddenRes.ok) {
+      const data = await hiddenRes.json();
+      hiddenRuns = data.projects || [];
+    } else {
+      hiddenRuns = [];
+    }
     renderRecentRuns();
+    renderHiddenRuns();
   } catch (err) {
     debugLog('projects.recent.failed', { error: err && err.message });
     recentRuns = [];
+    hiddenRuns = [];
     renderRecentRuns();
+    renderHiddenRuns();
+  }
+}
+
+function _runMatchesSearch(run, query) {
+  if (!query) return true;
+  const haystack = [
+    run.name || '',
+    run.channel || '',
+    run.workflow || '',
+  ].join(' ').toLowerCase();
+  return haystack.includes(query);
+}
+
+function _setEmptyStateHtml(html) {
+  if (!els.sidebarRunsEmptyState) return;
+  if (!html) {
+    els.sidebarRunsEmptyState.innerHTML = '';
+    hide(els.sidebarRunsEmptyState);
+    return;
+  }
+  els.sidebarRunsEmptyState.innerHTML = html;
+  show(els.sidebarRunsEmptyState);
+}
+
+function _renderEmptyState({ kind, query }) {
+  // kind: 'no-runs' | 'all-hidden' | 'no-match'
+  let html = '';
+  if (kind === 'no-runs') {
+    html = `
+      No runs yet.<br />
+      Pick <strong>Business Workflow</strong> or <strong>Social Media Production</strong>
+      above, write a task or click a suggested prompt, then <strong>Run</strong>.
+    `;
+  } else if (kind === 'all-hidden') {
+    html = `
+      All your runs are hidden.
+      <button type="button" class="sidebar-empty-action" data-empty-action="expand-hidden">Show hidden runs</button>
+      below, or start a <button type="button" class="sidebar-empty-action" data-empty-action="new-workflow">new workflow</button>.
+    `;
+  } else if (kind === 'no-match') {
+    const safe = (query || '').replace(/[<>&"']/g, '');
+    html = `
+      No runs match <strong>"${escapeHtml(safe)}"</strong>.
+      Try different keywords or
+      <button type="button" class="sidebar-empty-action" data-empty-action="clear-search">clear the search</button>.
+    `;
+  }
+  _setEmptyStateHtml(html);
+
+  if (els.sidebarRunsEmptyState) {
+    els.sidebarRunsEmptyState.querySelectorAll('[data-empty-action]').forEach((btn) => {
+      const action = btn.getAttribute('data-empty-action');
+      btn.addEventListener('click', () => {
+        if (action === 'clear-search') {
+          if (els.sidebarRunsSearch) els.sidebarRunsSearch.value = '';
+          recentRunsSearch = '';
+          renderRecentRuns();
+        } else if (action === 'expand-hidden') {
+          if (!hiddenRunsExpanded) toggleHiddenRunsList();
+        } else if (action === 'new-workflow') {
+          startNewWorkflow(currentMode);
+        }
+      });
+    });
   }
 }
 
 function renderRecentRuns() {
   if (!els.sidebarRunsList) return;
   els.sidebarRunsList.innerHTML = '';
+
   if (!recentRuns.length) {
-    show(els.sidebarRunsEmpty);
+    // No visible runs. Distinguish "none ever" from "all hidden".
+    if (hiddenRuns.length > 0) {
+      _renderEmptyState({ kind: 'all-hidden' });
+    } else {
+      _renderEmptyState({ kind: 'no-runs' });
+    }
     return;
   }
-  hide(els.sidebarRunsEmpty);
-  recentRuns.forEach((run) => {
+
+  const q = (recentRunsSearch || '').trim().toLowerCase();
+  const filtered = recentRuns.filter((r) => _runMatchesSearch(r, q));
+
+  if (!filtered.length) {
+    _renderEmptyState({ kind: 'no-match', query: recentRunsSearch });
+    return;
+  }
+  _setEmptyStateHtml('');
+
+  filtered.forEach((run) => {
     const li = document.createElement('li');
+    li.className = 'sidebar-run-li';
+    if (run.pinned) li.classList.add('is-pinned');
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'sidebar-list-item';
     if (run.artifact_folder === activeRunFolder) btn.classList.add('is-active');
     btn.setAttribute('data-folder', run.artifact_folder);
-    const labelChannel = run.workflow === 'social'
-      ? (run.channel || 'Custom')
-      : 'Business';
+    const labelChannel = run.workflow === 'social' ? (run.channel || 'Custom') : 'Business';
     const title = prettifyRunName(run.name);
     btn.innerHTML = `
       <span class="sidebar-run-title">${escapeHtml(title)}</span>
       <span class="sidebar-run-meta">${escapeHtml(labelChannel)} · ${escapeHtml(fmtDateShort(run.mtime_iso))}</span>
     `;
     btn.addEventListener('click', () => openProjectFromSidebar(run));
+
+    const actions = document.createElement('span');
+    actions.className = 'sidebar-run-actions';
+
+    const pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'sidebar-pin-btn';
+    pinBtn.setAttribute(
+      'aria-label',
+      run.pinned ? `Unpin ${title}` : `Pin ${title} to top`
+    );
+    pinBtn.setAttribute('title', run.pinned ? 'Unpin from top' : 'Pin to top');
+    pinBtn.textContent = run.pinned ? '★' : '☆';
+    pinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (run.pinned) unpinRun(run);
+      else pinRun(run);
+    });
+
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.className = 'sidebar-hide-btn';
+    hideBtn.setAttribute('aria-label', `Hide ${title} from sidebar`);
+    hideBtn.setAttribute('title', 'Hide from sidebar');
+    hideBtn.textContent = '×';
+    hideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideRunFromSidebar(run);
+    });
+
+    actions.appendChild(pinBtn);
+    actions.appendChild(hideBtn);
     li.appendChild(btn);
+    li.appendChild(actions);
     els.sidebarRunsList.appendChild(li);
   });
+}
+
+function renderHiddenRuns() {
+  if (!els.sidebarHiddenToggle || !els.sidebarHiddenList) return;
+  const count = hiddenRuns.length;
+
+  if (count === 0) {
+    hide(els.sidebarHiddenToggle);
+    hide(els.sidebarHiddenList);
+    hiddenRunsExpanded = false;
+    els.sidebarHiddenToggle.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  show(els.sidebarHiddenToggle);
+  els.sidebarHiddenToggle.textContent =
+    (hiddenRunsExpanded ? 'Hide list (' : 'Show hidden runs (') + count + ')';
+  els.sidebarHiddenToggle.setAttribute('aria-expanded', hiddenRunsExpanded ? 'true' : 'false');
+
+  if (!hiddenRunsExpanded) {
+    hide(els.sidebarHiddenList);
+    return;
+  }
+  show(els.sidebarHiddenList);
+
+  els.sidebarHiddenList.innerHTML = '';
+  hiddenRuns.forEach((run) => {
+    const li = document.createElement('li');
+    li.className = 'sidebar-hidden-item';
+    const labelChannel = run.workflow === 'social' ? (run.channel || 'Custom') : 'Business';
+    const title = prettifyRunName(run.name);
+    li.innerHTML = `
+      <span class="sidebar-hidden-item-text">
+        <span class="sidebar-hidden-item-title">${escapeHtml(title)}</span>
+        <span class="sidebar-hidden-item-meta">${escapeHtml(labelChannel)} · ${escapeHtml(fmtDateShort(run.mtime_iso))}</span>
+      </span>
+    `;
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = 'sidebar-restore-btn';
+    restoreBtn.textContent = 'Restore';
+    restoreBtn.setAttribute('aria-label', `Restore ${title} to the sidebar`);
+    restoreBtn.addEventListener('click', () => restoreRunToSidebar(run));
+    li.appendChild(restoreBtn);
+    els.sidebarHiddenList.appendChild(li);
+  });
+}
+
+function toggleHiddenRunsList() {
+  hiddenRunsExpanded = !hiddenRunsExpanded;
+  renderHiddenRuns();
+}
+
+async function hideRunFromSidebar(run) {
+  if (!run || !run.artifact_folder) return;
+  debugLog('projects.hide.start', { folder: run.artifact_folder });
+  // Optimistic UI: move from recent to hidden immediately, then sync.
+  recentRuns = recentRuns.filter((r) => r.artifact_folder !== run.artifact_folder);
+  hiddenRuns = [run, ...hiddenRuns.filter((r) => r.artifact_folder !== run.artifact_folder)];
+  if (activeRunFolder === run.artifact_folder) activeRunFolder = null;
+  renderRecentRuns();
+  renderHiddenRuns();
+
+  try {
+    const res = await fetch(`${BACKEND}/projects/hide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    debugLog('projects.hide.ok', { folder: run.artifact_folder });
+  } catch (err) {
+    debugLog('projects.hide.failed', { error: err && err.message });
+    // Roll back optimistic move
+    await loadRecentRunsFromBackend();
+  }
+}
+
+function _resortRecentRuns() {
+  // Mirror the backend ordering: pinned first, then newest mtime first.
+  recentRuns.sort((a, b) => (b.mtime_iso || '').localeCompare(a.mtime_iso || ''));
+  recentRuns.sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1));
+}
+
+async function pinRun(run) {
+  if (!run || !run.artifact_folder) return;
+  debugLog('projects.pin.start', { folder: run.artifact_folder });
+  // Optimistic: flip the flag locally + resort + render
+  const target = recentRuns.find((r) => r.artifact_folder === run.artifact_folder);
+  if (target) target.pinned = true;
+  // If it was hidden somehow, drop from hidden too (mutual exclusion).
+  hiddenRuns = hiddenRuns.filter((r) => r.artifact_folder !== run.artifact_folder);
+  _resortRecentRuns();
+  renderRecentRuns();
+  renderHiddenRuns();
+  try {
+    const res = await fetch(`${BACKEND}/projects/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    debugLog('projects.pin.ok', { folder: run.artifact_folder });
+  } catch (err) {
+    debugLog('projects.pin.failed', { error: err && err.message });
+    await loadRecentRunsFromBackend();
+  }
+}
+
+async function unpinRun(run) {
+  if (!run || !run.artifact_folder) return;
+  debugLog('projects.unpin.start', { folder: run.artifact_folder });
+  const target = recentRuns.find((r) => r.artifact_folder === run.artifact_folder);
+  if (target) target.pinned = false;
+  _resortRecentRuns();
+  renderRecentRuns();
+  try {
+    const res = await fetch(`${BACKEND}/projects/unpin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    debugLog('projects.unpin.ok', { folder: run.artifact_folder });
+  } catch (err) {
+    debugLog('projects.unpin.failed', { error: err && err.message });
+    await loadRecentRunsFromBackend();
+  }
+}
+
+async function restoreRunToSidebar(run) {
+  if (!run || !run.artifact_folder) return;
+  debugLog('projects.unhide.start', { folder: run.artifact_folder });
+  // Optimistic UI
+  hiddenRuns = hiddenRuns.filter((r) => r.artifact_folder !== run.artifact_folder);
+  recentRuns = [run, ...recentRuns.filter((r) => r.artifact_folder !== run.artifact_folder)];
+  // Keep order roughly by mtime
+  recentRuns.sort((a, b) => (b.mtime_iso || '').localeCompare(a.mtime_iso || ''));
+  renderRecentRuns();
+  renderHiddenRuns();
+
+  try {
+    const res = await fetch(`${BACKEND}/projects/unhide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    debugLog('projects.unhide.ok', { folder: run.artifact_folder });
+  } catch (err) {
+    debugLog('projects.unhide.failed', { error: err && err.message });
+    await loadRecentRunsFromBackend();
+  }
 }
 
 function recordRecentRunFromResult(result, mode) {
@@ -611,6 +943,60 @@ function showResultPanel(panelId) {
 /*                          RUN SUMMARY                          */
 /* ============================================================ */
 
+function _buildNextActionsHtml(mode) {
+  // Contextual next-step chips. Each chip carries a data-next-action that
+  // the run-summary click delegate maps to an existing handler. No new
+  // model calls, no backend changes — just a friendly nudge toward the
+  // most likely next step.
+  const chips = [];
+  if (mode === 'business') {
+    chips.push({ id: 'review-doc', label: 'Review business document' });
+    if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
+    chips.push({ id: 'review-email', label: 'Review draft email' });
+  } else {
+    chips.push({ id: 'review-script', label: 'Review the script' });
+    chips.push({ id: 'review-caption', label: 'Review the caption' });
+    if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
+  }
+  const buttons = chips
+    .map(
+      (c) =>
+        `<button type="button" class="run-next-chip" data-next-action="${c.id}">${escapeHtml(c.label)}</button>`
+    )
+    .join('');
+  return `
+    <div class="run-next">
+      <span class="run-next-label">Next</span>
+      <div class="run-next-chips">${buttons}</div>
+    </div>
+  `;
+}
+
+function _handleNextAction(action) {
+  switch (action) {
+    case 'review-doc':
+      showResultPanel('business-document-card');
+      break;
+    case 'review-email':
+      showResultPanel('draft-email-card');
+      break;
+    case 'review-script':
+      showResultPanel('social-script-card');
+      break;
+    case 'review-caption':
+      showResultPanel('social-caption-card');
+      break;
+    case 'upload-drive':
+      // Show the Actions panel first so the operator sees the upload status
+      // happen, then trigger the same flow the Actions card button does.
+      showResultPanel('actions-card');
+      uploadArtifactsToDrive();
+      break;
+    default:
+      break;
+  }
+}
+
 function updateRunSummary(mode, result) {
   if (!els.runSummary) return;
   let html = '';
@@ -631,6 +1017,7 @@ function updateRunSummary(mode, result) {
         </div>
       </div>
       ${taskPreview ? `<div class="run-summary-task">${escapeHtml(taskPreview)}${task.length > 360 ? '…' : ''}</div>` : ''}
+      ${_buildNextActionsHtml('business')}
       <div class="run-summary-folder">${escapeHtml(folder)}</div>
     `;
     updateWorkspaceHeader('Business Workflow', folderTail(folder));
@@ -658,6 +1045,7 @@ function updateRunSummary(mode, result) {
         </div>
       </div>
       ${topicPreview ? `<div class="run-summary-task">${escapeHtml(topicPreview)}${(meta.topic_notes || '').length > 360 ? '…' : ''}</div>` : ''}
+      ${_buildNextActionsHtml('social')}
       <div class="run-summary-folder">${escapeHtml(folder)}</div>
     `;
     updateWorkspaceHeader('Social Media Production', meta.channel || folderTail(folder));
@@ -670,6 +1058,11 @@ function updateRunSummary(mode, result) {
   if (editBtn) editBtn.addEventListener('click', () => setWorkspaceView('input'));
   if (rerunBtn) rerunBtn.addEventListener('click', () => (mode === 'social' ? runSocialWorkflow() : runWorkflow()));
   if (newBtn) newBtn.addEventListener('click', () => startNewWorkflow(mode));
+
+  // Delegated handler for the next-action chips.
+  els.runSummary.querySelectorAll('[data-next-action]').forEach((btn) => {
+    btn.addEventListener('click', () => _handleNextAction(btn.getAttribute('data-next-action')));
+  });
 }
 
 function firstNonEmptyLine(s) {
@@ -924,9 +1317,45 @@ function setActionsStatus(text, kind) { writeStatus(els.actionsStatus, text, kin
 function resetActionsStatus() {
   setActionsStatus('');
   document.querySelectorAll('.card-action-status').forEach((el) => writeStatus(el, ''));
+  hideDriveSuccessCard();
+}
+
+function hideDriveSuccessCard() {
+  if (els.driveSuccessCard) els.driveSuccessCard.classList.add('hidden');
   if (els.actionDriveLink) {
-    els.actionDriveLink.classList.add('hidden');
     els.actionDriveLink.removeAttribute('href');
+  }
+  if (els.driveSuccessCopyStatus) els.driveSuccessCopyStatus.textContent = '';
+}
+
+function showDriveSuccessCard(data) {
+  if (!els.driveSuccessCard) return;
+  const count = (data.uploaded_files || []).length;
+  if (els.driveSuccessCount) {
+    els.driveSuccessCount.textContent = `${count} file${count === 1 ? '' : 's'} uploaded`;
+  }
+  if (els.driveSuccessPath) {
+    const path = data.drive_path || data.drive_folder_name || '';
+    els.driveSuccessPath.textContent = path;
+    els.driveSuccessPath.title = path;
+  }
+  if (els.actionDriveLink && data.drive_folder_url) {
+    els.actionDriveLink.href = data.drive_folder_url;
+  }
+  if (els.driveSuccessCopyStatus) els.driveSuccessCopyStatus.textContent = '';
+  els.driveSuccessCard.classList.remove('hidden');
+}
+
+async function copyDriveLink() {
+  if (!els.actionDriveLink) return;
+  const url = els.actionDriveLink.href;
+  if (!url || url === '#') return;
+  const ok = await copyToClipboard(url);
+  if (els.driveSuccessCopyStatus) {
+    els.driveSuccessCopyStatus.textContent = ok ? 'Link copied.' : 'Copy failed.';
+    setTimeout(() => {
+      if (els.driveSuccessCopyStatus) els.driveSuccessCopyStatus.textContent = '';
+    }, 1600);
   }
 }
 
@@ -1333,7 +1762,7 @@ async function uploadArtifactsToDrive() {
   }
   const ok = window.confirm("Upload this workflow's artifact folder to your connected Google Drive?");
   if (!ok) return;
-  if (els.actionDriveLink) { els.actionDriveLink.classList.add('hidden'); els.actionDriveLink.removeAttribute('href'); }
+  hideDriveSuccessCard();
   setActionsStatus('Uploading to Google Drive…');
   if (els.actionUploadDrive) els.actionUploadDrive.disabled = true;
   try {
@@ -1347,16 +1776,10 @@ async function uploadArtifactsToDrive() {
       const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
-    const count = (data.uploaded_files || []).length;
-    const where = data.drive_path
-      ? `Uploaded ${count} file${count === 1 ? '' : 's'} to Google Drive: ${data.drive_path}`
-      : `Uploaded ${count} file${count === 1 ? '' : 's'} to Google Drive in folder "${data.drive_folder_name}".`;
-    setActionsStatus(where, 'ok');
-    if (els.actionDriveLink && data.drive_folder_url) {
-      els.actionDriveLink.href = data.drive_folder_url;
-      els.actionDriveLink.textContent = 'Open Drive folder';
-      els.actionDriveLink.classList.remove('hidden');
-    }
+    // Clear the in-progress status line; the rich card carries the full
+    // success state from here on.
+    setActionsStatus('');
+    showDriveSuccessCard(data);
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
@@ -1436,6 +1859,26 @@ function openSettings() {
     if (first && typeof first.focus === 'function') first.focus();
   });
   loadGoogleStatus();
+}
+
+function openTips() {
+  if (!els.tipsModal) return;
+  els.tipsModal.classList.remove('hidden');
+  els.tipsModal.setAttribute('aria-hidden', 'false');
+  document.addEventListener('keydown', handleTipsKeydown);
+  if (els.tipsDoneBtn) els.tipsDoneBtn.focus();
+}
+
+function closeTips() {
+  if (!els.tipsModal) return;
+  els.tipsModal.classList.add('hidden');
+  els.tipsModal.setAttribute('aria-hidden', 'true');
+  document.removeEventListener('keydown', handleTipsKeydown);
+  if (els.sidebarTipsBtn) els.sidebarTipsBtn.focus();
+}
+
+function handleTipsKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeTips(); }
 }
 
 function closeSettings() {
@@ -1701,13 +2144,37 @@ if (els.workspaceBackBtn) {
   els.workspaceBackBtn.addEventListener('click', goBackToWelcome);
 }
 
+// Sidebar "Show hidden runs" disclosure toggle
+if (els.sidebarHiddenToggle) {
+  els.sidebarHiddenToggle.addEventListener('click', toggleHiddenRunsList);
+}
+
+// Sidebar Recent runs search — pure client-side filter; no backend call.
+if (els.sidebarRunsSearch) {
+  els.sidebarRunsSearch.addEventListener('input', () => {
+    recentRunsSearch = els.sidebarRunsSearch.value || '';
+    renderRecentRuns();
+  });
+}
+
+// Welcome tip dismiss (persistent via localStorage)
+if (els.welcomeTipDismiss) {
+  els.welcomeTipDismiss.addEventListener('click', dismissWelcomeTip);
+}
+
 // New Workflow button
 if (els.sidebarNewWorkflowBtn) {
   els.sidebarNewWorkflowBtn.addEventListener('click', () => startNewWorkflow(currentMode));
 }
 
-// Settings button
+// Settings + Quick tips buttons
 if (els.sidebarSettingsBtn) els.sidebarSettingsBtn.addEventListener('click', openSettings);
+if (els.sidebarTipsBtn) els.sidebarTipsBtn.addEventListener('click', openTips);
+if (els.tipsCloseBtn) els.tipsCloseBtn.addEventListener('click', closeTips);
+if (els.tipsDoneBtn) els.tipsDoneBtn.addEventListener('click', closeTips);
+if (els.tipsModal) {
+  els.tipsModal.addEventListener('click', (e) => { if (e.target === els.tipsModal) closeTips(); });
+}
 if (els.settingsCloseBtn) els.settingsCloseBtn.addEventListener('click', closeSettings);
 if (els.settingsCancelBtn) els.settingsCancelBtn.addEventListener('click', closeSettings);
 if (els.settingsForm) els.settingsForm.addEventListener('submit', saveSettings);
@@ -1743,6 +2210,7 @@ if (els.actionOpenFolder) els.actionOpenFolder.addEventListener('click', openArt
 if (els.actionCopyFolder) els.actionCopyFolder.addEventListener('click', copyArtifactFolderAction);
 if (els.actionExportZip) els.actionExportZip.addEventListener('click', exportZipAction);
 if (els.actionUploadDrive) els.actionUploadDrive.addEventListener('click', uploadArtifactsToDrive);
+if (els.driveSuccessCopy) els.driveSuccessCopy.addEventListener('click', copyDriveLink);
 
 // Google Drive (in Settings modal)
 if (els.googleConnectBtn) els.googleConnectBtn.addEventListener('click', connectGoogleDrive);

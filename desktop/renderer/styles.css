@@ -197,6 +197,21 @@ body {
   border-color: transparent;
 }
 
+/* Secondary sidebar button (Quick tips) — lower visual weight than primary. */
+.sidebar-btn-secondary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-muted);
+  margin-bottom: 0.35rem;
+  text-align: center;
+}
+
+.sidebar-btn-secondary:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text-strong);
+  border-color: transparent;
+}
+
 .sidebar-mode-group {
   display: flex;
   flex-direction: column;
@@ -324,6 +339,229 @@ body {
   font-size: var(--fs-xs);
   color: var(--color-muted-soft);
   padding: var(--space-2);
+  line-height: 1.5;
+}
+
+/* Inline action links inside an empty state ("Show hidden runs", "Clear search") */
+.sidebar-empty-action {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sidebar-empty-action:hover { color: var(--color-accent-deep); }
+
+.sidebar-empty-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-radius: 3px;
+}
+
+/* Search input above the Recent runs list */
+.sidebar-runs-search {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.6rem;
+  margin-bottom: 0.3rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.sidebar-runs-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.sidebar-runs-search::placeholder {
+  color: var(--color-muted-soft);
+}
+
+/* Hide button on each Recent run item. Tucked top-right; appears on
+   hover/focus so the row stays clean. */
+.sidebar-run-li {
+  position: relative;
+  display: block;
+}
+
+/* Hover-revealed actions in the top-right of each run row. Pin first, then hide. */
+.sidebar-run-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-pin-btn,
+.sidebar-hide-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-muted-soft);
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.sidebar-run-li:hover .sidebar-pin-btn,
+.sidebar-run-li:hover .sidebar-hide-btn,
+.sidebar-pin-btn:focus-visible,
+.sidebar-hide-btn:focus-visible {
+  opacity: 1;
+}
+
+/* A pinned item shows its star always so the user can see at a glance which
+   rows are pinned. The button still toggles to unpin on click. */
+.sidebar-run-li.is-pinned .sidebar-pin-btn {
+  opacity: 1;
+  color: var(--color-accent);
+}
+
+.sidebar-pin-btn:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  border-color: #bfdbfe;
+}
+
+.sidebar-hide-btn:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  border-color: var(--color-error-border);
+}
+
+.sidebar-pin-btn:focus-visible,
+.sidebar-hide-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+/* Active rows that are ALSO pinned still get the active blue treatment;
+   the pin star tints toward white to stay visible on the active background. */
+.sidebar-run-li .sidebar-list-item.is-active ~ .sidebar-run-actions .sidebar-pin-btn,
+.sidebar-run-li.is-pinned .sidebar-list-item.is-active ~ .sidebar-run-actions .sidebar-pin-btn {
+  /* no-op, but kept for clarity. The pin button stays accent-blue. */
+}
+
+/* Make room on the right for the action buttons so the title text doesn't
+   collide with the icons even before hover reveals them. */
+.sidebar-run-li .sidebar-list-item {
+  padding-right: 3rem;
+}
+
+/* Disclosure for hidden runs. Lives just below the recent-runs list. */
+.sidebar-hidden-toggle {
+  margin-top: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--color-muted-soft);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.sidebar-hidden-toggle:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text-strong);
+}
+
+.sidebar-hidden-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.sidebar-hidden-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-hidden-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-hidden-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.sidebar-hidden-item-title {
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-hidden-item-meta {
+  font-size: 0.72rem;
+  color: var(--color-muted-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-restore-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.sidebar-restore-btn:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent);
+}
+
+.sidebar-restore-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .sidebar-runs {
@@ -478,6 +716,62 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* Dismissible welcome tip (first-launch onboarding) */
+.welcome-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  text-align: left;
+  background: var(--color-accent-soft);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 auto var(--space-3);
+  max-width: 760px;
+  box-shadow: var(--shadow-soft);
+}
+
+.welcome-tip-icon {
+  font-size: 1.25rem;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
+
+.welcome-tip-body {
+  flex: 1;
+  font-size: var(--fs-sm);
+  color: var(--color-accent-deep);
+  line-height: 1.5;
+}
+
+.welcome-tip-body strong {
+  color: var(--color-text-strong);
+}
+
+.welcome-tip-dismiss {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--color-accent-deep);
+  background: var(--color-surface);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.welcome-tip-dismiss:hover {
+  background: #c7dbfd;
+  border-color: var(--color-accent);
+}
+
+.welcome-tip-dismiss:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 /* ---------- Welcome state ---------- */
@@ -668,6 +962,58 @@ body {
   border-radius: var(--radius-sm);
   padding: 0.4rem 0.6rem;
   word-break: break-all;
+}
+
+/* "Next" suggested actions inside the Current Run Summary */
+.run-next {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-accent-soft);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+}
+
+.run-next-label {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-accent-deep);
+  flex-shrink: 0;
+}
+
+.run-next-chips {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.run-next-chip {
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent-deep);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.run-next-chip:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.run-next-chip:active { transform: translateY(1px); }
+
+.run-next-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.25);
 }
 
 .run-summary-task {
@@ -1073,22 +1419,89 @@ body {
 .audio-status.is-finished { color: var(--color-success); font-weight: 600; }
 .audio-status.is-empty { color: var(--color-error-text); font-weight: 600; }
 
-.action-drive-link {
-  display: inline-block;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--color-accent);
-  text-decoration: none;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--color-accent-soft);
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-soft);
-  align-self: flex-start;
+/* Rich Drive upload success card. Replaces the old single anchor pill —
+   shown only after a confirmed successful upload, then cleared on the
+   next workflow run or new upload attempt. */
+.drive-success-card {
+  background: var(--color-success-soft);
+  border: 1px solid #a7f3d0;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
-.action-drive-link:hover { background: #c7dbfd; text-decoration: underline; }
-.action-drive-link:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
+
+.drive-success-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.drive-success-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-success);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.18);
+}
+
+.drive-success-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.drive-success-title {
+  font-weight: 650;
+  color: var(--color-success);
+  font-size: var(--fs-sm);
+  letter-spacing: -0.005em;
+}
+
+.drive-success-meta {
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+}
+
+.drive-success-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-xs);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.drive-success-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+/* Make the existing #action-drive-link anchor look like a button when
+   inside the new success card (it's an <a> but we want btn-primary look). */
+.drive-success-actions .btn-primary {
+  text-decoration: none;
+}
+.drive-success-actions .btn-primary:hover { text-decoration: none; }
+
+.drive-success-copy-status {
+  font-size: var(--fs-xs);
+  color: var(--color-success);
+  font-weight: 600;
 }
 
 /* Approve & send email + review markers */
@@ -1148,6 +1561,44 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Narrower variant used by the Quick tips modal. */
+.modal-card-narrow {
+  max-width: 460px;
+}
+
+.tips-body { gap: var(--space-3); }
+
+.tips-list {
+  list-style: decimal;
+  padding-left: 1.4rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.tips-list strong { color: var(--color-text-strong); }
+.tips-list em { font-style: normal; color: var(--color-accent-deep); font-weight: 600; }
+
+.tips-list code {
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.tips-foot {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  line-height: 1.5;
 }
 
 .modal-head {
