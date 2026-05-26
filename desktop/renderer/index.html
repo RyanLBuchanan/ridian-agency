@@ -796,6 +796,24 @@
               creates. Token + client secret stay on this machine and are
               git-ignored.
             </span>
+
+            <label class="field">
+              <span class="field-label">Google Drive root folder ID</span>
+              <input
+                name="google_drive_root_folder_id"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="e.g. 1AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+              />
+              <span class="field-hint">
+                Optional. Paste the folder ID from the Drive URL for your
+                existing Ridian Technologies folder. Example:
+                <code>drive.google.com/drive/folders/FOLDER_ID</code>.
+                Use this to prevent Ridian Agency from creating a duplicate
+                top-level folder.
+              </span>
+            </label>
           </fieldset>
 
           <fieldset class="form-group">

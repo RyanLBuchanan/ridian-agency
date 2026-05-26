@@ -357,9 +357,45 @@ How the destination is chosen for each upload:
    duplicates. (Limitation: with the narrow `drive.file` scope the app
    can only see folders it itself created. If you create
    "Ridian Technologies" by hand in your Drive, the app cannot see it
-   and will create its own. See the Limitations section below.)
+   and will create its own — unless you point it at the existing folder
+   via the optional setting described below.)
 4. **Existing uploads at the Drive root from earlier versions are left
    alone.** Only new uploads use the new hierarchy.
+
+### Reusing an existing Drive folder as the root (optional)
+
+If you already have a "Ridian Technologies" folder in My Drive and don't
+want Ridian Agency to create a second one, point the app at the existing
+folder via **Settings → Google Workspace → Google Drive root folder ID**.
+
+How to get the folder ID:
+
+1. Open the desired folder in Google Drive.
+2. Copy the ID from the URL after `/folders/`. For
+   `drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz123456`
+   the ID is `1AbCdEfGhIjKlMnOpQrStUvWxYz123456`.
+3. Paste it into **Settings → Google Workspace → Google Drive root
+   folder ID**. The Settings panel also accepts a pasted full URL — the
+   folder ID is extracted automatically.
+4. Click **Save settings**.
+
+When configured, uploads land at:
+
+```text
+<your existing folder>/
+  Ridian Agency/
+    Business Workflows/
+    Social Media/...
+```
+
+Leave the field blank to restore the default behavior (the app creates
+and reuses its own top-level `Ridian Technologies` folder).
+
+If the folder ID is wrong or the configured folder is inaccessible, the
+upload fails with a clear message ("The configured Google Drive root
+folder could not be accessed…") instead of silently creating duplicates.
+The value lives in `apps/api/local_settings.json` next to other local
+preferences and is git-ignored.
 
 The upload success message in the desktop window shows the full path so
 you know exactly where the run landed, for example:

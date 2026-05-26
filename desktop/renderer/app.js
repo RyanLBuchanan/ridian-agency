@@ -197,6 +197,7 @@ const SOCIAL_FIELD_MAP = {
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
   'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
+  'google_drive_root_folder_id',
 ];
 const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
 

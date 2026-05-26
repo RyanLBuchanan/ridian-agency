@@ -350,6 +350,28 @@ is chosen automatically based on the artifact files and the `Channel:`
 line in `task.txt`. Older uploads from before this update remain at the
 Drive root — nothing is moved automatically.
 
+### Optional: reuse an existing Drive folder as the root
+
+The `drive.file` scope only lets the app see folders it itself created,
+so by default it creates a fresh `Ridian Technologies` folder. If you
+already have one and don't want a duplicate, point the app at the
+existing folder:
+
+1. Open the desired folder in Google Drive.
+2. Copy the ID from the URL after `/folders/`. For
+   `drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz123456`
+   the ID is `1AbCdEfGhIjKlMnOpQrStUvWxYz123456`.
+3. In the app, open **Settings → Google Workspace → Google Drive root
+   folder ID** and paste the ID (a full URL also works — the ID is
+   extracted automatically).
+4. Click **Save settings**.
+
+From then on, uploads land at `<your folder>/Ridian Agency/...` instead
+of creating a new top-level folder. Leave the field blank to restore
+the default behavior. If the ID is wrong or the folder is inaccessible
+the upload fails with a clear message rather than silently creating
+duplicates.
+
 ### Disconnect
 
 Settings → Google Workspace → **Disconnect Google Drive**. The token

@@ -28,6 +28,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from .artifact_service import outputs_dir
+from .settings_service import load_settings
 
 log = logging.getLogger("ridian.google")
 
@@ -268,6 +269,10 @@ _BUSINESS_MARKERS = (
 # Root path every upload lands under. Concrete subfolders are appended per workflow.
 _DRIVE_ROOT_PATH = ["Ridian Technologies", "Ridian Agency"]
 
+# When the operator configures an existing Drive folder as the root, we treat
+# that folder as the "Ridian Technologies" parent and skip recreating it.
+_CONFIGURED_ROOT_SUBPATH = ["Ridian Agency"]
+
 
 def _read_channel_from_task(folder: Path) -> str:
     """Pull the ``Channel:`` line out of task.txt if present. Empty otherwise."""
@@ -385,18 +390,69 @@ def find_or_create_folder(service, name: str, parent_id: Optional[str] = None) -
     return created["id"]
 
 
-def ensure_drive_path(service, path_parts: list[str]) -> tuple[Optional[str], list[str]]:
+def ensure_drive_path(
+    service,
+    path_parts: list[str],
+    *,
+    root_parent_id: Optional[str] = None,
+) -> tuple[Optional[str], list[str]]:
     """Walk ``path_parts`` top-down, creating missing folders.
 
-    Returns ``(final_parent_id, names_actually_used)``. If ``path_parts`` is
-    empty the final parent is None (i.e. My Drive root).
+    Returns ``(final_parent_id, names_actually_used)``. If ``root_parent_id``
+    is supplied the walk starts inside that folder; otherwise it starts at My
+    Drive root.
     """
-    parent_id: Optional[str] = None
+    parent_id: Optional[str] = root_parent_id
     names: list[str] = []
     for name in path_parts:
         parent_id = find_or_create_folder(service, name, parent_id)
         names.append(name)
     return parent_id, names
+
+
+def _normalize_root_folder_id(raw: Optional[str]) -> str:
+    """Return a bare folder ID from the operator's settings value.
+
+    Accepts either a raw ID or a pasted Drive folder URL. Returns "" when the
+    input is blank.
+    """
+    if not raw:
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    m = re.search(r"/folders/([A-Za-z0-9_\-]+)", s)
+    if m:
+        return m.group(1)
+    return s
+
+
+def _get_configured_root_id() -> str:
+    return _normalize_root_folder_id(
+        load_settings().get("google_drive_root_folder_id")
+    )
+
+
+def _lookup_root_folder_name(service, folder_id: str) -> Optional[str]:
+    """Best-effort name lookup for the configured root folder.
+
+    With the narrow ``drive.file`` scope the app generally cannot read folders
+    it did not create, so this often fails silently. Returns ``None`` on any
+    failure so the caller can fall back to a generic display label.
+    """
+    try:
+        meta = (
+            service.files()
+            .get(fileId=folder_id, fields="id, name, mimeType, trashed")
+            .execute()
+        )
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", "?")
+        log.info("google.root_lookup_unavailable status=%s", status)
+        return None
+    if meta.get("mimeType") != FOLDER_MIME or meta.get("trashed"):
+        return None
+    return meta.get("name")
 
 
 def upload_artifact_folder(folder_str: str) -> dict:
@@ -424,7 +480,33 @@ def upload_artifact_folder(folder_str: str) -> dict:
     # repeated uploads to the same category reuse the same folders rather
     # than spawning duplicates.
     drive_path_parts = infer_drive_destination(folder)
-    parent_id, parent_names = ensure_drive_path(service, drive_path_parts)
+
+    configured_root_id = _get_configured_root_id()
+    if configured_root_id:
+        # Treat the configured folder as the "Ridian Technologies" root and
+        # walk from "Ridian Agency" downward inside it.
+        if drive_path_parts and drive_path_parts[0] == "Ridian Technologies":
+            path_under_root = drive_path_parts[1:]
+        else:
+            path_under_root = list(drive_path_parts)
+        root_display = (
+            _lookup_root_folder_name(service, configured_root_id)
+            or "Ridian Technologies"
+        )
+        try:
+            parent_id, child_names = ensure_drive_path(
+                service, path_under_root, root_parent_id=configured_root_id
+            )
+        except GoogleDriveError as exc:
+            raise GoogleDriveError(
+                "The configured Google Drive root folder could not be "
+                "accessed. Check the folder ID in Settings (Google Workspace "
+                "→ Google Drive root folder ID) or reconnect Google Drive.",
+                status=400,
+            ) from exc
+        parent_names = [root_display] + child_names
+    else:
+        parent_id, parent_names = ensure_drive_path(service, drive_path_parts)
 
     # Create the per-run folder INSIDE the resolved parent.
     try:
@@ -443,6 +525,13 @@ def upload_artifact_folder(folder_str: str) -> dict:
     except HttpError as exc:
         status = getattr(getattr(exc, "resp", None), "status", "?")
         log.warning("google.folder_create_failed status=%s", status)
+        if configured_root_id and status in (400, 403, 404):
+            raise GoogleDriveError(
+                "The configured Google Drive root folder could not be "
+                "accessed. Check the folder ID in Settings (Google Workspace "
+                "→ Google Drive root folder ID) or reconnect Google Drive.",
+                status=400,
+            ) from exc
         raise GoogleDriveError(
             f"Drive folder create failed (HTTP {status}).", status=502
         ) from exc
