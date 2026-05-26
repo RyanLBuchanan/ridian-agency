@@ -59,77 +59,123 @@ const PROMPT_CATEGORIES = [
   },
 ];
 
+// Open Gulf content operating system — platform-first prompt library.
+//
+// Tabs are organized by PLATFORM (not by brand) so the operator chooses
+// where the content lives first, then the prompt encodes the platform's
+// role in the Open Gulf ecosystem:
+//   TikTok        = The Spark         (curiosity, "wait, what?")
+//   YouTube       = The Heart         (depth, teaching, trust)
+//   Instagram     = The Face          (visual identity, warm Gulf Coast futurism)
+//   LinkedIn      = The Brain         (professional authority, AI education credibility)
+//   X / Twitter   = The Signal Stream (rapid ideas, sharp observations)
+// Plus two cross-platform scenario tabs (Existing Footage, Weekly Planning).
+//
+// Each prompt pre-fills the social form. The channel value drives Drive
+// folder routing in google_drive_service.map_channel_to_path. Platforms
+// without dedicated routing rules (Instagram, X / Twitter) currently use
+// channel='Custom' and land under Social Media / Custom — see the
+// follow-up note in the deliverable summary.
 const SOCIAL_PROMPT_CATEGORIES = [
   {
-    id: 'open-gulf-tiktok', label: 'Open Gulf TikTok',
+    id: 'tiktok', label: 'TikTok',
     prompts: [
-      { text: 'Create a warm, cinematic TikTok explaining one practical AI productivity idea for everyday professionals.',
-        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Practical AI productivity idea for everyday professionals. Cinematic, warm tone.' } },
-      { text: 'Create a short Open Gulf TikTok about how AI is changing education without sounding alarmist or hype-driven.',
-        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'How AI is changing education. Grounded, calm, non-alarmist. Educator-friendly.' } },
-      { text: 'Create a reflective TikTok script about why people feel overwhelmed by AI and how to start calmly.',
-        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Why people feel overwhelmed by AI, and a calm starting point. Reflective.' } },
+      { text: 'Create a 20–30 second Open Gulf TikTok that sparks curiosity about one unconventional AI strategy.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video',
+          topic_notes: 'Open Gulf TikTok = THE SPARK. 20–30 seconds. One hook, one reframe, one example, one redirect to YouTube. Spark curiosity about one unconventional AI strategy — flip a common assumption.' } },
+      { text: 'Create a TikTok hook and script showing why people should stop treating ChatGPT like Google.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video',
+          topic_notes: 'Open Gulf TikTok = THE SPARK. Hook + script: why people should stop treating ChatGPT like Google. Make the contrast vivid. End with a soft redirect to the YouTube deep-dive.' } },
+      { text: 'Create a short TikTok that uses one clear AI insight, one example, and one redirect to YouTube.',
+        fields: { channel: 'Open Gulf TikTok', starting_point: 'I have a topic', content_format: 'Short-form video',
+          topic_notes: 'Open Gulf TikTok = THE SPARK. Structure: one clear AI insight + one concrete example + one redirect to YouTube. Get them curious enough to click through.' } },
     ],
   },
   {
-    id: 'open-gulf-youtube', label: 'Open Gulf YouTube',
+    id: 'youtube', label: 'YouTube',
     prompts: [
-      { text: 'Create a long-form YouTube outline for Open Gulf explaining practical AI productivity for beginners.',
-        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'Practical AI productivity for beginners. Long-form outline.' } },
-      { text: 'Create a YouTube tutorial structure showing how a small business owner can use AI to save time.',
-        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'Tutorial: how a small business owner can use AI to save time. Step-by-step.' } },
-      { text: 'Create a long-form video plan about the future of learning, AI tutors, and human-centered education.',
-        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video', topic_notes: 'The future of learning, AI tutors, and human-centered education. Long-form plan.' } },
+      { text: 'Create a YouTube episode outline that expands a TikTok idea into a deeper Open Gulf teaching segment.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video',
+          topic_notes: 'Open Gulf YouTube = THE HEART. Expand a TikTok idea into a 6–10 minute teaching segment. Trust, depth, teaching, philosophy, storytelling, human connection. Warm, educator-friendly, reflective.' } },
+      { text: 'Create a 6–10 minute YouTube script about using AI as a strategic thinking partner.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video',
+          topic_notes: 'Open Gulf YouTube = THE HEART. 6–10 minute script: using AI as a strategic thinking partner (not a search box). Cover the mindset shift, practical examples, one exercise the viewer can do today.' } },
+      { text: 'Create a YouTube breakdown that teaches role, context, goal, output format, guardrails, and clarifying questions.',
+        fields: { channel: 'Open Gulf YouTube', starting_point: 'I have a topic', content_format: 'Long-form YouTube video',
+          topic_notes: 'Open Gulf YouTube = THE HEART. Teaching breakdown of the six-part prompt structure: role, context, goal, output format, guardrails, clarifying questions. Worked example for each part. Depth + warmth.' } },
     ],
   },
   {
-    id: 'buns-tiktok', label: 'Buns TikTok',
+    id: 'instagram', label: 'Instagram',
     prompts: [
-      { text: 'Create a funny TikTok concept for Buns, a black tuxedo cat with dramatic, charming, mischievous energy.',
-        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Funny TikTok concept for Buns, a black tuxedo cat. Dramatic, charming, mischievous energy.' } },
-      { text: 'Create a cozy, wholesome Buns TikTok script based on a cat quietly watching the world from a window.',
-        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Cozy, wholesome Buns TikTok. Quietly watching the world from a window.' } },
-      { text: 'Create a playful "Buns as tiny CEO" TikTok with voiceover, captions, and edit notes.',
-        fields: { channel: 'Buns TikTok', starting_point: 'I have a topic', content_format: 'Short-form video', topic_notes: 'Buns as tiny CEO. Playful voiceover, captions, edit notes.' } },
+      { text: 'Create an Instagram Reel concept using warm Gulf Coast futurism visuals to explain one AI idea.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Short-form video',
+          topic_notes: 'Open Gulf Instagram Reel concept. Platform: Instagram. Open Gulf Instagram = THE FACE — visual identity, aesthetic presence, emotional tone. Warm Gulf Coast futurism (teal + amber palette, sunsets, ocean waves, calm technology). Include shot list, on-screen captions, voiceover sketch, IG caption (~150–300 chars), 5–8 hashtags.' } },
+      { text: 'Create an Instagram carousel that turns an Open Gulf AI insight into 5 simple visual slides.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf Instagram carousel: turn one AI insight into 5 simple, visually clean slides. Platform: Instagram. Open Gulf Instagram = THE FACE. Provide slide-by-slide copy + visual direction (Gulf Coast palette: teal + amber). Include the post caption, hashtags, and a suggested first comment.' } },
+      { text: 'Create a reflective Instagram caption about learning to use AI with less fear and more curiosity.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf Instagram caption (single image post). Platform: Instagram. Open Gulf Instagram = THE FACE. Reflective: learning to use AI with less fear and more curiosity. Photo concept + caption (~150–300 chars suited for IG) + 3–6 hashtags + alt text. Warm, human-centered, calm.' } },
     ],
   },
   {
     id: 'linkedin', label: 'LinkedIn',
     prompts: [
-      { text: 'Create a LinkedIn post for Open Gulf explaining one practical AI productivity habit for entrepreneurs and professionals.',
-        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'One practical AI productivity habit for entrepreneurs and professionals. Warm, reflective, educator-friendly. Open Gulf voice.' } },
-      { text: 'Create a founder-led LinkedIn post about building AI workflows in public without sounding hype-driven.',
-        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Founder-led reflection on building AI workflows in public. Honest, grounded, non-hype. Open Gulf voice.' } },
-      { text: 'Create a LinkedIn post for Ridian Technologies explaining how small businesses can use AI to reduce repetitive admin work.',
-        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'How small businesses can use AI to reduce repetitive admin work. Practical, useful, entrepreneur-friendly. Not salesy. Ridian Technologies voice.' } },
-      { text: 'Create a thoughtful LinkedIn post about AI, education, and the future of work in a warm, human-centered tone.',
-        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'AI, education, and the future of work. Warm, human-centered, reflective. Open Gulf voice.' } },
-      { text: 'Create a LinkedIn carousel-style outline about "5 practical ways entrepreneurs can use AI this week."',
-        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Carousel-style outline: "5 practical ways entrepreneurs can use AI this week." One concrete, repeatable action per slide. Ridian Technologies voice.' } },
-      { text: 'Create a concise LinkedIn post promoting a practical AI productivity workshop for local business owners.',
-        fields: { channel: 'Ridian Technologies LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only', topic_notes: 'Concise LinkedIn post promoting a practical AI productivity workshop for local business owners. Soft business-development angle. Ridian Technologies voice.' } },
+      { text: 'Create a professional LinkedIn post about why educators and professionals should treat AI as a thinking partner, not a search box.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf LinkedIn = THE BRAIN. Professional authority, AI education credibility. Post: why educators and professionals should treat AI as a thinking partner, not a search box. Concrete, useful, non-hype.' } },
+      { text: 'Create a LinkedIn thought-leadership post connecting prompt strategy to the future of learning and work.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf LinkedIn = THE BRAIN. Thought-leadership: connect prompt strategy to the future of learning and work. Position Ryan as a credible, calm voice on AI education. Avoid AI-bro tone.' } },
+      { text: 'Create a concise LinkedIn post that introduces Open Gulf as a human-centered AI education media project.',
+        fields: { channel: 'Open Gulf LinkedIn', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf LinkedIn = THE BRAIN. Concise introduction of Open Gulf as a human-centered AI education media project. 900–1500 chars. Mission (warm + reflective + practical), audience (educators, entrepreneurs, professionals), soft CTA.' } },
+    ],
+  },
+  {
+    id: 'x-twitter', label: 'X / Twitter',
+    prompts: [
+      { text: 'Create 10 short Open Gulf posts from one AI insight.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X. 10 short posts (each ≤ 280 chars) all derived from ONE AI insight. Each post stands alone. Number them. Open Gulf voice — rapid ideas, sharp observations, philosophical questions, thinking out loud.' } },
+      { text: 'Create a sharp X thread about why better AI conversations start with better context.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X (thread). 6–10 tweets: why better AI conversations start with better context. Open Gulf voice — thoughtful, sharp, not preachy. Strong first tweet that earns the click-through. End with a CTA.' } },
+      { text: 'Create short idea fragments about AI, education, creativity, and the future of work.',
+        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+          topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X. 8–12 short idea fragments suitable for live testing. Topics: AI, education, creativity, future of work. Reflective, warm, philosophical. Each ≤ 280 chars. Number them.' } },
     ],
   },
   {
     id: 'existing-footage', label: 'Existing Footage',
     prompts: [
-      { text: 'Turn this existing clip description into a TikTok post package with hook, text overlays, voiceover, caption, and hashtags.',
-        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video', media_notes: '(Describe your existing clip here — visuals, what is on screen, mood, any audio.)' } },
-      { text: 'Analyze this thumbnail or video description and propose the best short-form angle.',
-        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Repurposed clip', media_notes: '(Describe the thumbnail or video — composition, subject, mood.)' } },
-      { text: 'Create a social post package from existing footage without generating new topic ideas.',
-        fields: { starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video', media_notes: '(Describe the footage in detail. The agent will not invent new topics — it works with what you have.)' } },
+      { text: 'Turn this recorded clip into platform-specific outputs for TikTok, YouTube Shorts, Instagram, LinkedIn, and X / Twitter.',
+        fields: { channel: 'Custom', starting_point: 'I have existing footage or a thumbnail', content_format: 'Repurposed clip',
+          media_notes: '(Describe your recorded clip here — what is on screen, what you said, the mood, the length, any on-screen text.)',
+          topic_notes: 'Repurpose ONE recorded clip into platform-specific outputs for all five Open Gulf platforms: TikTok (the spark), YouTube Shorts (the heart, compressed), Instagram (the face), LinkedIn (the brain), X / Twitter (the signal stream). Adapt — do not duplicate. Each platform gets its own hook, copy, caption, and posting checklist.' } },
+      { text: 'Analyze this footage description and create the best Open Gulf short-form post package for the most suitable platform.',
+        fields: { channel: 'Custom', starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video',
+          media_notes: '(Describe the footage in detail — composition, subject, mood, length, any audio.)',
+          topic_notes: 'Analyze the footage. Recommend ONE best-fit Open Gulf platform (TikTok / Instagram Reel / YouTube Short / LinkedIn video) and explain in one sentence why. Then produce a complete platform-shaped post package for that platform only.' } },
+      { text: 'Repurpose this existing video into a hook, script, caption, hashtags, and posting checklist.',
+        fields: { channel: 'Custom', starting_point: 'I have existing footage or a thumbnail', content_format: 'Short-form video',
+          media_notes: '(Describe your existing video — visuals, what was said, mood, length.)',
+          topic_notes: 'Repurpose the existing video into a complete posting package: hook, tightened script, caption, hashtags, posting checklist. Work with the material as given — do not invent new topics. Open Gulf voice.' } },
     ],
   },
   {
     id: 'weekly-planning', label: 'Weekly Planning',
     prompts: [
-      { text: 'Create a 7-day content plan for Open Gulf TikTok focused on AI productivity, education, and human-centered technology.',
-        fields: { channel: 'Open Gulf TikTok', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: '7-day Open Gulf TikTok plan: AI productivity, education, human-centered technology.' } },
-      { text: 'Create a 7-day content plan for Buns TikTok balancing funny, cozy, and personality-driven posts.',
-        fields: { channel: 'Buns TikTok', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: '7-day Buns TikTok plan: balance funny, cozy, personality-driven.' } },
-      { text: 'Create a combined weekly posting plan for Open Gulf TikTok, Open Gulf YouTube, and Buns TikTok.',
-        fields: { channel: 'Custom', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan', topic_notes: 'Combined weekly plan across Open Gulf TikTok, Open Gulf YouTube, and Buns TikTok.' } },
+      { text: 'Create a 7-day Open Gulf content plan across TikTok, YouTube, Instagram, LinkedIn, and X / Twitter from one core weekly theme.',
+        fields: { channel: 'Custom', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan',
+          topic_notes: 'Open Gulf 7-day content plan across all five platforms (TikTok = spark, YouTube = heart, LinkedIn = brain, Instagram = face, X / Twitter = signal stream). Pick ONE core weekly theme and adapt it per platform — do not duplicate. For each day list: platform, post topic, hook, format, suggested visual, CTA, repurpose idea, best audience angle.' } },
+      { text: 'Create a weekly content map where TikTok sparks curiosity, YouTube teaches deeply, LinkedIn builds authority, Instagram builds identity, and X / Twitter tests short ideas.',
+        fields: { channel: 'Custom', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan',
+          topic_notes: 'Open Gulf weekly content map. Each platform has a distinct role: TikTok sparks curiosity (20–30s, one reframe), YouTube teaches deeply (6–10 min teaching), LinkedIn builds authority (900–1500 char post), Instagram builds identity (visual / aesthetic), X / Twitter tests short ideas (sharp fragments). Plan 7 days with this division of labor.' } },
+      { text: 'Create a weekly Open Gulf publishing plan for AI productivity, education, creativity, and human-centered technology.',
+        fields: { channel: 'Custom', starting_point: 'Generate ideas from scratch', content_format: 'Content calendar', output_depth: 'Weekly content plan',
+          topic_notes: 'Open Gulf weekly publishing plan. Themes to weave through the week: AI productivity, education, creativity, human-centered technology. All five platforms (TikTok, YouTube, Instagram, LinkedIn, X / Twitter). Pick a tentpole topic for the week and spin it across formats — TikTok hook, YouTube teaching, LinkedIn authority, Instagram visual, X fragments.' } },
     ],
   },
 ];
