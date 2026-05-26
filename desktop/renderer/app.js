@@ -206,6 +206,7 @@ const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
 /* ============================================================ */
 
 const TABS_BUSINESS = [
+  { label: 'Review & Publish',  panel: 'review-publish-card' },
   { label: 'Actions',           panel: 'actions-card' },
   { label: 'Files',             panel: 'artifact-folder-card' },
   { label: 'Research',          panel: 'research-card' },
@@ -215,12 +216,37 @@ const TABS_BUSINESS = [
 ];
 
 const TABS_SOCIAL = [
+  { label: 'Review & Publish', panel: 'review-publish-card' },
   { label: 'Actions',          panel: 'actions-card' },
   { label: 'Files',            panel: 'artifact-folder-card' },
   { label: 'Content Package',  panel: 'social-content-package-card' },
   { label: 'Script',           panel: 'social-script-card' },
   { label: 'Caption',          panel: 'social-caption-card' },
   { label: 'Checklist',        panel: 'social-checklist-card' },
+];
+
+/* ============================================================ */
+/*                REVIEW & PUBLISH CHECKLISTS                    */
+/* ============================================================ */
+/* Session-only state — each new workflow run resets the boxes by
+ * re-rendering the list. No persistence across app restarts. */
+
+const REVIEW_CHECKLIST_BUSINESS = [
+  { id: 'rv-bus-research',  text: 'Review research summary',         actionPanel: 'research-card',          actionLabel: 'Open' },
+  { id: 'rv-bus-document',  text: 'Review business document',        actionPanel: 'business-document-card', actionLabel: 'Open' },
+  { id: 'rv-bus-slides',    text: 'Review slide outline',            actionPanel: 'slide-outline-card',     actionLabel: 'Open' },
+  { id: 'rv-bus-email',     text: 'Review draft email',              actionPanel: 'draft-email-card',       actionLabel: 'Open' },
+  { id: 'rv-bus-export',    text: 'Export or upload the package',    actionPanel: 'actions-card',           actionLabel: 'Open' },
+  { id: 'rv-bus-send',      text: 'Send approved email if desired',  actionPanel: 'draft-email-card',       actionLabel: 'Open' },
+];
+
+const REVIEW_CHECKLIST_SOCIAL = [
+  { id: 'rv-soc-content',   text: 'Review content package',                                actionPanel: 'social-content-package-card', actionLabel: 'Open' },
+  { id: 'rv-soc-script',    text: 'Review script',                                          actionPanel: 'social-script-card',          actionLabel: 'Open' },
+  { id: 'rv-soc-caption',   text: 'Review caption',                                         actionPanel: 'social-caption-card',         actionLabel: 'Open' },
+  { id: 'rv-soc-checklist', text: 'Review posting checklist',                               actionPanel: 'social-checklist-card',       actionLabel: 'Open' },
+  { id: 'rv-soc-upload',    text: 'Upload package to Google Drive if desired',              actionPanel: 'actions-card',                actionLabel: 'Open' },
+  { id: 'rv-soc-publish',   text: 'Manually publish or schedule on the chosen platform',    actionPanel: null,                          actionLabel: null },
 ];
 
 /* ============================================================ */
@@ -979,7 +1005,69 @@ function buildSidebarOutputNav(mode) {
     li.appendChild(btn);
     els.sidebarOutputsList.appendChild(li);
   });
-  showResultPanel('actions-card');
+  renderReviewPublishChecklist(mode);
+  showResultPanel('review-publish-card');
+}
+
+/* Build the Review & Publish list for the active mode. Resets all
+ * checkbox state because a new run is starting. */
+function renderReviewPublishChecklist(mode) {
+  const list = document.getElementById('review-publish-list');
+  if (!list) return;
+  const items = mode === 'social' ? REVIEW_CHECKLIST_SOCIAL : REVIEW_CHECKLIST_BUSINESS;
+  list.innerHTML = '';
+  items.forEach((item) => {
+    const li = document.createElement('li');
+    li.className = 'review-item';
+    li.dataset.itemId = item.id;
+
+    const label = document.createElement('label');
+    label.className = 'review-item-label';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'review-item-check';
+    checkbox.id = `${item.id}-check`;
+    checkbox.addEventListener('change', () => {
+      li.classList.toggle('is-checked', checkbox.checked);
+      updateReviewProgress();
+    });
+
+    const text = document.createElement('span');
+    text.className = 'review-item-text';
+    text.textContent = item.text;
+
+    label.appendChild(checkbox);
+    label.appendChild(text);
+    li.appendChild(label);
+
+    if (item.actionPanel) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-ghost btn-compact review-item-action';
+      btn.textContent = item.actionLabel || 'Open';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        showResultPanel(item.actionPanel);
+      });
+      li.appendChild(btn);
+    }
+
+    list.appendChild(li);
+  });
+  updateReviewProgress();
+}
+
+function updateReviewProgress() {
+  const list = document.getElementById('review-publish-list');
+  const text = document.getElementById('review-progress-text');
+  const fill = document.getElementById('review-progress-fill');
+  if (!list || !text || !fill) return;
+  const boxes = list.querySelectorAll('.review-item-check');
+  const total = boxes.length;
+  const done = Array.from(boxes).filter((b) => b.checked).length;
+  text.textContent = `${done} of ${total} reviewed`;
+  fill.style.width = total ? `${Math.round((done / total) * 100)}%` : '0%';
 }
 
 function showResultPanel(panelId) {

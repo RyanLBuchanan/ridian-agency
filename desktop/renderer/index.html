@@ -424,6 +424,30 @@
             </article>
 
             <div id="result-panel-area" class="result-panel-area">
+              <!-- Guided post-run checklist. Default panel after each run. -->
+              <article
+                id="review-publish-card"
+                data-result-panel="review-publish-card"
+                class="card review-publish-card hidden"
+                aria-labelledby="review-publish-heading"
+              >
+                <div class="card-head">
+                  <h2 id="review-publish-heading">Review &amp; Publish</h2>
+                  <span class="review-progress" aria-live="polite">
+                    <span id="review-progress-text">0 of 0 reviewed</span>
+                  </span>
+                </div>
+                <p class="review-publish-intro">
+                  Use this checklist to review the generated materials
+                  before exporting, uploading, emailing, or posting.
+                  Nothing is sent or published unless you choose it.
+                </p>
+                <div class="review-progress-bar" aria-hidden="true">
+                  <div id="review-progress-fill" class="review-progress-fill"></div>
+                </div>
+                <ol id="review-publish-list" class="review-list"></ol>
+              </article>
+
               <!-- Shared cards -->
               <article id="actions-card" data-result-panel="actions-card" class="card actions-card" aria-labelledby="actions-heading">
                 <div class="card-head">
