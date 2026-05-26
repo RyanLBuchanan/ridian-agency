@@ -256,6 +256,10 @@
                   Clear &amp; reset
                 </button>
               </div>
+              <p class="run-helper-text">
+                This creates drafts only. Nothing is posted, emailed, or
+                uploaded without your approval.
+              </p>
             </section>
           </section>
 
@@ -292,7 +296,9 @@
                   <select id="social-channel" name="channel">
                     <option value="Open Gulf TikTok">Open Gulf TikTok</option>
                     <option value="Open Gulf YouTube">Open Gulf YouTube</option>
+                    <option value="Open Gulf Instagram">Open Gulf Instagram</option>
                     <option value="Open Gulf LinkedIn">Open Gulf LinkedIn</option>
+                    <option value="Open Gulf X / Twitter">Open Gulf X / Twitter</option>
                     <option value="Buns TikTok">Buns TikTok</option>
                     <option value="Ridian Technologies LinkedIn">Ridian Technologies LinkedIn</option>
                     <option value="Custom">Custom</option>
@@ -348,7 +354,7 @@
                   id="social-media-notes"
                   name="media_notes"
                   rows="3"
-                  placeholder="Describe any existing footage, photo, thumbnail, or clip."
+                  placeholder="Optional. If you already have video or a photo, describe it briefly. Example: a 45-second clip of you explaining how AI helps you plan your week."
                 ></textarea>
               </label>
 
@@ -358,7 +364,7 @@
                   id="social-topic-notes"
                   name="topic_notes"
                   rows="4"
-                  placeholder="Enter your topic, rough notes, transcript, or concept. Leave blank if you want ideas from scratch."
+                  placeholder="Type whatever you have: a topic, rough notes, a transcript, even a half-formed idea. Example: &quot;I want to teach why educators should treat AI as a thinking partner, not a search box.&quot; Leave blank to brainstorm from scratch."
                 ></textarea>
               </label>
 
@@ -370,6 +376,10 @@
                   Clear &amp; reset
                 </button>
               </div>
+              <p class="run-helper-text">
+                This creates drafts only. Nothing is posted, emailed, or
+                uploaded without your approval.
+              </p>
             </section>
           </section>
 
@@ -420,7 +430,7 @@
                   <h2 id="actions-heading">Actions</h2>
                 </div>
                 <div class="actions-row">
-                  <button id="action-open-folder" type="button" class="btn btn-primary">Open artifact folder</button>
+                  <button id="action-open-folder" type="button" class="btn btn-primary">Open output folder</button>
                   <button id="action-copy-folder" type="button" class="btn btn-ghost">Copy folder path</button>
                   <button id="action-export-zip" type="button" class="btn btn-ghost">Export all as ZIP</button>
                   <button id="action-upload-drive" type="button" class="btn btn-ghost">Upload to Google Drive</button>
@@ -459,7 +469,7 @@
 
               <article id="artifact-folder-card" data-result-panel="artifact-folder-card" class="card result-card hidden">
                 <div class="card-head">
-                  <h2>Artifact folder</h2>
+                  <h2>Output folder</h2>
                   <button class="btn btn-ghost copy-btn" type="button" data-target="artifact_folder">Copy</button>
                 </div>
                 <pre class="result-folder" data-field="artifact_folder"></pre>
@@ -681,7 +691,7 @@
             <li>
               <strong>Outputs stay local.</strong>
               Every run is saved to <code>outputs/</code> on your machine.
-              Click <em>Open artifact folder</em> on the Actions tab to find it.
+              Click <em>Open output folder</em> on the Actions tab to find it.
             </li>
           </ol>
           <p class="tips-foot">
@@ -791,7 +801,7 @@
           <fieldset class="form-group">
             <legend>Output location</legend>
             <div class="readonly-row">
-              <span class="field-label">Artifacts folder</span>
+              <span class="field-label">Output folder</span>
               <code id="settings-outputs-path" class="readonly-value">—</code>
               <span class="field-hint">Set the <code>OUTPUTS_DIR</code> env var to override.</span>
             </div>

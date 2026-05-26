@@ -109,13 +109,13 @@ const SOCIAL_PROMPT_CATEGORIES = [
     id: 'instagram', label: 'Instagram',
     prompts: [
       { text: 'Create an Instagram Reel concept using warm Gulf Coast futurism visuals to explain one AI idea.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Short-form video',
+        fields: { channel: 'Open Gulf Instagram', starting_point: 'I have a topic', content_format: 'Short-form video',
           topic_notes: 'Open Gulf Instagram Reel concept. Platform: Instagram. Open Gulf Instagram = THE FACE — visual identity, aesthetic presence, emotional tone. Warm Gulf Coast futurism (teal + amber palette, sunsets, ocean waves, calm technology). Include shot list, on-screen captions, voiceover sketch, IG caption (~150–300 chars), 5–8 hashtags.' } },
       { text: 'Create an Instagram carousel that turns an Open Gulf AI insight into 5 simple visual slides.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+        fields: { channel: 'Open Gulf Instagram', starting_point: 'I have a topic', content_format: 'Caption/post only',
           topic_notes: 'Open Gulf Instagram carousel: turn one AI insight into 5 simple, visually clean slides. Platform: Instagram. Open Gulf Instagram = THE FACE. Provide slide-by-slide copy + visual direction (Gulf Coast palette: teal + amber). Include the post caption, hashtags, and a suggested first comment.' } },
       { text: 'Create a reflective Instagram caption about learning to use AI with less fear and more curiosity.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+        fields: { channel: 'Open Gulf Instagram', starting_point: 'I have a topic', content_format: 'Caption/post only',
           topic_notes: 'Open Gulf Instagram caption (single image post). Platform: Instagram. Open Gulf Instagram = THE FACE. Reflective: learning to use AI with less fear and more curiosity. Photo concept + caption (~150–300 chars suited for IG) + 3–6 hashtags + alt text. Warm, human-centered, calm.' } },
     ],
   },
@@ -137,13 +137,13 @@ const SOCIAL_PROMPT_CATEGORIES = [
     id: 'x-twitter', label: 'X / Twitter',
     prompts: [
       { text: 'Create 10 short Open Gulf posts from one AI insight.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+        fields: { channel: 'Open Gulf X / Twitter', starting_point: 'I have a topic', content_format: 'Caption/post only',
           topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X. 10 short posts (each ≤ 280 chars) all derived from ONE AI insight. Each post stands alone. Number them. Open Gulf voice — rapid ideas, sharp observations, philosophical questions, thinking out loud.' } },
       { text: 'Create a sharp X thread about why better AI conversations start with better context.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+        fields: { channel: 'Open Gulf X / Twitter', starting_point: 'I have a topic', content_format: 'Caption/post only',
           topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X (thread). 6–10 tweets: why better AI conversations start with better context. Open Gulf voice — thoughtful, sharp, not preachy. Strong first tweet that earns the click-through. End with a CTA.' } },
       { text: 'Create short idea fragments about AI, education, creativity, and the future of work.',
-        fields: { channel: 'Custom', starting_point: 'I have a topic', content_format: 'Caption/post only',
+        fields: { channel: 'Open Gulf X / Twitter', starting_point: 'I have a topic', content_format: 'Caption/post only',
           topic_notes: 'Open Gulf X / Twitter = THE SIGNAL STREAM. Platform: X. 8–12 short idea fragments suitable for live testing. Topics: AI, education, creativity, future of work. Reflective, warm, philosophical. Each ≤ 280 chars. Number them.' } },
     ],
   },
@@ -206,7 +206,7 @@ const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
 
 const TABS_BUSINESS = [
   { label: 'Actions',           panel: 'actions-card' },
-  { label: 'Artifacts',         panel: 'artifact-folder-card' },
+  { label: 'Files',             panel: 'artifact-folder-card' },
   { label: 'Research',          panel: 'research-card' },
   { label: 'Business Document', panel: 'business-document-card' },
   { label: 'Slide Outline',     panel: 'slide-outline-card' },
@@ -215,7 +215,7 @@ const TABS_BUSINESS = [
 
 const TABS_SOCIAL = [
   { label: 'Actions',          panel: 'actions-card' },
-  { label: 'Artifacts',        panel: 'artifact-folder-card' },
+  { label: 'Files',            panel: 'artifact-folder-card' },
   { label: 'Content Package',  panel: 'social-content-package-card' },
   { label: 'Script',           panel: 'social-script-card' },
   { label: 'Caption',          panel: 'social-caption-card' },
@@ -1823,7 +1823,7 @@ async function uploadArtifactsToDrive() {
       return;
     }
   }
-  const ok = window.confirm("Upload this workflow's artifact folder to your connected Google Drive?");
+  const ok = window.confirm("Upload this workflow's output folder to your connected Google Drive?");
   if (!ok) return;
   hideDriveSuccessCard();
   setActionsStatus('Uploading to Google Drive…');

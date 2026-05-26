@@ -156,6 +156,63 @@ as Open Gulf LinkedIn, plus:
 Same Caption Package structure as Open Gulf LinkedIn. Same Script
 section rule (Not applicable unless format is video).
 
+== Open Gulf Instagram ==
+THE FACE. Visual identity, aesthetic presence, emotional tone, warm
+Gulf Coast futurism. Open Gulf voice (warm, reflective, calm,
+educator-friendly).
+
+Include in the Content Package:
+- Visual concept (1-2 sentences — what the post looks like).
+- For Reels (video): 3 hook options (first 2 seconds), shot list,
+  on-screen text overlays.
+- For carousels: 5-8 slides with copy + visual direction per slide.
+- For single-image posts: photo concept + framing.
+- Repurpose idea (e.g. trim into a TikTok, expand into a YouTube Short).
+
+Caption Package for Open Gulf Instagram:
+- Caption text (150-300 chars typical; longer is OK for storytelling,
+  but lead with the hook — only the first ~125 chars show before
+  "more").
+- Hashtags: 5-10 (mix of niche + broader reach).
+- Alt text (one sentence describing the visual for accessibility).
+- Suggested first comment (often a follow-up link or question).
+- CTA.
+
+Script section: write "Not applicable - Instagram still post" UNLESS
+the Content format is Short-form video or Repurposed clip, then
+provide a Reel treatment (concept, beat-by-beat visuals, voiceover
+sketch, on-screen captions) AND keep the still-post caption in the
+Caption Package as the caption above the Reel.
+
+Visual palette reminder: Gulf Coast sunsets, teal + amber, ocean
+waves, calm technology, warm futurism.
+
+== Open Gulf X / Twitter ==
+THE SIGNAL STREAM. Rapid ideas, sharp observations, AI commentary,
+philosophical questions, thinking out loud. Open Gulf voice
+(reflective, sharp, not preachy, never AI-bro).
+
+Include in the Content Package:
+- Angle (1-2 sentences — what insight or observation this post lands).
+- Format choice: single post, thread, or numbered batch of posts.
+- Repurpose idea (e.g. turn the strongest post into a TikTok hook or a
+  LinkedIn paragraph).
+
+Caption Package for Open Gulf X / Twitter:
+- The actual posts. Number them. Each post must be <= 280 characters.
+- For single posts: 1 post.
+- For threads: 5-10 numbered tweets that hand off cleanly (each tweet
+  should make the next one click-worthy).
+- For batches: 8-12 numbered standalone posts derived from one
+  insight, each strong enough to ship on its own.
+- Hashtags: 0-2 (X / Twitter culture is mostly hashtag-light).
+- CTA: optional — often a link in the last tweet, or a "what's your
+  take?" question to drive replies.
+
+Script section: write "Not applicable - X is text-first" UNLESS the
+operator picks Short-form video format, then provide a brief video
+treatment plus the post copy that sits above the video.
+
 == Custom ==
 Use sensible defaults: angle, 3 hooks, format-appropriate body,
 visual/edit notes, suggested CTA.

@@ -1076,6 +1076,13 @@ body {
   color: var(--color-success);
 }
 
+.run-helper-text {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-muted-soft);
+  line-height: 1.5;
+}
+
 /* ---------- Prompt library ---------- */
 
 .prompts-card { gap: var(--space-3); }

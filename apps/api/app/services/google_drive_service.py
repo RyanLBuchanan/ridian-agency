@@ -295,8 +295,14 @@ def map_channel_to_path(channel: str) -> list[str]:
         return ["Social Media", "Open Gulf", "TikTok"]
     if "open gulf" in c and "youtube" in c:
         return ["Social Media", "Open Gulf", "YouTube"]
+    if "open gulf" in c and "instagram" in c:
+        return ["Social Media", "Open Gulf", "Instagram"]
     if "open gulf" in c and "linkedin" in c:
         return ["Social Media", "Open Gulf", "LinkedIn"]
+    # "twitter" is unique enough to identify the X / Twitter channel without
+    # false positives against other Open Gulf platforms.
+    if "open gulf" in c and "twitter" in c:
+        return ["Social Media", "Open Gulf", "X Twitter"]
     if "buns" in c and "tiktok" in c:
         return ["Social Media", "Buns1562", "TikTok"]
     if "ridian technologies" in c and "linkedin" in c:
