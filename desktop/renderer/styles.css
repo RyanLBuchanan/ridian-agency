@@ -210,6 +210,15 @@
   background: var(--color-bg-soft);
 }
 
+[data-theme="dark"] .workspace-header {
+  background: rgba(28, 31, 41, 0.85);
+  border-bottom-color: var(--color-border);
+}
+
+[data-theme="dark"] .workspace-subtitle {
+  color: #a0a6b6;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 
