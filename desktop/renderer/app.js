@@ -1282,6 +1282,117 @@ function folderTail(folder) {
   return parts[parts.length - 1] || folder;
 }
 
+/* ============================================================ */
+/*                    NEW WORKFLOW WIZARD                        */
+/* ============================================================ */
+
+const WIZARD_OPTIONS = {
+  research: {
+    mode: 'business',
+    task: 'Research practical opportunities for [business/market/audience]. Summarize the market, pain points, opportunities, recommended next steps, a slide outline, and a draft outreach email.',
+  },
+  proposal: {
+    mode: 'business',
+    task: 'Create a concise client-ready proposal for [client/business/audience]. Include context, problem, recommendation, deliverables, timeline, and next steps.',
+  },
+  email: {
+    mode: 'business',
+    task: 'Draft a professional outreach or follow-up email to [recipient/audience] about [topic]. Keep it concise, warm, specific, and action-oriented.',
+  },
+  'social-post': {
+    mode: 'social',
+    social: {
+      channel: 'Open Gulf TikTok',
+      starting_point: 'I have a topic',
+      content_format: 'Short-form video',
+      goal: 'Educate',
+      output_depth: 'Quick post package',
+      topic_notes: '',
+      media_notes: '',
+    },
+  },
+  'weekly-plan': {
+    mode: 'social',
+    social: {
+      channel: 'Custom',
+      starting_point: 'Generate ideas from scratch',
+      content_format: 'Content calendar',
+      goal: 'Grow audience',
+      output_depth: 'Weekly content plan',
+      topic_notes: 'Create a weekly Open Gulf content plan across TikTok, YouTube, Instagram, LinkedIn, and X/Twitter.',
+      media_notes: '',
+    },
+  },
+  repurpose: {
+    mode: 'social',
+    social: {
+      channel: 'Custom',
+      starting_point: 'I have existing footage or a thumbnail',
+      content_format: 'Repurposed clip',
+      goal: 'Grow audience',
+      output_depth: 'Full production package',
+      topic_notes: '',
+      media_notes: '',
+    },
+  },
+  presentation: {
+    mode: 'business',
+    task: 'Create a practical workshop or presentation package for [audience] on [topic]. Include learning goals, agenda, talking points, slide outline, audience engagement ideas, and a follow-up email.',
+  },
+};
+
+function openWizard() {
+  const modal = document.getElementById('wizard-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  document.addEventListener('keydown', _handleWizardKeydown);
+  const first = modal.querySelector('.wizard-option');
+  if (first) first.focus();
+}
+
+function closeWizard() {
+  const modal = document.getElementById('wizard-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  document.removeEventListener('keydown', _handleWizardKeydown);
+}
+
+function _handleWizardKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeWizard(); }
+}
+
+function _applyWizardOption(key) {
+  const opt = WIZARD_OPTIONS[key];
+  if (!opt) return;
+  closeWizard();
+
+  if (opt.mode === 'business') {
+    if (els.taskInput) els.taskInput.value = opt.task || '';
+    setMode('business');
+    setWorkspaceView('input');
+    if (els.taskInput) els.taskInput.focus();
+  } else if (opt.mode === 'social') {
+    clearSocialFormValuesOnly();
+    const s = opt.social || {};
+    if (s.channel && els.socialChannel) els.socialChannel.value = s.channel;
+    if (s.starting_point && els.socialStartingPoint) els.socialStartingPoint.value = s.starting_point;
+    if (s.content_format && els.socialContentFormat) els.socialContentFormat.value = s.content_format;
+    if (s.goal && els.socialGoal) els.socialGoal.value = s.goal;
+    if (s.output_depth && els.socialOutputDepth) els.socialOutputDepth.value = s.output_depth;
+    if (els.socialTopicNotes) els.socialTopicNotes.value = s.topic_notes || '';
+    if (els.socialMediaNotes) els.socialMediaNotes.value = s.media_notes || '';
+    setMode('social');
+    setWorkspaceView('input');
+    if (els.socialTopicNotes) els.socialTopicNotes.focus({ preventScroll: true });
+  }
+  currentResult = null;
+  currentRunMeta = null;
+  activeRunFolder = null;
+  renderRecentRuns();
+}
+
 function startNewWorkflow(mode) {
   audioStop();
   if (mode === 'business' || (!mode && currentMode === 'business')) {
@@ -2389,8 +2500,24 @@ if (els.welcomeTipDismiss) {
 
 // New Workflow button
 if (els.sidebarNewWorkflowBtn) {
-  els.sidebarNewWorkflowBtn.addEventListener('click', () => startNewWorkflow(currentMode));
+  els.sidebarNewWorkflowBtn.addEventListener('click', openWizard);
 }
+
+// Wizard option clicks
+document.querySelectorAll('[data-wizard]').forEach((btn) => {
+  btn.addEventListener('click', () => _applyWizardOption(btn.getAttribute('data-wizard')));
+});
+
+// Wizard close / cancel / blank
+const wizardCloseBtn = document.getElementById('wizard-close-btn');
+const wizardCancelBtn = document.getElementById('wizard-cancel-btn');
+const wizardBlankBtn = document.getElementById('wizard-blank-btn');
+if (wizardCloseBtn) wizardCloseBtn.addEventListener('click', closeWizard);
+if (wizardCancelBtn) wizardCancelBtn.addEventListener('click', closeWizard);
+if (wizardBlankBtn) wizardBlankBtn.addEventListener('click', () => {
+  closeWizard();
+  startNewWorkflow(currentMode);
+});
 
 // Settings + Quick tips buttons
 if (els.sidebarSettingsBtn) els.sidebarSettingsBtn.addEventListener('click', openSettings);

@@ -874,6 +874,77 @@
       </div>
     </div>
 
+    <!-- ============================================================ -->
+    <!--                    NEW WORKFLOW WIZARD                       -->
+    <!-- ============================================================ -->
+    <div
+      id="wizard-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wizard-heading"
+      aria-hidden="true"
+    >
+      <div class="modal-card wizard-card">
+        <header class="modal-head">
+          <h2 id="wizard-heading">What would you like to create?</h2>
+          <button
+            id="wizard-close-btn"
+            type="button"
+            class="modal-close"
+            aria-label="Close wizard"
+          >&times;</button>
+        </header>
+
+        <div class="wizard-body">
+          <div class="wizard-grid">
+            <button type="button" class="wizard-option" data-wizard="research">
+              <span class="wizard-option-title">Business research package</span>
+              <span class="wizard-option-desc">Research a market, summarize opportunities, create a document, slide outline, and email draft.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="proposal">
+              <span class="wizard-option-title">Client proposal or business document</span>
+              <span class="wizard-option-desc">Create a polished business document from a goal, rough notes, or client need.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="email">
+              <span class="wizard-option-title">Outreach or follow-up email</span>
+              <span class="wizard-option-desc">Draft a professional email for a prospect, partner, chamber, client, or stakeholder.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="social-post">
+              <span class="wizard-option-title">Social media post</span>
+              <span class="wizard-option-desc">Create a platform-specific post package for TikTok, YouTube, Instagram, LinkedIn, or X/Twitter.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="weekly-plan">
+              <span class="wizard-option-title">Weekly content plan</span>
+              <span class="wizard-option-desc">Create a 7-day content plan across Open Gulf platforms.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="repurpose">
+              <span class="wizard-option-title">Repurpose existing footage</span>
+              <span class="wizard-option-desc">Turn a video, photo, or thumbnail description into platform-specific social media outputs.</span>
+            </button>
+            <button type="button" class="wizard-option" data-wizard="presentation">
+              <span class="wizard-option-title">Presentation or workshop outline</span>
+              <span class="wizard-option-desc">Build a practical talk, workshop, or slide outline from a topic.</span>
+            </button>
+          </div>
+        </div>
+
+        <footer class="modal-foot">
+          <button
+            id="wizard-blank-btn"
+            type="button"
+            class="btn btn-ghost"
+          >Start blank</button>
+          <span class="modal-foot-spacer"></span>
+          <button
+            id="wizard-cancel-btn"
+            type="button"
+            class="btn btn-ghost"
+          >Cancel</button>
+        </footer>
+      </div>
+    </div>
+
     <script src="app.js" defer></script>
   </body>
 </html>
