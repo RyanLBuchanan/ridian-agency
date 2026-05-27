@@ -56,6 +56,7 @@ UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "script.md",
     "caption_package.md",
     "posting_checklist.md",
+    "visual_production.md",
     # Uploaded thumbnail/image input
     "input_thumbnail.png",
     "input_thumbnail.jpg",

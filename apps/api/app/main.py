@@ -197,6 +197,7 @@ class SocialMediaResponse(BaseModel):
     script: str
     caption_package: str
     posting_checklist: str
+    visual_production: str = ""
 
 
 class RecentProject(BaseModel):
@@ -243,6 +244,7 @@ class LoadProjectResponse(BaseModel):
     script: str = ""
     caption_package: str = ""
     posting_checklist: str = ""
+    visual_production: str = ""
 
 
 def _settings_view_with_outputs() -> SettingsView:
@@ -334,6 +336,7 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
         script=result.script,
         caption_package=result.caption_package,
         posting_checklist=result.posting_checklist,
+        visual_production=result.visual_production,
     )
 
 

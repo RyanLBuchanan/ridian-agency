@@ -217,13 +217,14 @@ const TABS_BUSINESS = [
 ];
 
 const TABS_SOCIAL = [
-  { label: 'Review & Publish', panel: 'review-publish-card' },
-  { label: 'Actions',          panel: 'actions-card' },
-  { label: 'Files',            panel: 'artifact-folder-card' },
-  { label: 'Content Package',  panel: 'social-content-package-card' },
-  { label: 'Script',           panel: 'social-script-card' },
-  { label: 'Caption',          panel: 'social-caption-card' },
-  { label: 'Checklist',        panel: 'social-checklist-card' },
+  { label: 'Review & Publish',  panel: 'review-publish-card' },
+  { label: 'Actions',           panel: 'actions-card' },
+  { label: 'Files',             panel: 'artifact-folder-card' },
+  { label: 'Content Package',   panel: 'social-content-package-card' },
+  { label: 'Script',            panel: 'social-script-card' },
+  { label: 'Caption',           panel: 'social-caption-card' },
+  { label: 'Checklist',         panel: 'social-checklist-card' },
+  { label: 'Visual Production', panel: 'social-visual-production-card' },
 ];
 
 /* ============================================================ */
@@ -242,12 +243,13 @@ const REVIEW_CHECKLIST_BUSINESS = [
 ];
 
 const REVIEW_CHECKLIST_SOCIAL = [
-  { id: 'rv-soc-content',   text: 'Review content package',                                actionPanel: 'social-content-package-card', actionLabel: 'Open' },
-  { id: 'rv-soc-script',    text: 'Review script',                                          actionPanel: 'social-script-card',          actionLabel: 'Open' },
-  { id: 'rv-soc-caption',   text: 'Review caption',                                         actionPanel: 'social-caption-card',         actionLabel: 'Open' },
-  { id: 'rv-soc-checklist', text: 'Review posting checklist',                               actionPanel: 'social-checklist-card',       actionLabel: 'Open' },
-  { id: 'rv-soc-upload',    text: 'Upload package to Google Drive if desired',              actionPanel: 'actions-card',                actionLabel: 'Open' },
-  { id: 'rv-soc-publish',   text: 'Manually publish or schedule on the chosen platform',    actionPanel: null,                          actionLabel: null },
+  { id: 'rv-soc-content',   text: 'Review content package',                                actionPanel: 'social-content-package-card',        actionLabel: 'Open' },
+  { id: 'rv-soc-script',    text: 'Review script',                                          actionPanel: 'social-script-card',                actionLabel: 'Open' },
+  { id: 'rv-soc-caption',   text: 'Review caption',                                         actionPanel: 'social-caption-card',               actionLabel: 'Open' },
+  { id: 'rv-soc-checklist', text: 'Review posting checklist',                               actionPanel: 'social-checklist-card',             actionLabel: 'Open' },
+  { id: 'rv-soc-visual',    text: 'Review visual production plan',                          actionPanel: 'social-visual-production-card',     actionLabel: 'Open' },
+  { id: 'rv-soc-upload',    text: 'Upload package to Google Drive if desired',              actionPanel: 'actions-card',                      actionLabel: 'Open' },
+  { id: 'rv-soc-publish',   text: 'Manually publish or schedule on the chosen platform',    actionPanel: null,                                actionLabel: null },
 ];
 
 /* ============================================================ */
@@ -1176,6 +1178,7 @@ function _buildNextActionsHtml(mode) {
   } else {
     chips.push({ id: 'review-script', label: 'Review the script' });
     chips.push({ id: 'review-caption', label: 'Review the caption' });
+    chips.push({ id: 'review-visual', label: 'Review visual production' });
     if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
   }
   const buttons = chips
@@ -1205,6 +1208,9 @@ function _handleNextAction(action) {
       break;
     case 'review-caption':
       showResultPanel('social-caption-card');
+      break;
+    case 'review-visual':
+      showResultPanel('social-visual-production-card');
       break;
     case 'upload-drive':
       // Show the Actions panel first so the operator sees the upload status
@@ -1881,6 +1887,8 @@ function renderSocialResults(result) {
   document.querySelector('[data-field="script"]').innerHTML = renderMarkdown(result.script);
   document.querySelector('[data-field="caption_package"]').innerHTML = renderMarkdown(result.caption_package);
   document.querySelector('[data-field="posting_checklist"]').innerHTML = renderMarkdown(result.posting_checklist);
+  const vpEl = document.querySelector('[data-field="visual_production"]');
+  if (vpEl) vpEl.innerHTML = renderMarkdown(result.visual_production || '');
 
   hide(els.resultsBusiness);
   show(els.resultsSocial);

@@ -1,11 +1,11 @@
 """Social Media Production workflow.
 
-A single OpenAI Agents SDK agent produces a four-section Markdown package
-(Content Package / Script / Caption Package / Posting Checklist). We split
-it on the `# <Header>` markers and persist each section to its own file
-under ``outputs/<timestamp>_<slug>/``.
+A single OpenAI Agents SDK agent produces a five-section Markdown package
+(Content Package / Script / Caption Package / Posting Checklist / Visual
+Production). We split it on the `# <Header>` markers and persist each
+section to its own file under ``outputs/<timestamp>_<slug>/``.
 
-Kept deliberately simple — one agent, one Runner.run, four files — so a
+Kept deliberately simple — one agent, one Runner.run, five files — so a
 non-trivial brief still returns in roughly the same 30-90 seconds as the
 business workflow.
 """
@@ -37,6 +37,7 @@ SECTION_HEADERS = (
     "Script",
     "Caption Package",
     "Posting Checklist",
+    "Visual Production",
 )
 
 # Map section header -> on-disk filename.
@@ -45,6 +46,7 @@ SECTION_FILENAMES = {
     "Script": "script.md",
     "Caption Package": "caption_package.md",
     "Posting Checklist": "posting_checklist.md",
+    "Visual Production": "visual_production.md",
 }
 
 _HEADER_RE = re.compile(r"^#\s+(.+?)\s*$")
@@ -69,6 +71,7 @@ class SocialMediaResult:
     script: str
     caption_package: str
     posting_checklist: str
+    visual_production: str
 
 
 def _build_agent() -> Agent:
@@ -232,6 +235,7 @@ async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaRes
     script = sections.get("Script", "")
     caption_package = sections.get("Caption Package", "")
     posting_checklist = sections.get("Posting Checklist", "")
+    visual_production = sections.get("Visual Production", "")
 
     # Fallback: if the agent didn't use our headings at all, dump the whole
     # output into Content Package rather than losing it.
@@ -242,6 +246,7 @@ async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaRes
     write_artifact(folder, SECTION_FILENAMES["Script"], script or "(empty)")
     write_artifact(folder, SECTION_FILENAMES["Caption Package"], caption_package or "(empty)")
     write_artifact(folder, SECTION_FILENAMES["Posting Checklist"], posting_checklist or "(empty)")
+    write_artifact(folder, SECTION_FILENAMES["Visual Production"], visual_production or "(empty)")
     write_artifact(folder, "task.txt", formatted_input)
 
     return SocialMediaResult(
@@ -250,4 +255,5 @@ async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaRes
         script=script,
         caption_package=caption_package,
         posting_checklist=posting_checklist,
+        visual_production=visual_production,
     )

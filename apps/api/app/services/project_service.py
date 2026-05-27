@@ -44,6 +44,7 @@ LOAD_FIELD_MAP: dict[str, str] = {
     "script.md":                 "script",
     "caption_package.md":        "caption_package",
     "posting_checklist.md":      "posting_checklist",
+    "visual_production.md":      "visual_production",
 }
 
 _SOCIAL_MARKERS = (
