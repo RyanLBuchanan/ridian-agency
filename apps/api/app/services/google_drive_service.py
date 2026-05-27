@@ -483,6 +483,10 @@ def upload_artifact_folder(folder_str: str) -> dict:
 
     configured_root_id = _get_configured_root_id()
     if configured_root_id:
+        log.info(
+            "google.upload root_mode=configured_root id=%s",
+            configured_root_id,
+        )
         # Treat the configured folder as the "Ridian Technologies" root and
         # walk from "Ridian Agency" downward inside it.
         if drive_path_parts and drive_path_parts[0] == "Ridian Technologies":
@@ -492,6 +496,11 @@ def upload_artifact_folder(folder_str: str) -> dict:
         root_display = (
             _lookup_root_folder_name(service, configured_root_id)
             or "Ridian Technologies"
+        )
+        log.info(
+            "google.upload configured_root display_name=%s walk=%s",
+            root_display,
+            " / ".join(path_under_root),
         )
         try:
             parent_id, child_names = ensure_drive_path(
@@ -506,6 +515,7 @@ def upload_artifact_folder(folder_str: str) -> dict:
             ) from exc
         parent_names = [root_display] + child_names
     else:
+        log.info("google.upload root_mode=default_root")
         parent_id, parent_names = ensure_drive_path(service, drive_path_parts)
 
     # Create the per-run folder INSIDE the resolved parent.
