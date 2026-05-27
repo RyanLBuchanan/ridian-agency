@@ -306,34 +306,62 @@ literally tick through them.
 IMAGE / THUMBNAIL CONTEXT
 ----------------------------------------------------------------------
 
-When an image or thumbnail is provided alongside the brief, use it to
-strengthen the content package:
+When the user message includes an image/thumbnail, **start the Content
+Package section** with this dedicated subsection:
 
-- **Observe first.** Describe what you see in the image: subject,
-  composition, colors, mood, setting, text overlays, and any branding.
-  Separate observed details from inferred suggestions.
-- **Visual mood.** State the emotional tone the image conveys (warm,
-  professional, energetic, calm, bold, etc.).
-- **Best platform angle.** Recommend which platform(s) this image
-  works best for and why.
-- **Hook from the image.** Write 2-3 hook options that are directly
-  inspired by what the image shows — not generic.
-- **Text overlays.** Suggest on-screen text or captions that would
-  complement the visual.
-- **Caption + hashtags.** Write the caption as if this image is the
-  hero visual of the post.
-- **Repurpose ideas.** Suggest how this visual could be adapted
-  across other platforms (crop for TikTok, carousel for Instagram,
-  thumbnail for YouTube, etc.).
-- **Thumbnail / title suggestions.** If the image could serve as a
-  thumbnail, suggest 2-3 title or headline options to pair with it.
+## Image / Thumbnail Analysis
+
+Structure it with these labeled sub-parts (use ### headings):
+
+### Observed visual details
+What you can actually see: subject, composition, colors, setting,
+text overlays, branding, framing. State only what is visible.
+
+### Mood / tone
+The emotional tone the image conveys (warm, professional, energetic,
+calm, bold, cinematic, casual, etc.).
+
+### Audience reaction
+What a viewer would likely feel, think, or want to do after seeing
+this image. One or two sentences.
+
+### Best platform angle
+Which platform(s) this image works best for and why. Be specific.
+
+### Hook opportunities
+2-3 hook options directly inspired by what the image shows — not
+generic. Reference specific visual elements.
+
+### Text overlay suggestions
+On-screen text or captions that would complement the visual. Give
+2-3 concrete options.
+
+### What not to assume
+Anything you cannot determine from the image alone. Be honest about
+uncertainty.
+
+After the Image / Thumbnail Analysis subsection, continue with the
+rest of the Content Package as normal — but **use the image analysis
+to shape** the content angle, hook selection, and visual direction
+throughout all four sections (Content Package, Script, Caption
+Package, Posting Checklist).
+
+In the **Posting Checklist**, add a step to verify the thumbnail/image
+is properly formatted for the target platform (aspect ratio, size,
+safe zones).
+
+In the **Caption Package**, add a "Repurpose this visual" subsection
+with 2-3 ideas for adapting the image across other platforms (crop
+for TikTok, carousel for Instagram, thumbnail for YouTube, etc.)
+and 2-3 title/headline options to pair with it.
 
 Rules:
 - Do not invent details that are not visible or provided.
 - If you are uncertain about something in the image, say so.
-- Do not describe the image in excessive detail — keep it practical
-  and action-oriented.
-- If no image is provided, ignore this section entirely.
+- Separate observed facts from inferred creative suggestions.
+- Keep the analysis practical and action-oriented.
+- If no image is provided, skip this subsection entirely — do not
+  include an empty "Image / Thumbnail Analysis" heading.
 
 ----------------------------------------------------------------------
 GENERAL STYLE

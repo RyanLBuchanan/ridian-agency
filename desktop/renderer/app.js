@@ -198,6 +198,7 @@ const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
   'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
+  'appearance',
 ];
 const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
 
@@ -1150,6 +1151,12 @@ function showResultPanel(panelId) {
       p.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
   }
+
+  const backNav = document.getElementById('panel-back-nav');
+  if (backNav) {
+    if (target === 'review-publish-card') hide(backNav);
+    else show(backNav);
+  }
 }
 
 /* ============================================================ */
@@ -1244,12 +1251,16 @@ function updateRunSummary(mode, result) {
       meta.goal && `<span class="run-summary-badge">${escapeHtml(meta.goal)}</span>`,
     ].filter(Boolean).join('');
     const topicPreview = (meta.topic_notes || '').slice(0, 360);
+    const imageIndicator = thumbnailData && thumbnailData.name
+      ? `<div class="run-summary-image-used">Image used: ${escapeHtml(thumbnailData.name)}</div>`
+      : '';
     html = `
       <div class="run-summary-head">
         <div class="run-summary-meta">
           <span class="run-summary-eyebrow">Social Media Production</span>
           <h2 class="run-summary-title">${escapeHtml(meta.channel || 'Social media run')}</h2>
           <div class="run-summary-badges">${badges}</div>
+          ${imageIndicator}
         </div>
         <div class="run-summary-actions">
           <button type="button" class="btn btn-ghost btn-compact" id="run-summary-edit">Edit task</button>
@@ -1300,6 +1311,15 @@ const PLATFORM_CHANNEL_MAP = {
   'X / Twitter': 'Open Gulf X / Twitter',
 };
 
+function _cleanPrompt(text) {
+  return text
+    .replace(/([.?!])\s*\./g, '$1')   // "?." → "?", ".." → ".", "!." → "!"
+    .replace(/\.\s*([?!])/g, '$1')     // ".?" → "?"
+    .replace(/([.?!])\1+/g, '$1')      // "..." → ".", "??" → "?"
+    .replace(/\s{2,}/g, ' ')           // collapse multiple spaces
+    .trim();
+}
+
 const WIZARD_FIELDS = {
   research: {
     mode: 'business',
@@ -1313,10 +1333,10 @@ const WIZARD_FIELDS = {
       let t = `Research practical opportunities for ${v.market || 'this market'}`;
       if (v.audience) t += `, focused on ${v.audience}`;
       t += '.';
-      if (v.decision) t += ` The key decision: ${v.decision}.`;
-      if (v.focus) t += ` Special focus: ${v.focus}.`;
+      if (v.decision) t += ` The key decision: ${v.decision}`;
+      if (v.focus) t += ` Special focus: ${v.focus}`;
       t += ' Summarize the market, pain points, opportunities, recommended next steps, a slide outline, and a draft outreach email.';
-      return { task: t };
+      return { task: _cleanPrompt(t) };
     },
   },
   proposal: {
@@ -1331,10 +1351,10 @@ const WIZARD_FIELDS = {
       let t = `Create a concise client-ready proposal for ${v.client || 'the client'}`;
       if (v.problem) t += ` addressing ${v.problem}`;
       t += '.';
-      if (v.solution) t += ` The proposed solution: ${v.solution}.`;
+      if (v.solution) t += ` The proposed solution: ${v.solution}`;
       t += ` Tone: ${v.tone || 'concise'}.`;
       t += ' Include context, problem, recommendation, deliverables, timeline, and next steps.';
-      return { task: t };
+      return { task: _cleanPrompt(t) };
     },
   },
   email: {
@@ -1349,10 +1369,10 @@ const WIZARD_FIELDS = {
       let t = `Draft a professional outreach or follow-up email to ${v.recipient || 'the recipient'}`;
       if (v.purpose) t += ` about ${v.purpose}`;
       t += '.';
-      if (v.cta) t += ` The recipient should: ${v.cta}.`;
+      if (v.cta) t += ` The recipient should: ${v.cta}`;
       t += ` Tone: ${v.tone || 'warm'}.`;
       t += ' Keep it concise, specific, and action-oriented.';
-      return { task: t };
+      return { task: _cleanPrompt(t) };
     },
   },
   'social-post': {
@@ -1367,7 +1387,7 @@ const WIZARD_FIELDS = {
       const channel = PLATFORM_CHANNEL_MAP[v.platform] || 'Open Gulf TikTok';
       const isVideo = ['TikTok', 'YouTube'].includes(v.platform);
       let notes = v.topic || '';
-      if (v.audience) notes += (notes ? '. ' : '') + `Audience: ${v.audience}.`;
+      if (v.audience) notes += (notes ? '. ' : '') + `Audience: ${v.audience}`;
       return {
         social: {
           channel,
@@ -1375,7 +1395,7 @@ const WIZARD_FIELDS = {
           content_format: isVideo ? 'Short-form video' : 'Caption/post only',
           goal: (v.goal || 'Educate').replace('Inspire curiosity', 'Inspire').replace('Build trust', 'Build trust').replace('Promote a service', 'Promote').replace('Grow audience', 'Grow audience'),
           output_depth: 'Quick post package',
-          topic_notes: notes,
+          topic_notes: _cleanPrompt(notes),
           media_notes: '',
         },
       };
@@ -1393,10 +1413,10 @@ const WIZARD_FIELDS = {
       let notes = `Create a 7-day Open Gulf content plan`;
       if (v.theme) notes += ` around the theme: ${v.theme}`;
       notes += '.';
-      if (v.platforms) notes += ` Platforms: ${v.platforms}.`;
+      if (v.platforms) notes += ` Platforms: ${v.platforms}`;
       else notes += ' Platforms: TikTok, YouTube, Instagram, LinkedIn, and X / Twitter.';
-      if (v.audience) notes += ` Audience: ${v.audience}.`;
-      if (v.goal) notes += ` Main goal: ${v.goal.toLowerCase()}.`;
+      if (v.audience) notes += ` Audience: ${v.audience}`;
+      if (v.goal) notes += ` Main goal: ${v.goal.toLowerCase()}`;
       return {
         social: {
           channel: 'Custom',
@@ -1404,7 +1424,7 @@ const WIZARD_FIELDS = {
           content_format: 'Content calendar',
           goal: v.goal || 'Grow audience',
           output_depth: 'Weekly content plan',
-          topic_notes: notes,
+          topic_notes: _cleanPrompt(notes + '.'),
           media_notes: '',
         },
       };
@@ -1421,8 +1441,8 @@ const WIZARD_FIELDS = {
     build(v) {
       const channel = PLATFORM_CHANNEL_MAP[v.platform] || 'Custom';
       let notes = '';
-      if (v.feeling) notes += `Viewer takeaway: ${v.feeling}.`;
-      if (v.message) notes += (notes ? ' ' : '') + `Key message: ${v.message}.`;
+      if (v.feeling) notes += `Viewer takeaway: ${v.feeling}`;
+      if (v.message) notes += (notes ? '. ' : '') + `Key message: ${v.message}`;
       return {
         social: {
           channel,
@@ -1430,7 +1450,7 @@ const WIZARD_FIELDS = {
           content_format: 'Repurposed clip',
           goal: 'Grow audience',
           output_depth: 'Full production package',
-          topic_notes: notes,
+          topic_notes: _cleanPrompt(notes ? notes + '.' : ''),
           media_notes: v.footage || '',
         },
       };
@@ -1449,10 +1469,10 @@ const WIZARD_FIELDS = {
       if (v.audience) t += ` for ${v.audience}`;
       if (v.topic) t += ` on ${v.topic}`;
       t += '.';
-      if (v.length) t += ` Session length: ${v.length}.`;
-      if (v.outcome) t += ` Participants should be able to: ${v.outcome}.`;
+      if (v.length) t += ` Session length: ${v.length}`;
+      if (v.outcome) t += ` Participants should be able to: ${v.outcome}`;
       t += ' Include learning goals, agenda, talking points, slide outline, audience engagement ideas, and a follow-up email.';
-      return { task: t };
+      return { task: _cleanPrompt(t) };
     },
   },
 };
@@ -2394,11 +2414,41 @@ function setSettingsStatus(text, kind) {
   if (kind === 'err') els.settingsStatus.classList.add('is-err');
 }
 
+/* ============================================================ */
+/*                     THEME / APPEARANCE                        */
+/* ============================================================ */
+
+function applyTheme(pref) {
+  const val = (pref || 'system').toLowerCase();
+  if (val === 'dark') {
+    document.documentElement.dataset.theme = 'dark';
+  } else if (val === 'light') {
+    document.documentElement.dataset.theme = 'light';
+  } else {
+    // system
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
+  }
+}
+
+// Listen for OS theme changes when in system mode
+try {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    const saved = (cachedSettings && cachedSettings.appearance) || 'system';
+    if (saved === 'system' || !saved) applyTheme('system');
+  });
+} catch (_) { /* matchMedia listener not supported */ }
+
 function applySettingsToForm(settings) {
   if (!els.settingsForm) return;
   SETTINGS_FIELDS.forEach((name) => {
     const input = els.settingsForm.elements.namedItem(name);
-    if (input) input.value = settings[name] || '';
+    if (!input) return;
+    if (name === 'appearance') {
+      input.value = settings[name] || 'system';
+    } else {
+      input.value = settings[name] || '';
+    }
   });
   SETTINGS_SECRET_FIELDS.forEach((name) => {
     const input = els.settingsForm.elements.namedItem(name);
@@ -2510,6 +2560,7 @@ async function saveSettings(e) {
     }
     cachedSettings = data;
     applySettingsToForm(data);
+    applyTheme(data.appearance);
     pollHealth();
     setSettingsStatus('Settings saved.', 'ok');
     setTimeout(() => {
@@ -2822,6 +2873,10 @@ if (els.taskInput) {
 if (els.socialRunBtn) els.socialRunBtn.addEventListener('click', runSocialWorkflow);
 if (els.socialClearBtn) els.socialClearBtn.addEventListener('click', () => startNewWorkflow('social'));
 
+// Panel back-to-review navigation
+const panelBackBtn = document.getElementById('panel-back-btn');
+if (panelBackBtn) panelBackBtn.addEventListener('click', () => showResultPanel('review-publish-card'));
+
 // Thumbnail / image input
 if (els.thumbnailSelectBtn && els.thumbnailFileInput) {
   els.thumbnailSelectBtn.addEventListener('click', () => els.thumbnailFileInput.click());
@@ -2869,3 +2924,8 @@ loadGoogleStatus();
 loadRecentRunsFromBackend();
 setMode('business');
 setWorkspaceView('welcome');
+
+// Load saved theme on startup
+fetch(`${BACKEND}/settings`).then(r => r.ok ? r.json() : null).then(data => {
+  if (data) { cachedSettings = data; applyTheme(data.appearance); }
+}).catch(() => { applyTheme('system'); });

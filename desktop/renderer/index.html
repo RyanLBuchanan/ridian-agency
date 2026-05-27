@@ -466,6 +466,9 @@
             </article>
 
             <div id="result-panel-area" class="result-panel-area">
+              <div id="panel-back-nav" class="panel-back-nav hidden">
+                <button id="panel-back-btn" type="button" class="panel-back-btn">&larr; Review &amp; Publish</button>
+              </div>
               <!-- Guided post-run checklist. Default panel after each run. -->
               <article
                 id="review-publish-card"
@@ -795,6 +798,24 @@
         </header>
 
         <form id="settings-form" class="modal-body" autocomplete="off">
+          <fieldset class="form-group">
+            <legend>Appearance</legend>
+            <div class="appearance-group" role="radiogroup" aria-label="Appearance">
+              <label class="appearance-option">
+                <input type="radio" name="appearance" value="light" />
+                <span class="appearance-label">Light</span>
+              </label>
+              <label class="appearance-option">
+                <input type="radio" name="appearance" value="dark" />
+                <span class="appearance-label">Dark</span>
+              </label>
+              <label class="appearance-option">
+                <input type="radio" name="appearance" value="system" checked />
+                <span class="appearance-label">Use system setting</span>
+              </label>
+            </div>
+          </fieldset>
+
           <fieldset class="form-group">
             <legend>AI provider</legend>
             <label class="field">

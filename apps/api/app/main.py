@@ -106,6 +106,7 @@ class SettingsView(BaseModel):
     smtp_from_email: str = ""
     smtp_password_configured: bool = False
     google_drive_root_folder_id: str = ""
+    appearance: str = ""
     outputs_path: str = ""
 
 
@@ -127,6 +128,7 @@ class SettingsUpdate(BaseModel):
     smtp_password: str | None = None
     smtp_from_email: str | None = None
     google_drive_root_folder_id: str | None = None
+    appearance: str | None = None
 
 
 class ArtifactFolderRequest(BaseModel):

@@ -41,6 +41,7 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "smtp_password",
     "smtp_from_email",
     "google_drive_root_folder_id",
+    "appearance",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when
