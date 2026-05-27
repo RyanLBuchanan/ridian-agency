@@ -316,6 +316,10 @@ const els = {
   socialTopicNotes: document.getElementById('social-topic-notes'),
   socialRunBtn: document.getElementById('social-run-btn'),
   socialClearBtn: document.getElementById('social-clear-btn'),
+  thumbnailFileInput: document.getElementById('thumbnail-file-input'),
+  thumbnailSelectBtn: document.getElementById('thumbnail-select-btn'),
+  thumbnailFilename: document.getElementById('thumbnail-filename'),
+  thumbnailClearBtn: document.getElementById('thumbnail-clear-btn'),
 
   // prompt library containers
   promptsTabsBusiness: document.querySelector('#view-input-business .prompts-tabs'),
@@ -380,6 +384,8 @@ let recentRunsSearch = '';           // current filter text for Recent runs
 let runsFilter = 'all';             // 'all' | 'pinned' | 'business' | 'social'
 let runsExpanded = false;           // false = show RUNS_PAGE_SIZE; true = show all
 const RUNS_PAGE_SIZE = 10;
+let thumbnailData = null;           // { name, dataUri } or null
+const THUMBNAIL_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /* ============================================================ */
 /*                          HELPERS                              */
@@ -1286,64 +1292,178 @@ function folderTail(folder) {
 /*                    NEW WORKFLOW WIZARD                        */
 /* ============================================================ */
 
-const WIZARD_OPTIONS = {
+const PLATFORM_CHANNEL_MAP = {
+  'TikTok': 'Open Gulf TikTok',
+  'YouTube': 'Open Gulf YouTube',
+  'Instagram': 'Open Gulf Instagram',
+  'LinkedIn': 'Open Gulf LinkedIn',
+  'X / Twitter': 'Open Gulf X / Twitter',
+};
+
+const WIZARD_FIELDS = {
   research: {
     mode: 'business',
-    task: 'Research practical opportunities for [business/market/audience]. Summarize the market, pain points, opportunities, recommended next steps, a slide outline, and a draft outreach email.',
+    fields: [
+      { id: 'market', label: 'What market, business type, or opportunity should we research?', type: 'text', placeholder: 'e.g. AI tutoring for K-12 schools' },
+      { id: 'audience', label: 'What location or audience should we focus on?', type: 'text', placeholder: 'e.g. Gulf Coast small businesses' },
+      { id: 'decision', label: 'What decision are you trying to make?', type: 'text', placeholder: 'e.g. Should I launch a consulting offer for this market?' },
+      { id: 'focus', label: 'Any special focus?', type: 'text', placeholder: 'e.g. pricing models, competitor landscape', optional: true },
+    ],
+    build(v) {
+      let t = `Research practical opportunities for ${v.market || 'this market'}`;
+      if (v.audience) t += `, focused on ${v.audience}`;
+      t += '.';
+      if (v.decision) t += ` The key decision: ${v.decision}.`;
+      if (v.focus) t += ` Special focus: ${v.focus}.`;
+      t += ' Summarize the market, pain points, opportunities, recommended next steps, a slide outline, and a draft outreach email.';
+      return { task: t };
+    },
   },
   proposal: {
     mode: 'business',
-    task: 'Create a concise client-ready proposal for [client/business/audience]. Include context, problem, recommendation, deliverables, timeline, and next steps.',
+    fields: [
+      { id: 'client', label: 'Who is the proposal or document for?', type: 'text', placeholder: 'e.g. Bay Area Chamber of Commerce' },
+      { id: 'problem', label: 'What problem or opportunity should it address?', type: 'text', placeholder: 'e.g. They need help using AI to streamline member communications' },
+      { id: 'solution', label: 'What service or solution are you proposing?', type: 'text', placeholder: 'e.g. A 3-month AI workflow integration package' },
+      { id: 'tone', label: 'What tone should it use?', type: 'select', options: ['Concise', 'Warm', 'Formal', 'Persuasive'] },
+    ],
+    build(v) {
+      let t = `Create a concise client-ready proposal for ${v.client || 'the client'}`;
+      if (v.problem) t += ` addressing ${v.problem}`;
+      t += '.';
+      if (v.solution) t += ` The proposed solution: ${v.solution}.`;
+      t += ` Tone: ${v.tone || 'concise'}.`;
+      t += ' Include context, problem, recommendation, deliverables, timeline, and next steps.';
+      return { task: t };
+    },
   },
   email: {
     mode: 'business',
-    task: 'Draft a professional outreach or follow-up email to [recipient/audience] about [topic]. Keep it concise, warm, specific, and action-oriented.',
+    fields: [
+      { id: 'recipient', label: 'Who is the email going to?', type: 'text', placeholder: 'e.g. Sarah Kim, director of partnerships at Gulf Innovations' },
+      { id: 'purpose', label: 'What is the purpose of the email?', type: 'text', placeholder: 'e.g. Follow up after our meeting about AI workflow consulting' },
+      { id: 'cta', label: 'What should the recipient do next?', type: 'text', placeholder: 'e.g. Schedule a 15-minute call next week' },
+      { id: 'tone', label: 'Tone', type: 'select', options: ['Warm', 'Concise', 'Professional', 'Friendly'] },
+    ],
+    build(v) {
+      let t = `Draft a professional outreach or follow-up email to ${v.recipient || 'the recipient'}`;
+      if (v.purpose) t += ` about ${v.purpose}`;
+      t += '.';
+      if (v.cta) t += ` The recipient should: ${v.cta}.`;
+      t += ` Tone: ${v.tone || 'warm'}.`;
+      t += ' Keep it concise, specific, and action-oriented.';
+      return { task: t };
+    },
   },
   'social-post': {
     mode: 'social',
-    social: {
-      channel: 'Open Gulf TikTok',
-      starting_point: 'I have a topic',
-      content_format: 'Short-form video',
-      goal: 'Educate',
-      output_depth: 'Quick post package',
-      topic_notes: '',
-      media_notes: '',
+    fields: [
+      { id: 'platform', label: 'Which platform?', type: 'select', options: ['TikTok', 'YouTube', 'Instagram', 'LinkedIn', 'X / Twitter'] },
+      { id: 'topic', label: 'What is the topic or idea?', type: 'text', placeholder: 'e.g. Why educators should treat AI as a thinking partner, not a search box' },
+      { id: 'audience', label: 'Who is the audience?', type: 'text', placeholder: 'e.g. Teachers and education professionals' },
+      { id: 'goal', label: 'Goal', type: 'select', options: ['Educate', 'Inspire curiosity', 'Build trust', 'Promote a service', 'Grow audience'] },
+    ],
+    build(v) {
+      const channel = PLATFORM_CHANNEL_MAP[v.platform] || 'Open Gulf TikTok';
+      const isVideo = ['TikTok', 'YouTube'].includes(v.platform);
+      let notes = v.topic || '';
+      if (v.audience) notes += (notes ? '. ' : '') + `Audience: ${v.audience}.`;
+      return {
+        social: {
+          channel,
+          starting_point: 'I have a topic',
+          content_format: isVideo ? 'Short-form video' : 'Caption/post only',
+          goal: (v.goal || 'Educate').replace('Inspire curiosity', 'Inspire').replace('Build trust', 'Build trust').replace('Promote a service', 'Promote').replace('Grow audience', 'Grow audience'),
+          output_depth: 'Quick post package',
+          topic_notes: notes,
+          media_notes: '',
+        },
+      };
     },
   },
   'weekly-plan': {
     mode: 'social',
-    social: {
-      channel: 'Custom',
-      starting_point: 'Generate ideas from scratch',
-      content_format: 'Content calendar',
-      goal: 'Grow audience',
-      output_depth: 'Weekly content plan',
-      topic_notes: 'Create a weekly Open Gulf content plan across TikTok, YouTube, Instagram, LinkedIn, and X/Twitter.',
-      media_notes: '',
+    fields: [
+      { id: 'theme', label: 'What is the weekly theme?', type: 'text', placeholder: 'e.g. How AI helps small businesses save 5 hours per week' },
+      { id: 'platforms', label: 'Which platforms should be included?', type: 'text', placeholder: 'e.g. TikTok, YouTube, Instagram, LinkedIn, X / Twitter' },
+      { id: 'audience', label: 'Who is the audience?', type: 'text', placeholder: 'e.g. Entrepreneurs, educators, and solo professionals' },
+      { id: 'goal', label: 'What is the main goal?', type: 'select', options: ['Grow audience', 'Educate', 'Build trust', 'Drive traffic', 'Test ideas'] },
+    ],
+    build(v) {
+      let notes = `Create a 7-day Open Gulf content plan`;
+      if (v.theme) notes += ` around the theme: ${v.theme}`;
+      notes += '.';
+      if (v.platforms) notes += ` Platforms: ${v.platforms}.`;
+      else notes += ' Platforms: TikTok, YouTube, Instagram, LinkedIn, and X / Twitter.';
+      if (v.audience) notes += ` Audience: ${v.audience}.`;
+      if (v.goal) notes += ` Main goal: ${v.goal.toLowerCase()}.`;
+      return {
+        social: {
+          channel: 'Custom',
+          starting_point: 'Generate ideas from scratch',
+          content_format: 'Content calendar',
+          goal: v.goal || 'Grow audience',
+          output_depth: 'Weekly content plan',
+          topic_notes: notes,
+          media_notes: '',
+        },
+      };
     },
   },
   repurpose: {
     mode: 'social',
-    social: {
-      channel: 'Custom',
-      starting_point: 'I have existing footage or a thumbnail',
-      content_format: 'Repurposed clip',
-      goal: 'Grow audience',
-      output_depth: 'Full production package',
-      topic_notes: '',
-      media_notes: '',
+    fields: [
+      { id: 'footage', label: 'Describe the footage, photo, or clip.', type: 'textarea', placeholder: 'e.g. A 45-second clip of me explaining how AI helps plan my week, filmed at my desk with natural light' },
+      { id: 'platform', label: 'Which platform should this be for?', type: 'select', options: ['TikTok', 'YouTube', 'Instagram', 'LinkedIn', 'X / Twitter'] },
+      { id: 'feeling', label: 'What should viewers feel or do after watching?', type: 'text', placeholder: 'e.g. Feel curious enough to try AI tools this week' },
+      { id: 'message', label: 'Any important message to include?', type: 'text', placeholder: 'e.g. AI saves me 5 hours a week', optional: true },
+    ],
+    build(v) {
+      const channel = PLATFORM_CHANNEL_MAP[v.platform] || 'Custom';
+      let notes = '';
+      if (v.feeling) notes += `Viewer takeaway: ${v.feeling}.`;
+      if (v.message) notes += (notes ? ' ' : '') + `Key message: ${v.message}.`;
+      return {
+        social: {
+          channel,
+          starting_point: 'I have existing footage or a thumbnail',
+          content_format: 'Repurposed clip',
+          goal: 'Grow audience',
+          output_depth: 'Full production package',
+          topic_notes: notes,
+          media_notes: v.footage || '',
+        },
+      };
     },
   },
   presentation: {
     mode: 'business',
-    task: 'Create a practical workshop or presentation package for [audience] on [topic]. Include learning goals, agenda, talking points, slide outline, audience engagement ideas, and a follow-up email.',
+    fields: [
+      { id: 'audience', label: 'Who is the audience?', type: 'text', placeholder: 'e.g. Chamber of Commerce members, small business owners' },
+      { id: 'topic', label: 'What is the topic?', type: 'text', placeholder: 'e.g. How to use AI to save 5 hours per week in your business' },
+      { id: 'length', label: 'How long is the session?', type: 'text', placeholder: 'e.g. 45 minutes with 15 minutes for Q&A' },
+      { id: 'outcome', label: 'What should participants be able to do afterward?', type: 'text', placeholder: 'e.g. Set up one AI-powered workflow for their business' },
+    ],
+    build(v) {
+      let t = `Create a practical workshop or presentation package`;
+      if (v.audience) t += ` for ${v.audience}`;
+      if (v.topic) t += ` on ${v.topic}`;
+      t += '.';
+      if (v.length) t += ` Session length: ${v.length}.`;
+      if (v.outcome) t += ` Participants should be able to: ${v.outcome}.`;
+      t += ' Include learning goals, agenda, talking points, slide outline, audience engagement ideas, and a follow-up email.';
+      return { task: t };
+    },
   },
 };
+
+let wizardStep = 1;
+let wizardSelectedKey = null;
 
 function openWizard() {
   const modal = document.getElementById('wizard-modal');
   if (!modal) return;
+  _wizardShowStep(1);
   modal.classList.remove('hidden');
   modal.setAttribute('aria-hidden', 'false');
   document.addEventListener('keydown', _handleWizardKeydown);
@@ -1357,25 +1477,132 @@ function closeWizard() {
   modal.classList.add('hidden');
   modal.setAttribute('aria-hidden', 'true');
   document.removeEventListener('keydown', _handleWizardKeydown);
+  wizardStep = 1;
+  wizardSelectedKey = null;
 }
 
 function _handleWizardKeydown(e) {
   if (e.key === 'Escape') { e.preventDefault(); closeWizard(); }
 }
 
-function _applyWizardOption(key) {
-  const opt = WIZARD_OPTIONS[key];
-  if (!opt) return;
+function _wizardShowStep(step) {
+  wizardStep = step;
+  const step1 = document.getElementById('wizard-step1');
+  const step2 = document.getElementById('wizard-step2');
+  const heading = document.getElementById('wizard-heading');
+  const footer = document.getElementById('wizard-footer');
+  if (!step1 || !step2 || !footer) return;
+
+  if (step === 1) {
+    show(step1); hide(step2);
+    if (heading) heading.textContent = 'What would you like to create?';
+    footer.innerHTML = `
+      <button id="wizard-blank-btn" type="button" class="btn btn-ghost">Start blank</button>
+      <span class="modal-foot-spacer"></span>
+      <button id="wizard-cancel-btn" type="button" class="btn btn-ghost">Cancel</button>
+    `;
+    footer.querySelector('#wizard-blank-btn').addEventListener('click', () => { closeWizard(); startNewWorkflow(currentMode); });
+    footer.querySelector('#wizard-cancel-btn').addEventListener('click', closeWizard);
+  } else {
+    hide(step1); show(step2);
+    const cfg = WIZARD_FIELDS[wizardSelectedKey];
+    if (heading && cfg) {
+      const titles = { research: 'Business research package', proposal: 'Client proposal', email: 'Outreach or follow-up email', 'social-post': 'Social media post', 'weekly-plan': 'Weekly content plan', repurpose: 'Repurpose footage', presentation: 'Presentation or workshop' };
+      heading.textContent = titles[wizardSelectedKey] || 'Details';
+    }
+    _wizardRenderFields();
+    footer.innerHTML = `
+      <button id="wizard-back-btn" type="button" class="btn btn-ghost">Back</button>
+      <span class="modal-foot-spacer"></span>
+      <button id="wizard-create-btn" type="button" class="btn btn-primary">Create draft</button>
+    `;
+    footer.querySelector('#wizard-back-btn').addEventListener('click', () => _wizardShowStep(1));
+    footer.querySelector('#wizard-create-btn').addEventListener('click', _wizardCreateDraft);
+  }
+}
+
+function _wizardRenderFields() {
+  const container = document.getElementById('wizard-fields');
+  if (!container) return;
+  container.innerHTML = '';
+  const cfg = WIZARD_FIELDS[wizardSelectedKey];
+  if (!cfg) return;
+
+  cfg.fields.forEach((f) => {
+    const group = document.createElement('div');
+    group.className = 'wizard-field-group';
+
+    const label = document.createElement('label');
+    label.className = 'wizard-field-label';
+    label.setAttribute('for', `wiz-${f.id}`);
+    label.textContent = f.label;
+    if (f.optional) {
+      const opt = document.createElement('span');
+      opt.className = 'wizard-field-optional';
+      opt.textContent = ' (optional)';
+      label.appendChild(opt);
+    }
+    group.appendChild(label);
+
+    let input;
+    if (f.type === 'select') {
+      input = document.createElement('select');
+      input.className = 'wizard-field-select';
+      (f.options || []).forEach((o) => {
+        const option = document.createElement('option');
+        option.value = o;
+        option.textContent = o;
+        input.appendChild(option);
+      });
+    } else if (f.type === 'textarea') {
+      input = document.createElement('textarea');
+      input.className = 'wizard-field-textarea';
+      input.rows = 3;
+      if (f.placeholder) input.placeholder = f.placeholder;
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'wizard-field-input';
+      if (f.placeholder) input.placeholder = f.placeholder;
+    }
+    input.id = `wiz-${f.id}`;
+    input.name = f.id;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    group.appendChild(input);
+    container.appendChild(group);
+  });
+
+  const firstInput = container.querySelector('input, textarea, select');
+  if (firstInput) setTimeout(() => firstInput.focus(), 60);
+}
+
+function _wizardGatherValues() {
+  const cfg = WIZARD_FIELDS[wizardSelectedKey];
+  if (!cfg) return {};
+  const vals = {};
+  cfg.fields.forEach((f) => {
+    const el = document.getElementById(`wiz-${f.id}`);
+    vals[f.id] = el ? el.value.trim() : '';
+  });
+  return vals;
+}
+
+function _wizardCreateDraft() {
+  const cfg = WIZARD_FIELDS[wizardSelectedKey];
+  if (!cfg) return;
+  const vals = _wizardGatherValues();
+  const result = cfg.build(vals);
   closeWizard();
 
-  if (opt.mode === 'business') {
-    if (els.taskInput) els.taskInput.value = opt.task || '';
+  if (cfg.mode === 'business') {
+    if (els.taskInput) els.taskInput.value = result.task || '';
     setMode('business');
     setWorkspaceView('input');
     if (els.taskInput) els.taskInput.focus();
-  } else if (opt.mode === 'social') {
+  } else if (cfg.mode === 'social') {
     clearSocialFormValuesOnly();
-    const s = opt.social || {};
+    const s = result.social || {};
     if (s.channel && els.socialChannel) els.socialChannel.value = s.channel;
     if (s.starting_point && els.socialStartingPoint) els.socialStartingPoint.value = s.starting_point;
     if (s.content_format && els.socialContentFormat) els.socialContentFormat.value = s.content_format;
@@ -1391,6 +1618,12 @@ function _applyWizardOption(key) {
   currentRunMeta = null;
   activeRunFolder = null;
   renderRecentRuns();
+}
+
+function _wizardSelectOption(key) {
+  if (!WIZARD_FIELDS[key]) return;
+  wizardSelectedKey = key;
+  _wizardShowStep(2);
 }
 
 function startNewWorkflow(mode) {
@@ -1416,6 +1649,43 @@ function clearSocialFormValuesOnly() {
   if (els.socialContentFormat) els.socialContentFormat.value = 'Short-form video';
   if (els.socialGoal) els.socialGoal.value = 'Educate';
   if (els.socialOutputDepth) els.socialOutputDepth.value = 'Quick post package';
+  clearThumbnail();
+}
+
+function clearThumbnail() {
+  thumbnailData = null;
+  if (els.thumbnailFileInput) els.thumbnailFileInput.value = '';
+  if (els.thumbnailFilename) {
+    els.thumbnailFilename.textContent = 'No image selected';
+    els.thumbnailFilename.classList.remove('has-file');
+  }
+  if (els.thumbnailClearBtn) hide(els.thumbnailClearBtn);
+}
+
+function handleThumbnailSelect(file) {
+  if (!file) return;
+  const allowed = /\.(png|jpe?g|webp)$/i;
+  if (!allowed.test(file.name)) {
+    alert('Unsupported image format. Please use PNG, JPG, or WEBP.');
+    return;
+  }
+  if (file.size > THUMBNAIL_MAX_BYTES) {
+    alert('Image is too large (max 5 MB). Please choose a smaller file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    thumbnailData = { name: file.name, dataUri: reader.result };
+    if (els.thumbnailFilename) {
+      els.thumbnailFilename.textContent = file.name;
+      els.thumbnailFilename.classList.add('has-file');
+    }
+    if (els.thumbnailClearBtn) show(els.thumbnailClearBtn);
+  };
+  reader.onerror = () => {
+    alert('Could not read the image file. Please try again.');
+  };
+  reader.readAsDataURL(file);
 }
 
 /* ============================================================ */
@@ -1510,6 +1780,9 @@ async function runSocialWorkflow() {
     goal: (els.socialGoal && els.socialGoal.value) || '',
     output_depth: (els.socialOutputDepth && els.socialOutputDepth.value) || '',
   };
+  if (thumbnailData && thumbnailData.dataUri) {
+    payload.image_data = thumbnailData.dataUri;
+  }
   if (!payload.channel) { showError('Choose a Channel / Brand before running the social workflow.'); return; }
   if (backendUp === false) { showError('Backend is not running.'); return; }
   if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
@@ -2503,16 +2776,16 @@ if (els.sidebarNewWorkflowBtn) {
   els.sidebarNewWorkflowBtn.addEventListener('click', openWizard);
 }
 
-// Wizard option clicks
+// Wizard option clicks (Step 1 → Step 2)
 document.querySelectorAll('[data-wizard]').forEach((btn) => {
-  btn.addEventListener('click', () => _applyWizardOption(btn.getAttribute('data-wizard')));
+  btn.addEventListener('click', () => _wizardSelectOption(btn.getAttribute('data-wizard')));
 });
 
-// Wizard close / cancel / blank
+// Wizard close + initial footer buttons (re-wired on each step transition)
 const wizardCloseBtn = document.getElementById('wizard-close-btn');
+if (wizardCloseBtn) wizardCloseBtn.addEventListener('click', closeWizard);
 const wizardCancelBtn = document.getElementById('wizard-cancel-btn');
 const wizardBlankBtn = document.getElementById('wizard-blank-btn');
-if (wizardCloseBtn) wizardCloseBtn.addEventListener('click', closeWizard);
 if (wizardCancelBtn) wizardCancelBtn.addEventListener('click', closeWizard);
 if (wizardBlankBtn) wizardBlankBtn.addEventListener('click', () => {
   closeWizard();
@@ -2548,6 +2821,16 @@ if (els.taskInput) {
 // Social form
 if (els.socialRunBtn) els.socialRunBtn.addEventListener('click', runSocialWorkflow);
 if (els.socialClearBtn) els.socialClearBtn.addEventListener('click', () => startNewWorkflow('social'));
+
+// Thumbnail / image input
+if (els.thumbnailSelectBtn && els.thumbnailFileInput) {
+  els.thumbnailSelectBtn.addEventListener('click', () => els.thumbnailFileInput.click());
+  els.thumbnailFileInput.addEventListener('change', () => {
+    const file = els.thumbnailFileInput.files && els.thumbnailFileInput.files[0];
+    if (file) handleThumbnailSelect(file);
+  });
+}
+if (els.thumbnailClearBtn) els.thumbnailClearBtn.addEventListener('click', clearThumbnail);
 if (els.socialTopicNotes) {
   els.socialTopicNotes.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runSocialWorkflow(); }

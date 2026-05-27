@@ -185,6 +185,7 @@ class SocialMediaRequest(BaseModel):
     topic_notes: str = Field("", description="Topic, rough notes, transcript, or concept.")
     goal: str = Field("", description="Educate / entertain / drive traffic / etc.")
     output_depth: str = Field("", description="Quick / full / weekly plan.")
+    image_data: str | None = Field(None, description="Base64 data URI of an optional thumbnail/image.")
 
 
 class SocialMediaResponse(BaseModel):
@@ -316,6 +317,7 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
                 topic_notes=payload.topic_notes,
                 goal=payload.goal,
                 output_depth=payload.output_depth,
+                image_data=payload.image_data,
             )
         )
     except Exception as exc:

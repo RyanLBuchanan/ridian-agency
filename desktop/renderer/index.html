@@ -371,6 +371,35 @@
                 ></textarea>
               </label>
 
+              <div class="field thumbnail-field">
+                <span class="field-label">Thumbnail / image input</span>
+                <div class="thumbnail-controls">
+                  <button
+                    id="thumbnail-select-btn"
+                    type="button"
+                    class="btn btn-ghost btn-compact"
+                  >Choose image</button>
+                  <span id="thumbnail-filename" class="thumbnail-filename">No image selected</span>
+                  <button
+                    id="thumbnail-clear-btn"
+                    type="button"
+                    class="btn btn-ghost btn-compact thumbnail-clear hidden"
+                  >Remove</button>
+                </div>
+                <input
+                  id="thumbnail-file-input"
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.webp"
+                  class="sr-only"
+                  aria-label="Select a thumbnail or image"
+                />
+                <span class="field-hint">
+                  Optional. Add a thumbnail, screenshot, or image and Ridian
+                  Agency will use it to shape the hook, script, caption, and
+                  visual direction.
+                </span>
+              </div>
+
               <label class="field">
                 <span class="field-label">Topic / idea / notes</span>
                 <textarea
@@ -896,7 +925,8 @@
           >&times;</button>
         </header>
 
-        <div class="wizard-body">
+        <!-- Step 1: choose a workflow type -->
+        <div id="wizard-step1" class="wizard-body">
           <div class="wizard-grid">
             <button type="button" class="wizard-option" data-wizard="research">
               <span class="wizard-option-title">Business research package</span>
@@ -929,7 +959,14 @@
           </div>
         </div>
 
-        <footer class="modal-foot">
+        <!-- Step 2: answer a few questions -->
+        <div id="wizard-step2" class="wizard-body hidden">
+          <p class="wizard-step2-hint">Fill in a few details. You can always edit the result before running.</p>
+          <div id="wizard-fields" class="wizard-fields"></div>
+        </div>
+
+        <!-- Footer: changes between steps -->
+        <footer id="wizard-footer" class="modal-foot">
           <button
             id="wizard-blank-btn"
             type="button"

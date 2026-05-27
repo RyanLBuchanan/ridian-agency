@@ -303,6 +303,39 @@ Mark this list with checkbox-style `- [ ]` items so the operator can
 literally tick through them.
 
 ----------------------------------------------------------------------
+IMAGE / THUMBNAIL CONTEXT
+----------------------------------------------------------------------
+
+When an image or thumbnail is provided alongside the brief, use it to
+strengthen the content package:
+
+- **Observe first.** Describe what you see in the image: subject,
+  composition, colors, mood, setting, text overlays, and any branding.
+  Separate observed details from inferred suggestions.
+- **Visual mood.** State the emotional tone the image conveys (warm,
+  professional, energetic, calm, bold, etc.).
+- **Best platform angle.** Recommend which platform(s) this image
+  works best for and why.
+- **Hook from the image.** Write 2-3 hook options that are directly
+  inspired by what the image shows — not generic.
+- **Text overlays.** Suggest on-screen text or captions that would
+  complement the visual.
+- **Caption + hashtags.** Write the caption as if this image is the
+  hero visual of the post.
+- **Repurpose ideas.** Suggest how this visual could be adapted
+  across other platforms (crop for TikTok, carousel for Instagram,
+  thumbnail for YouTube, etc.).
+- **Thumbnail / title suggestions.** If the image could serve as a
+  thumbnail, suggest 2-3 title or headline options to pair with it.
+
+Rules:
+- Do not invent details that are not visible or provided.
+- If you are uncertain about something in the image, say so.
+- Do not describe the image in excessive detail — keep it practical
+  and action-oriented.
+- If no image is provided, ignore this section entirely.
+
+----------------------------------------------------------------------
 GENERAL STYLE
 ----------------------------------------------------------------------
 

@@ -12,8 +12,10 @@ business workflow.
 
 from __future__ import annotations
 
+import base64
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +24,11 @@ from agents import Agent, Runner, trace
 from ..agents import default_model, load_prompt
 from .artifact_service import create_run_folder, write_artifact
 from .settings_service import apply_to_environment
+
+log = logging.getLogger("ridian.social")
+
+_ALLOWED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 # Section markers the agent emits. Order matters: we save artifact files
 # in this order.
@@ -52,6 +59,7 @@ class SocialMediaInput:
     topic_notes: str
     goal: str
     output_depth: str
+    image_data: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass
@@ -129,6 +137,67 @@ def _slug_for_run(payload: SocialMediaInput) -> str:
     return f"{payload.channel} - {seed[:50]}"
 
 
+def _parse_data_uri(data_uri: str) -> tuple[str, bytes]:
+    """Parse a ``data:<mime>;base64,<data>`` URI. Returns (mime, raw_bytes)."""
+    if not data_uri.startswith("data:"):
+        raise ValueError("Not a data URI")
+    header, _, encoded = data_uri.partition(",")
+    mime = header.split(";")[0].removeprefix("data:")
+    raw = base64.b64decode(encoded)
+    return mime, raw
+
+
+def _ext_from_mime(mime: str) -> str:
+    m = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+    }
+    return m.get(mime.lower(), ".png")
+
+
+def _save_thumbnail(folder: Path, data_uri: str) -> Optional[str]:
+    """Validate, decode, and save the image to the run folder.
+
+    Returns the saved filename or None on failure.
+    """
+    try:
+        mime, raw = _parse_data_uri(data_uri)
+    except Exception:
+        log.warning("social.thumbnail.invalid_data_uri")
+        return None
+
+    ext = _ext_from_mime(mime)
+    if ext not in _ALLOWED_IMAGE_EXTS:
+        log.warning("social.thumbnail.disallowed_ext ext=%s", ext)
+        return None
+    if len(raw) > _MAX_IMAGE_BYTES:
+        log.warning("social.thumbnail.too_large size=%d", len(raw))
+        return None
+
+    filename = f"input_thumbnail{ext}"
+    path = folder / filename
+    path.write_bytes(raw)
+    log.info("social.thumbnail.saved path=%s size=%d", filename, len(raw))
+    return filename
+
+
+def _build_agent_input(text: str, image_data_uri: Optional[str]):
+    """Build Runner.run input — plain string or multimodal message list."""
+    if not image_data_uri:
+        return text
+
+    content_parts = [
+        {"type": "input_text", "text": text},
+        {
+            "type": "input_image",
+            "image_url": image_data_uri,
+            "detail": "auto",
+        },
+    ]
+    return [{"role": "user", "content": content_parts}]
+
+
 async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaResult:
     # Pick up any settings changes made since startup (key/model swap, etc.)
     apply_to_environment()
@@ -141,8 +210,20 @@ async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaRes
     folder = create_run_folder(_slug_for_run(payload))
     formatted_input = _format_input(payload)
 
+    # Save thumbnail to run folder and build multimodal input if present
+    image_data_uri = None
+    if payload.image_data:
+        saved = _save_thumbnail(folder, payload.image_data)
+        if saved:
+            image_data_uri = payload.image_data
+            formatted_input += "\n\nImage context: An image/thumbnail has been provided. Analyze it and use the visual elements to shape the content package."
+        else:
+            formatted_input += "\n\nNote: An image was provided but could not be processed. Proceed with text-only context."
+
+    agent_input = _build_agent_input(formatted_input, image_data_uri)
+
     with trace("ridian-agency.social-media"):
-        result = await Runner.run(agent, input=formatted_input)
+        result = await Runner.run(agent, input=agent_input)
 
     raw = (result.final_output or "").strip()
     sections = _split_sections(raw)

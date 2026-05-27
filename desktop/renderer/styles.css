@@ -1164,6 +1164,39 @@ body {
   line-height: 1.5;
 }
 
+/* ---------- Thumbnail / image input ---------- */
+
+.thumbnail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thumbnail-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.thumbnail-filename {
+  font-size: var(--fs-xs);
+  color: var(--color-muted-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 250px;
+}
+
+.thumbnail-filename.has-file {
+  color: var(--color-text-strong);
+  font-weight: 600;
+}
+
+.thumbnail-clear {
+  color: var(--color-error-text);
+}
+
 /* ---------- Review & Publish (guided post-run checklist) ---------- */
 
 .review-publish-card {
@@ -1983,6 +2016,64 @@ body {
   font-size: var(--fs-xs);
   color: var(--color-muted-soft);
   line-height: 1.45;
+}
+
+.wizard-step2-hint {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--color-muted-soft);
+  line-height: 1.5;
+}
+
+.wizard-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wizard-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wizard-field-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+
+.wizard-field-input,
+.wizard-field-select,
+.wizard-field-textarea {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.65rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  width: 100%;
+}
+
+.wizard-field-input:focus,
+.wizard-field-select:focus,
+.wizard-field-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.wizard-field-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.wizard-field-optional {
+  font-size: var(--fs-xs);
+  color: var(--color-muted-soft);
+  font-weight: 400;
 }
 
 @media (max-width: 640px) {

@@ -56,6 +56,11 @@ UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "script.md",
     "caption_package.md",
     "posting_checklist.md",
+    # Uploaded thumbnail/image input
+    "input_thumbnail.png",
+    "input_thumbnail.jpg",
+    "input_thumbnail.jpeg",
+    "input_thumbnail.webp",
 )
 
 _MIME_BY_SUFFIX = {
@@ -64,6 +69,10 @@ _MIME_BY_SUFFIX = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".zip": "application/zip",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
