@@ -49,40 +49,53 @@
           </div>
         </div>
 
-        <nav
-          id="sidebar-outputs"
-          class="sidebar-section sidebar-outputs hidden"
-          aria-label="Outputs for current run"
-        >
-          <h3 class="sidebar-section-title">Outputs</h3>
-          <ul id="sidebar-outputs-list" class="sidebar-list" role="tablist"></ul>
-        </nav>
+        <!-- Scrollable middle section: Outputs nav + Recent Runs -->
+        <div class="sidebar-scroll">
+          <nav
+            id="sidebar-outputs"
+            class="sidebar-section sidebar-outputs hidden"
+            aria-label="Outputs for current run"
+          >
+            <h3 class="sidebar-section-title">Outputs</h3>
+            <ul id="sidebar-outputs-list" class="sidebar-list" role="tablist"></ul>
+          </nav>
 
-        <nav class="sidebar-section sidebar-runs" aria-label="Recent runs">
-          <h3 class="sidebar-section-title">Recent runs</h3>
-          <label class="sr-only" for="sidebar-runs-search">Search recent runs</label>
-          <input
-            id="sidebar-runs-search"
-            type="search"
-            class="sidebar-runs-search"
-            placeholder="Search runs…"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <ul id="sidebar-runs-list" class="sidebar-list"></ul>
-          <!-- Single dynamic empty-state region; JS picks the message based on
-               recent-count / hidden-count / search query. Keeps the markup
-               simple while letting messaging stay contextual. -->
-          <div id="sidebar-runs-empty-state" class="sidebar-empty hidden"></div>
-          <button
-            id="sidebar-hidden-toggle"
-            type="button"
-            class="sidebar-hidden-toggle hidden"
-            aria-expanded="false"
-            aria-controls="sidebar-hidden-list"
-          >Show hidden runs (0)</button>
-          <ul id="sidebar-hidden-list" class="sidebar-hidden-list hidden"></ul>
-        </nav>
+          <nav class="sidebar-section sidebar-runs" aria-label="Recent runs">
+            <div class="sidebar-runs-head">
+              <h3 class="sidebar-section-title">Recent runs</h3>
+              <div id="sidebar-runs-filters" class="sidebar-runs-filters" role="group" aria-label="Filter runs">
+                <button type="button" class="sidebar-filter-chip is-active" data-runs-filter="all">All</button>
+                <button type="button" class="sidebar-filter-chip" data-runs-filter="pinned">Pinned</button>
+                <button type="button" class="sidebar-filter-chip" data-runs-filter="business">Business</button>
+                <button type="button" class="sidebar-filter-chip" data-runs-filter="social">Social</button>
+              </div>
+            </div>
+            <label class="sr-only" for="sidebar-runs-search">Search recent runs</label>
+            <input
+              id="sidebar-runs-search"
+              type="search"
+              class="sidebar-runs-search"
+              placeholder="Search runs…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <ul id="sidebar-runs-list" class="sidebar-list"></ul>
+            <button
+              id="sidebar-runs-show-more"
+              type="button"
+              class="sidebar-show-more hidden"
+            >Show more</button>
+            <div id="sidebar-runs-empty-state" class="sidebar-empty hidden"></div>
+            <button
+              id="sidebar-hidden-toggle"
+              type="button"
+              class="sidebar-hidden-toggle hidden"
+              aria-expanded="false"
+              aria-controls="sidebar-hidden-list"
+            >Show hidden runs (0)</button>
+            <ul id="sidebar-hidden-list" class="sidebar-hidden-list hidden"></ul>
+          </nav>
+        </div>
 
         <div class="sidebar-footer">
           <button

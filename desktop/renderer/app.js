@@ -263,6 +263,7 @@ const els = {
   sidebarRunsList: document.getElementById('sidebar-runs-list'),
   sidebarRunsEmptyState: document.getElementById('sidebar-runs-empty-state'),
   sidebarRunsSearch: document.getElementById('sidebar-runs-search'),
+  sidebarRunsShowMore: document.getElementById('sidebar-runs-show-more'),
   sidebarHiddenToggle: document.getElementById('sidebar-hidden-toggle'),
   sidebarHiddenList: document.getElementById('sidebar-hidden-list'),
   sidebarSettingsBtn: document.getElementById('sidebar-settings-btn'),
@@ -376,6 +377,9 @@ let activeRunFolder = null;          // string — which sidebar run is highligh
 let hiddenRuns = [];                 // [{artifact_folder, name, workflow, channel, mtime_iso}]
 let hiddenRunsExpanded = false;      // disclosure state for the hidden section
 let recentRunsSearch = '';           // current filter text for Recent runs
+let runsFilter = 'all';             // 'all' | 'pinned' | 'business' | 'social'
+let runsExpanded = false;           // false = show RUNS_PAGE_SIZE; true = show all
+const RUNS_PAGE_SIZE = 10;
 
 /* ============================================================ */
 /*                          HELPERS                              */
@@ -677,82 +681,133 @@ function _renderEmptyState({ kind, query }) {
   }
 }
 
+function _applyRunsFilter(runs) {
+  if (runsFilter === 'pinned') return runs.filter((r) => r.pinned);
+  if (runsFilter === 'business') return runs.filter((r) => r.workflow !== 'social');
+  if (runsFilter === 'social') return runs.filter((r) => r.workflow === 'social');
+  return runs; // 'all'
+}
+
+function _buildRunLi(run) {
+  const li = document.createElement('li');
+  li.className = 'sidebar-run-li';
+  if (run.pinned) li.classList.add('is-pinned');
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'sidebar-list-item';
+  if (run.artifact_folder === activeRunFolder) btn.classList.add('is-active');
+  btn.setAttribute('data-folder', run.artifact_folder);
+  const labelChannel = run.workflow === 'social' ? (run.channel || 'Custom') : 'Business';
+  const title = prettifyRunName(run.name);
+  btn.innerHTML = `
+    <span class="sidebar-run-title">${escapeHtml(title)}</span>
+    <span class="sidebar-run-meta">${escapeHtml(labelChannel)} · ${escapeHtml(fmtDateShort(run.mtime_iso))}</span>
+  `;
+  btn.addEventListener('click', () => openProjectFromSidebar(run));
+
+  const actions = document.createElement('span');
+  actions.className = 'sidebar-run-actions';
+
+  const pinBtn = document.createElement('button');
+  pinBtn.type = 'button';
+  pinBtn.className = 'sidebar-pin-btn';
+  pinBtn.setAttribute(
+    'aria-label',
+    run.pinned ? `Unpin ${title}` : `Pin ${title} to top`
+  );
+  pinBtn.setAttribute('title', run.pinned ? 'Unpin from top' : 'Pin to top');
+  pinBtn.textContent = run.pinned ? '★' : '☆';
+  pinBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (run.pinned) unpinRun(run);
+    else pinRun(run);
+  });
+
+  const hideBtn = document.createElement('button');
+  hideBtn.type = 'button';
+  hideBtn.className = 'sidebar-hide-btn';
+  hideBtn.setAttribute('aria-label', `Hide ${title} from sidebar`);
+  hideBtn.setAttribute('title', 'Hide from sidebar');
+  hideBtn.textContent = '×';
+  hideBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideRunFromSidebar(run);
+  });
+
+  actions.appendChild(pinBtn);
+  actions.appendChild(hideBtn);
+  li.appendChild(btn);
+  li.appendChild(actions);
+  return li;
+}
+
+function _addGroupLabel(container, text) {
+  const div = document.createElement('li');
+  div.className = 'sidebar-pinned-divider';
+  div.setAttribute('aria-hidden', 'true');
+  div.textContent = text;
+  container.appendChild(div);
+}
+
 function renderRecentRuns() {
   if (!els.sidebarRunsList) return;
   els.sidebarRunsList.innerHTML = '';
 
+  // Update filter chip active state
+  document.querySelectorAll('[data-runs-filter]').forEach((chip) => {
+    chip.classList.toggle('is-active', chip.getAttribute('data-runs-filter') === runsFilter);
+  });
+
   if (!recentRuns.length) {
-    // No visible runs. Distinguish "none ever" from "all hidden".
     if (hiddenRuns.length > 0) {
       _renderEmptyState({ kind: 'all-hidden' });
     } else {
       _renderEmptyState({ kind: 'no-runs' });
     }
+    if (els.sidebarRunsShowMore) hide(els.sidebarRunsShowMore);
     return;
   }
 
   const q = (recentRunsSearch || '').trim().toLowerCase();
-  const filtered = recentRuns.filter((r) => _runMatchesSearch(r, q));
+  let filtered = recentRuns.filter((r) => _runMatchesSearch(r, q));
+  filtered = _applyRunsFilter(filtered);
 
   if (!filtered.length) {
-    _renderEmptyState({ kind: 'no-match', query: recentRunsSearch });
+    _renderEmptyState({ kind: 'no-match', query: recentRunsSearch || runsFilter });
+    if (els.sidebarRunsShowMore) hide(els.sidebarRunsShowMore);
     return;
   }
   _setEmptyStateHtml('');
 
-  filtered.forEach((run) => {
-    const li = document.createElement('li');
-    li.className = 'sidebar-run-li';
-    if (run.pinned) li.classList.add('is-pinned');
+  // Separate pinned from unpinned
+  const pinned = filtered.filter((r) => r.pinned);
+  const unpinned = filtered.filter((r) => !r.pinned);
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'sidebar-list-item';
-    if (run.artifact_folder === activeRunFolder) btn.classList.add('is-active');
-    btn.setAttribute('data-folder', run.artifact_folder);
-    const labelChannel = run.workflow === 'social' ? (run.channel || 'Custom') : 'Business';
-    const title = prettifyRunName(run.name);
-    btn.innerHTML = `
-      <span class="sidebar-run-title">${escapeHtml(title)}</span>
-      <span class="sidebar-run-meta">${escapeHtml(labelChannel)} · ${escapeHtml(fmtDateShort(run.mtime_iso))}</span>
-    `;
-    btn.addEventListener('click', () => openProjectFromSidebar(run));
+  // Pinned always visible
+  if (pinned.length && unpinned.length) _addGroupLabel(els.sidebarRunsList, 'Pinned');
+  pinned.forEach((run) => els.sidebarRunsList.appendChild(_buildRunLi(run)));
 
-    const actions = document.createElement('span');
-    actions.className = 'sidebar-run-actions';
+  // Recent (unpinned) — paginate
+  if (unpinned.length && pinned.length) _addGroupLabel(els.sidebarRunsList, 'Recent');
+  const limit = runsExpanded ? unpinned.length : RUNS_PAGE_SIZE;
+  const visible = unpinned.slice(0, limit);
+  const hasMore = unpinned.length > limit;
+  visible.forEach((run) => els.sidebarRunsList.appendChild(_buildRunLi(run)));
 
-    const pinBtn = document.createElement('button');
-    pinBtn.type = 'button';
-    pinBtn.className = 'sidebar-pin-btn';
-    pinBtn.setAttribute(
-      'aria-label',
-      run.pinned ? `Unpin ${title}` : `Pin ${title} to top`
-    );
-    pinBtn.setAttribute('title', run.pinned ? 'Unpin from top' : 'Pin to top');
-    pinBtn.textContent = run.pinned ? '★' : '☆';
-    pinBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (run.pinned) unpinRun(run);
-      else pinRun(run);
-    });
-
-    const hideBtn = document.createElement('button');
-    hideBtn.type = 'button';
-    hideBtn.className = 'sidebar-hide-btn';
-    hideBtn.setAttribute('aria-label', `Hide ${title} from sidebar`);
-    hideBtn.setAttribute('title', 'Hide from sidebar');
-    hideBtn.textContent = '×';
-    hideBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      hideRunFromSidebar(run);
-    });
-
-    actions.appendChild(pinBtn);
-    actions.appendChild(hideBtn);
-    li.appendChild(btn);
-    li.appendChild(actions);
-    els.sidebarRunsList.appendChild(li);
-  });
+  // Show more / Show less
+  if (els.sidebarRunsShowMore) {
+    if (hasMore || runsExpanded) {
+      show(els.sidebarRunsShowMore);
+      if (runsExpanded) {
+        els.sidebarRunsShowMore.textContent = 'Show less';
+      } else {
+        els.sidebarRunsShowMore.textContent = `Show ${unpinned.length - limit} more`;
+      }
+    } else {
+      hide(els.sidebarRunsShowMore);
+    }
+  }
 }
 
 function renderHiddenRuns() {
@@ -2305,6 +2360,24 @@ if (els.sidebarHiddenToggle) {
 if (els.sidebarRunsSearch) {
   els.sidebarRunsSearch.addEventListener('input', () => {
     recentRunsSearch = els.sidebarRunsSearch.value || '';
+    runsExpanded = false;
+    renderRecentRuns();
+  });
+}
+
+// Sidebar filter chips
+document.querySelectorAll('[data-runs-filter]').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    runsFilter = chip.getAttribute('data-runs-filter') || 'all';
+    runsExpanded = false;
+    renderRecentRuns();
+  });
+});
+
+// Show more / Show less toggle
+if (els.sidebarRunsShowMore) {
+  els.sidebarRunsShowMore.addEventListener('click', () => {
+    runsExpanded = !runsExpanded;
     renderRecentRuns();
   });
 }

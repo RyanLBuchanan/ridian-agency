@@ -98,9 +98,7 @@ body {
   border-right: 1px solid var(--color-sidebar-border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -430,8 +428,11 @@ body {
   opacity: 1;
 }
 
-/* A pinned item shows its star always so the user can see at a glance which
-   rows are pinned. The button still toggles to unpin on click. */
+/* Pinned items show a subtle left accent and always-visible star. */
+.sidebar-run-li.is-pinned .sidebar-list-item {
+  border-left: 2.5px solid var(--color-accent);
+}
+
 .sidebar-run-li.is-pinned .sidebar-pin-btn {
   opacity: 1;
   color: var(--color-accent);
@@ -564,13 +565,93 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
 .sidebar-runs {
   flex: 1;
   min-height: 0;
 }
 
+.sidebar-runs-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-runs-filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sidebar-filter-chip {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-soft);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 100ms ease;
+  line-height: 1.4;
+}
+
+.sidebar-filter-chip:hover:not(.is-active) {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text);
+}
+
+.sidebar-filter-chip.is-active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.sidebar-filter-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.sidebar-show-more {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 6px 0;
+  cursor: pointer;
+  text-align: center;
+  transition: color 120ms ease;
+}
+
+.sidebar-show-more:hover { color: var(--color-accent-deep); }
+.sidebar-show-more:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.sidebar-pinned-divider {
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-soft);
+  padding: 6px 4px 2px;
+}
+
 .sidebar-footer {
-  margin-top: auto;
+  flex-shrink: 0;
   padding: var(--space-3);
   border-top: 1px solid var(--color-sidebar-border);
 }
