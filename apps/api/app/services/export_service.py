@@ -57,6 +57,11 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "agentic_advances_brief.md",
         # NotebookLM Package
         "notebooklm_package.md",
+        # Operator v1 — audiobook + sources + script + machine log
+        "sources_packet.md",
+        "script.md",
+        "audiobook.mp3",
+        "operation_log.json",
     }
 )
 

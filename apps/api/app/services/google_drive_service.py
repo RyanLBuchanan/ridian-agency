@@ -61,6 +61,11 @@ UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "agentic_advances_brief.md",
     # NotebookLM Package
     "notebooklm_package.md",
+    # Operator v1 — finished business artifacts
+    "sources_packet.md",
+    "script.md",
+    "audiobook.mp3",
+    "operation_log.json",
     # Uploaded thumbnail/image input
     "input_thumbnail.png",
     "input_thumbnail.jpg",
@@ -78,6 +83,8 @@ _MIME_BY_SUFFIX = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
+    ".mp3": "audio/mpeg",
+    ".json": "application/json",
 }
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -281,6 +288,8 @@ _BUSINESS_MARKERS = (
 )
 _AGENTIC_MARKERS = ("agentic_advances_brief.md",)
 _NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
+_OPERATOR_MARKERS = ("operation_log.json",)
+_AUDIOBOOK_MARKERS = ("audiobook.mp3",)
 
 # Root path every upload lands under. Concrete subfolders are appended per workflow.
 _DRIVE_ROOT_PATH = ["Ridian Technologies", "Ridian Agency"]
@@ -343,7 +352,15 @@ def infer_drive_destination(artifact_folder: Path) -> list[str]:
     has_business = any((artifact_folder / f).is_file() for f in _BUSINESS_MARKERS)
     has_agentic = any((artifact_folder / f).is_file() for f in _AGENTIC_MARKERS)
     has_notebooklm = any((artifact_folder / f).is_file() for f in _NOTEBOOKLM_MARKERS)
+    has_audiobook = any((artifact_folder / f).is_file() for f in _AUDIOBOOK_MARKERS)
+    has_operator = any((artifact_folder / f).is_file() for f in _OPERATOR_MARKERS)
 
+    # Operator runs win over plain "business" detection — they carry their own
+    # operation log and are categorized by deliverable (audiobook vs. other).
+    if has_audiobook or (has_operator and "audiobook" in artifact_folder.name.lower()):
+        return list(_DRIVE_ROOT_PATH) + ["Audio Briefings"]
+    if has_operator:
+        return list(_DRIVE_ROOT_PATH) + ["Operations"]
     if has_social:
         channel = _read_channel_from_task(artifact_folder)
         return list(_DRIVE_ROOT_PATH) + map_channel_to_path(channel)

@@ -790,6 +790,7 @@ function _buildRunLi(run) {
   if (run.workflow === 'social') labelChannel = run.channel || 'Custom';
   else if (run.workflow === 'agentic') labelChannel = 'Agentic Brief';
   else if (run.workflow === 'notebooklm') labelChannel = 'NotebookLM';
+  else if (run.workflow === 'operator') labelChannel = 'Operator';
   else labelChannel = 'Business';
   const title = prettifyRunName(run.name);
   btn.innerHTML = `
@@ -1099,6 +1100,20 @@ async function openProjectFromSidebar(run) {
       throw new Error((data && data.detail) || `HTTP ${res.status}`);
     }
     const data = await res.json();
+    // Operator runs aren't replayable in v1 — they're streaming-only artifacts.
+    // Open the output folder so the operator can play the mp3 + read the files.
+    if (data.workflow === 'operator') {
+      try {
+        await fetch(`${BACKEND}/artifacts/open-folder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ artifact_folder: data.artifact_folder }),
+        });
+      } catch (_) { /* best-effort */ }
+      activeRunFolder = data.artifact_folder;
+      renderRecentRuns();
+      return;
+    }
     let mode = 'business';
     if (data.workflow === 'social') mode = 'social';
     else if (data.workflow === 'agentic') mode = 'agentic';
@@ -3608,6 +3623,7 @@ function _renderRecent(items) {
     if (r.workflow === 'social') { channel = r.channel || 'Social'; icon = 'S'; }
     else if (r.workflow === 'agentic') { channel = 'Agentic Brief'; icon = 'A'; }
     else if (r.workflow === 'notebooklm') { channel = 'NotebookLM'; icon = 'N'; }
+    else if (r.workflow === 'operator') { channel = 'Operator'; icon = 'O'; }
     else { channel = 'Business'; icon = 'B'; }
     const title = prettifyRunName(r.name || '');
     const btn = document.createElement('button');
@@ -4109,3 +4125,456 @@ setWorkspaceView('welcome');
 fetch(`${BACKEND}/settings`).then(r => r.ok ? r.json() : null).then(data => {
   if (data) { cachedSettings = data; applyTheme(data.appearance); }
 }).catch(() => { applyTheme('system'); });
+
+
+/* ============================================================ */
+/*               OPERATOR v1 — natural-command surface          */
+/* ============================================================ */
+/*
+ * SSE protocol (from /operations/run):
+ *   start    | step | artifact | message | error | complete | end
+ *
+ * Streams via fetch + ReadableStream (EventSource doesn't allow POST).
+ */
+
+const OPERATOR = {
+  form:           document.getElementById('operator-form'),
+  command:        document.getElementById('operator-command'),
+  runBtn:         document.getElementById('operator-run-btn'),
+  cancelBtn:      document.getElementById('operator-cancel-btn'),
+  elapsed:        document.getElementById('operator-elapsed'),
+  active:         document.getElementById('operator-active'),
+  statusDot:      document.getElementById('operator-active-status-dot'),
+  statusLabel:    document.getElementById('operator-active-status-label'),
+  folder:         document.getElementById('operator-active-folder'),
+  timeline:       document.getElementById('operator-timeline'),
+  artifactsCard:  document.getElementById('operator-artifacts-card'),
+  artifactsList:  document.getElementById('operator-artifacts-list'),
+  audioPlayer:    document.getElementById('operator-audio-player'),
+  audio:          document.getElementById('operator-audio'),
+  audioName:      document.getElementById('operator-audio-name'),
+  errors:         document.getElementById('operator-errors'),
+  status:         document.getElementById('operator-actions-status'),
+  openFolderBtn:  document.getElementById('operator-open-folder'),
+  uploadDriveBtn: document.getElementById('operator-upload-drive'),
+  emailMeBtn:     document.getElementById('operator-email-me'),
+};
+
+const operatorState = {
+  abortController: null,
+  active: null,        // { id, artifact_folder, command, intent }
+  finalRecord: null,   // populated on 'complete'
+  artifacts: [],
+  elapsedTimer: null,
+  elapsedStart: null,
+};
+
+function _opSetStatus(text, kind) {
+  if (!OPERATOR.status) return;
+  OPERATOR.status.textContent = text || '';
+  OPERATOR.status.className = 'operator-actions-status';
+  if (kind === 'ok') OPERATOR.status.classList.add('is-ok');
+  if (kind === 'err') OPERATOR.status.classList.add('is-err');
+}
+
+function _opSetRunning(running) {
+  if (!OPERATOR.runBtn) return;
+  OPERATOR.runBtn.disabled = running;
+  OPERATOR.runBtn.textContent = running ? 'Running…' : 'Run operation';
+  if (OPERATOR.cancelBtn) OPERATOR.cancelBtn.classList.toggle('hidden', !running);
+}
+
+function _opSetStatusDot(kind) {
+  if (!OPERATOR.statusDot) return;
+  OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed', 'is-partial');
+  OPERATOR.statusDot.classList.add('is-' + kind);
+  if (OPERATOR.statusLabel) {
+    OPERATOR.statusLabel.textContent =
+      kind === 'running'   ? 'Running…' :
+      kind === 'completed' ? 'Completed' :
+      kind === 'partial'   ? 'Completed with issues' :
+      kind === 'failed'    ? 'Failed' :
+      'Idle';
+  }
+}
+
+function _opStartElapsed() {
+  operatorState.elapsedStart = Date.now();
+  if (OPERATOR.elapsed) OPERATOR.elapsed.textContent = '0:00';
+  operatorState.elapsedTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - operatorState.elapsedStart) / 1000);
+    if (OPERATOR.elapsed) {
+      OPERATOR.elapsed.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+  }, 1000);
+}
+
+function _opStopElapsed() {
+  if (operatorState.elapsedTimer) clearInterval(operatorState.elapsedTimer);
+  operatorState.elapsedTimer = null;
+}
+
+function _opResetUI() {
+  if (OPERATOR.timeline) OPERATOR.timeline.innerHTML = '';
+  if (OPERATOR.artifactsList) OPERATOR.artifactsList.innerHTML = '';
+  if (OPERATOR.errors) { OPERATOR.errors.innerHTML = ''; OPERATOR.errors.classList.add('hidden'); }
+  if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.add('hidden');
+  if (OPERATOR.audioPlayer) OPERATOR.audioPlayer.classList.add('hidden');
+  if (OPERATOR.audio) { OPERATOR.audio.pause(); OPERATOR.audio.removeAttribute('src'); }
+  if (OPERATOR.folder) OPERATOR.folder.textContent = '';
+  _opSetStatus('');
+  operatorState.artifacts = [];
+  operatorState.finalRecord = null;
+}
+
+const STEP_LABELS = {
+  interpret: 'Interpreting command',
+  research:  'Researching the live web',
+  script:    'Writing audiobook script',
+  audio:     'Synthesizing audio',
+};
+
+function _opRenderStep(step) {
+  if (!OPERATOR.timeline) return;
+  let li = OPERATOR.timeline.querySelector(`[data-step="${step.name}"]`);
+  if (!li) {
+    li = document.createElement('li');
+    li.className = 'operator-step';
+    li.setAttribute('data-step', step.name);
+    li.innerHTML = `
+      <span class="operator-step-icon"></span>
+      <span class="operator-step-body">
+        <span class="operator-step-name"></span>
+        <span class="operator-step-detail"></span>
+      </span>
+      <span class="operator-step-time"></span>
+    `;
+    OPERATOR.timeline.appendChild(li);
+  }
+  li.classList.remove('is-running', 'is-completed', 'is-failed', 'is-skipped');
+  li.classList.add('is-' + step.status);
+  li.querySelector('.operator-step-name').textContent = STEP_LABELS[step.name] || step.name;
+  li.querySelector('.operator-step-detail').textContent = step.detail || '';
+  const icon = li.querySelector('.operator-step-icon');
+  icon.textContent =
+    step.status === 'completed' ? '✓' :
+    step.status === 'failed'    ? '!' :
+    step.status === 'skipped'   ? '–' :
+    '•';
+  const time = li.querySelector('.operator-step-time');
+  if (step.started_at && step.completed_at) {
+    const dt = (new Date(step.completed_at).getTime() - new Date(step.started_at).getTime()) / 1000;
+    time.textContent = `${dt.toFixed(0)}s`;
+  } else {
+    time.textContent = '';
+  }
+}
+
+function _opIconForKind(kind) {
+  if (kind === 'audio') return '♪';
+  if (kind === 'markdown') return 'M';
+  if (kind === 'json') return 'J';
+  return '·';
+}
+
+function _opRenderArtifact(art) {
+  if (!OPERATOR.artifactsCard) return;
+  OPERATOR.artifactsCard.classList.remove('hidden');
+  // Replace if same name already present (avoid duplicates).
+  const existing = OPERATOR.artifactsList.querySelector(`[data-artifact-name="${art.name}"]`);
+  if (existing) existing.remove();
+
+  const li = document.createElement('li');
+  li.className = 'operator-artifact-item';
+  li.setAttribute('data-artifact-name', art.name);
+  li.innerHTML = `
+    <span class="operator-artifact-icon" aria-hidden="true">${escapeHtml(_opIconForKind(art.kind))}</span>
+    <span>
+      <span class="operator-artifact-name">${escapeHtml(art.name)}</span>
+      <span class="operator-artifact-meta">${escapeHtml(art.kind)}</span>
+    </span>
+  `;
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'operator-artifact-open';
+  openBtn.textContent = 'Open';
+  openBtn.addEventListener('click', () => _opOpenArtifactFile(art.name));
+  li.appendChild(openBtn);
+  OPERATOR.artifactsList.appendChild(li);
+
+  if (art.kind === 'audio' && art.name.toLowerCase().endsWith('.mp3')) {
+    _opShowAudio(art.name);
+  }
+}
+
+function _opShowAudio(filename) {
+  if (!OPERATOR.audio || !operatorState.active || !operatorState.active.artifact_folder) return;
+  const url = `${BACKEND}/operations/audio?artifact_folder=${encodeURIComponent(operatorState.active.artifact_folder)}&filename=${encodeURIComponent(filename)}`;
+  OPERATOR.audio.src = url;
+  if (OPERATOR.audioName) OPERATOR.audioName.textContent = filename;
+  if (OPERATOR.audioPlayer) OPERATOR.audioPlayer.classList.remove('hidden');
+}
+
+function _opRenderError(message) {
+  if (!OPERATOR.errors) return;
+  OPERATOR.errors.classList.remove('hidden');
+  if (!OPERATOR.errors.querySelector('.operator-errors-title')) {
+    OPERATOR.errors.innerHTML = `
+      <div class="operator-errors-title">Issues during this operation</div>
+      <ul class="operator-errors-list"></ul>
+    `;
+  }
+  const ul = OPERATOR.errors.querySelector('.operator-errors-list');
+  const li = document.createElement('li');
+  li.textContent = message;
+  ul.appendChild(li);
+}
+
+async function _opParseSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const evt = _opParseSSEBlock(rawEvent);
+      if (evt) _opHandleEvent(evt);
+    }
+  }
+}
+
+function _opParseSSEBlock(block) {
+  let event = 'message';
+  const dataLines = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(':')) continue;
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  if (!dataLines.length) return null;
+  let data = null;
+  try { data = JSON.parse(dataLines.join('\n')); } catch (_) { data = { raw: dataLines.join('\n') }; }
+  return { event, data };
+}
+
+function _opHandleEvent(evt) {
+  switch (evt.event) {
+    case 'start':
+      operatorState.active = evt.data || {};
+      if (OPERATOR.folder) OPERATOR.folder.textContent = evt.data.artifact_folder || '';
+      _opSetStatusDot('running');
+      break;
+    case 'step':
+      _opRenderStep(evt.data || {});
+      break;
+    case 'artifact': {
+      const a = evt.data || {};
+      operatorState.artifacts.push(a);
+      _opRenderArtifact(a);
+      break;
+    }
+    case 'message':
+      // No-op for v1; could surface as a toast later.
+      break;
+    case 'error':
+      _opRenderError((evt.data && evt.data.message) || 'Unknown error');
+      break;
+    case 'complete':
+      operatorState.finalRecord = evt.data || null;
+      _opSetStatusDot(((evt.data && evt.data.status) || 'completed'));
+      break;
+    case 'end':
+      _opStopElapsed();
+      _opSetRunning(false);
+      // If we never received a 'complete' event, mark as failed for clarity.
+      if (!operatorState.finalRecord) _opSetStatusDot('failed');
+      break;
+  }
+}
+
+async function _opSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const command = (OPERATOR.command && OPERATOR.command.value || '').trim();
+  if (command.length < 4) {
+    _opSetStatus('Type a command first.', 'err');
+    return;
+  }
+  _opResetUI();
+  _opSetRunning(true);
+  if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+  _opSetStatusDot('running');
+  _opStartElapsed();
+
+  operatorState.abortController = new AbortController();
+
+  try {
+    const res = await fetch(`${BACKEND}/operations/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ command }),
+      signal: operatorState.abortController.signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    await _opParseSSE(res);
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      _opSetStatus('Operation cancelled.', 'err');
+    } else {
+      const msg = err && err.message ? err.message : String(err);
+      _opRenderError(/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable.' : msg);
+    }
+    _opSetStatusDot('failed');
+  } finally {
+    _opStopElapsed();
+    _opSetRunning(false);
+    operatorState.abortController = null;
+  }
+}
+
+async function _opOpenArtifactFile(filename) {
+  if (!operatorState.active || !operatorState.active.artifact_folder) return;
+  if (filename.toLowerCase().endsWith('.json')) {
+    // No JSON allowlisting in the open-file endpoint; just open the folder.
+    return _opOpenArtifactFolder();
+  }
+  try {
+    const res = await fetch(`${BACKEND}/artifacts/open-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        artifact_folder: operatorState.active.artifact_folder,
+        filename,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    _opSetStatus(`Opened ${filename}.`, 'ok');
+  } catch (err) {
+    _opSetStatus(`Could not open ${filename}: ${err.message || err}`, 'err');
+  }
+}
+
+async function _opOpenArtifactFolder() {
+  if (!operatorState.active || !operatorState.active.artifact_folder) {
+    _opSetStatus('No active operation.', 'err');
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND}/artifacts/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: operatorState.active.artifact_folder }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    _opSetStatus('Output folder opened.', 'ok');
+  } catch (err) {
+    _opSetStatus(`Could not open folder: ${err.message || err}`, 'err');
+  }
+}
+
+async function _opUploadDrive() {
+  if (!operatorState.active || !operatorState.active.artifact_folder) {
+    _opSetStatus('No active operation to upload.', 'err');
+    return;
+  }
+  _opSetStatus('Uploading to Google Drive…');
+  try {
+    const res = await fetch(`${BACKEND}/google/upload-artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: operatorState.active.artifact_folder }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    const path = (data && data.drive_path) || (data && data.drive_folder_name) || 'Drive';
+    _opSetStatus(`Uploaded to ${path} (${(data.uploaded_files || []).length} files).`, 'ok');
+  } catch (err) {
+    _opSetStatus(`Upload failed: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+async function _opEmailMe() {
+  if (!operatorState.finalRecord) {
+    _opSetStatus('Wait for the operation to finish first.', 'err');
+    return;
+  }
+  const folder = (operatorState.active && operatorState.active.artifact_folder) || '';
+  const name = folder.split(/[\\/]/).pop() || 'Operation';
+  const body =
+    `Ridian Operator package: ${name}\n\n` +
+    `Command:\n${operatorState.active && operatorState.active.command || ''}\n\n` +
+    `Status: ${operatorState.finalRecord.status}\n` +
+    `Sources: ${operatorState.finalRecord.sources_count}\n` +
+    `Audio generated: ${operatorState.finalRecord.audio_generated}\n` +
+    `Artifacts:\n` +
+    (operatorState.finalRecord.artifacts || [])
+      .map((a) => `  - ${a.name} (${a.path})`)
+      .join('\n') +
+    `\n\nLocal folder:\n${folder}\n`;
+  const ok = window.confirm('Send this operation package summary to your configured email address?');
+  if (!ok) return;
+  _opSetStatus('Sending email…');
+  try {
+    const res = await fetch(`${BACKEND}/email/send-approved`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: `Ridian Operator — ${name}`,
+        body,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    const to = data && data.to_email ? ` to ${data.to_email}` : '';
+    _opSetStatus(`Email sent${to}.`, 'ok');
+  } catch (err) {
+    _opSetStatus(`Email failed: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+// Wire up the operator surface (only fires if elements exist).
+if (OPERATOR.form) {
+  OPERATOR.form.addEventListener('submit', _opSubmit);
+}
+if (OPERATOR.command) {
+  OPERATOR.command.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); _opSubmit(); }
+  });
+}
+if (OPERATOR.cancelBtn) {
+  OPERATOR.cancelBtn.addEventListener('click', () => {
+    if (operatorState.abortController) operatorState.abortController.abort();
+  });
+}
+if (OPERATOR.openFolderBtn) OPERATOR.openFolderBtn.addEventListener('click', _opOpenArtifactFolder);
+if (OPERATOR.uploadDriveBtn) OPERATOR.uploadDriveBtn.addEventListener('click', _opUploadDrive);
+if (OPERATOR.emailMeBtn) OPERATOR.emailMeBtn.addEventListener('click', _opEmailMe);
+
+// Example chips populate the textarea.
+document.querySelectorAll('[data-operator-example]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const text = btn.getAttribute('data-operator-example') || '';
+    if (OPERATOR.command) {
+      OPERATOR.command.value = text;
+      OPERATOR.command.focus();
+    }
+  });
+});

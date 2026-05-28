@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -38,6 +39,8 @@ from .services.export_service import (  # noqa: E402
 from .services import dashboard_service  # noqa: E402
 from .services import google_drive_service  # noqa: E402
 from .services import memory_service  # noqa: E402
+from .services import operation_log_service  # noqa: E402
+from .services import operator_service  # noqa: E402
 from .services import project_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
     ALLOWED_OUTPUT_DEPTHS as AGENTIC_DEPTHS,
@@ -736,6 +739,90 @@ async def memory_brand_save(payload: BrandPayload) -> dict:
 @app.get("/dashboard")
 async def dashboard_get() -> dict:
     return dashboard_service.build_dashboard()
+
+
+# ---------------------------------------------------------------------------
+# Operator v1 — natural-command operations + live SSE timeline
+# ---------------------------------------------------------------------------
+
+
+class OperationRunRequest(BaseModel):
+    command: str = Field(..., min_length=4, description="Natural-language command for Ridian to execute.")
+
+
+@app.post("/operations/run")
+async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
+    """Run an operation and stream timeline events as Server-Sent Events.
+
+    The renderer subscribes via fetch + ReadableStream (or EventSource).
+    Each event is a JSON object on a single ``data:`` line, terminated by
+    a blank line per SSE spec.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def emit(event: dict) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        try:
+            await operator_service.run_operation(command=payload.command, emit=emit)
+        finally:
+            await queue.put(None)  # sentinel — stop the stream
+
+    asyncio.create_task(runner())
+
+    async def event_stream():
+        # Initial comment line so the client immediately knows the stream is live.
+        yield ": connected\n\n"
+        while True:
+            evt = await queue.get()
+            if evt is None:
+                yield "event: end\ndata: {}\n\n"
+                break
+            try:
+                payload_json = json.dumps(evt.get("data", {}), default=str)
+            except (TypeError, ValueError):
+                payload_json = json.dumps({"raw": str(evt)})
+            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+
+@app.get("/operations/recent")
+async def operations_recent(limit: int = 20) -> dict:
+    return {"operations": operation_log_service.list_recent(limit=limit)}
+
+
+@app.get("/operations/{operation_id}")
+async def operations_get(operation_id: str) -> dict:
+    rec = operation_log_service.get_operation(operation_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="operation not found")
+    return rec
+
+
+@app.get("/operations/audio")
+async def operations_audio(artifact_folder: str, filename: str = "audiobook.mp3") -> FileResponse:
+    """Serve an audio artifact for inline playback.
+
+    Reuses project_service's path-traversal protection so only files inside
+    the configured outputs/ directory can be served.
+    """
+    if filename != "audiobook.mp3":
+        raise HTTPException(status_code=400, detail="Only audiobook.mp3 may be streamed.")
+    try:
+        folder = project_service._resolve_project_folder(artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    path = folder / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="audio file not found")
+    return FileResponse(str(path), media_type="audio/mpeg", filename=filename)
 
 
 @app.post("/email/send-approved", response_model=EmailSendResponse)

@@ -65,6 +65,7 @@ _BUSINESS_MARKERS = (
 )
 _AGENTIC_MARKERS = ("agentic_advances_brief.md",)
 _NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
+_OPERATOR_MARKERS = ("operation_log.json",)
 
 # Sibling of .env / local_settings.json. Stores per-machine sidebar
 # preferences (hidden + pinned). Git-ignored. Folders themselves are
@@ -159,6 +160,11 @@ def _detect_workflow(folder: Path) -> str:
         files = {p.name for p in folder.iterdir() if p.is_file()}
     except OSError:
         return "unknown"
+    # Operator runs always carry an operation_log.json and take precedence so
+    # the renderer can show them as a distinct type even when they share other
+    # markers (e.g. script.md is also used by Social workflows).
+    if any(m in files for m in _OPERATOR_MARKERS):
+        return "operator"
     if any(m in files for m in _SOCIAL_MARKERS):
         return "social"
     if any(m in files for m in _BUSINESS_MARKERS):

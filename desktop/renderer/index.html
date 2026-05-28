@@ -211,6 +211,84 @@
 
           <!-- ======================== WELCOME STATE ======================== -->
           <section id="view-welcome" class="workspace-view">
+
+            <!-- ============= OPERATOR v1 — COMMAND SURFACE ============= -->
+            <section class="operator" aria-labelledby="operator-heading">
+              <header class="operator-head">
+                <span class="operator-eyebrow">Operator v1</span>
+                <h2 id="operator-heading" class="operator-title">Tell Ridian what to do.</h2>
+                <p class="operator-sub">
+                  Ridian researches, drafts, generates audio, and saves a finished package locally.
+                  External actions like sending email require your approval.
+                </p>
+              </header>
+
+              <form id="operator-form" class="operator-form" autocomplete="off">
+                <label class="sr-only" for="operator-command">Command for Ridian</label>
+                <textarea
+                  id="operator-command"
+                  name="command"
+                  rows="3"
+                  placeholder="Tell Ridian what to do…  (try: &quot;Research the newest in AGI and give me a NotebookLM-style audiobook.&quot;)"
+                  spellcheck="false"
+                ></textarea>
+                <div class="operator-actions">
+                  <button
+                    id="operator-run-btn"
+                    type="submit"
+                    class="btn btn-primary"
+                  >Run operation</button>
+                  <button
+                    id="operator-cancel-btn"
+                    type="button"
+                    class="btn btn-ghost hidden"
+                  >Stop</button>
+                  <span id="operator-elapsed" class="operator-elapsed" aria-live="polite"></span>
+                </div>
+                <div class="operator-examples">
+                  <span class="operator-examples-label">Try:</span>
+                  <button type="button" class="operator-example" data-operator-example="Research the newest in AGI and give me a NotebookLM-style audiobook.">Research the newest in AGI and give me a NotebookLM-style audiobook.</button>
+                </div>
+              </form>
+
+              <!-- Live execution timeline -->
+              <div id="operator-active" class="operator-active hidden">
+                <div class="operator-active-head">
+                  <div class="operator-active-title">
+                    <span id="operator-active-status-dot" class="operator-status-dot is-running" aria-hidden="true"></span>
+                    <span id="operator-active-status-label">Running…</span>
+                  </div>
+                  <span id="operator-active-folder" class="operator-active-folder"></span>
+                </div>
+                <ol id="operator-timeline" class="operator-timeline"></ol>
+              </div>
+
+              <!-- Artifacts panel (live as artifacts land) -->
+              <div id="operator-artifacts-card" class="operator-artifacts-card hidden">
+                <div class="operator-artifacts-head">
+                  <h3 class="operator-artifacts-title">Artifacts</h3>
+                  <div class="operator-artifacts-actions">
+                    <button id="operator-open-folder" type="button" class="btn btn-ghost btn-compact">Open output folder</button>
+                    <button id="operator-upload-drive" type="button" class="btn btn-ghost btn-compact">Upload to Google Drive</button>
+                    <button id="operator-email-me" type="button" class="btn btn-ghost btn-compact">Email package to me</button>
+                  </div>
+                </div>
+                <ul id="operator-artifacts-list" class="operator-artifacts-list"></ul>
+                <div id="operator-audio-player" class="operator-audio-player hidden">
+                  <audio id="operator-audio" controls preload="metadata"></audio>
+                  <div class="operator-audio-meta">
+                    <span id="operator-audio-name">audiobook.mp3</span>
+                  </div>
+                </div>
+                <div id="operator-errors" class="operator-errors hidden"></div>
+                <span id="operator-actions-status" class="operator-actions-status" role="status" aria-live="polite"></span>
+              </div>
+            </section>
+
+            <!-- Templates & context — demoted dashboard (still available, no longer the main focus) -->
+            <details id="operator-templates" class="operator-templates">
+              <summary>Templates &amp; context</summary>
+
             <div class="dashboard">
 
               <!-- Hero / briefing -->
@@ -415,6 +493,7 @@
               </div>
 
             </div>
+            </details>
           </section>
 
           <!-- ======================== INPUT (BUSINESS) ======================== -->
