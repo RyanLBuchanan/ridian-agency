@@ -35,8 +35,23 @@ from .services.export_service import (  # noqa: E402
     open_artifact_file,
     open_artifact_folder,
 )
+from .services import dashboard_service  # noqa: E402
 from .services import google_drive_service  # noqa: E402
+from .services import memory_service  # noqa: E402
 from .services import project_service  # noqa: E402
+from .services.agentic_advances_workflow_service import (  # noqa: E402
+    ALLOWED_OUTPUT_DEPTHS as AGENTIC_DEPTHS,
+    ALLOWED_TIME_WINDOWS as AGENTIC_WINDOWS,
+    AgenticAdvancesInput,
+    run_agentic_advances_workflow,
+)
+from .services.notebooklm_workflow_service import (  # noqa: E402
+    ALLOWED_AUDIENCES as NLM_AUDIENCES,
+    ALLOWED_OUTPUT_TYPES as NLM_OUTPUT_TYPES,
+    ALLOWED_PURPOSES as NLM_PURPOSES,
+    NotebookLMInput,
+    run_notebooklm_workflow,
+)
 from .services.social_media_workflow_service import (  # noqa: E402
     SocialMediaInput,
     run_social_media_workflow,
@@ -227,7 +242,7 @@ class ProjectActionResponse(BaseModel):
 
 
 class LoadProjectResponse(BaseModel):
-    """Compatible with both workflow response shapes — renderer reads
+    """Compatible with every workflow response shape — renderer reads
     whichever fields are present for the detected workflow type."""
     artifact_folder: str
     name: str
@@ -245,6 +260,36 @@ class LoadProjectResponse(BaseModel):
     caption_package: str = ""
     posting_checklist: str = ""
     visual_production: str = ""
+    # Agentic Advances
+    agentic_advances_brief: str = ""
+    # NotebookLM
+    notebooklm_package: str = ""
+
+
+class AgenticAdvancesRequest(BaseModel):
+    topic_focus: str = Field("", description="Optional Ridian-specific topic focus.")
+    time_window: str = Field("Last 7 days", description="Look-back window for web research.")
+    output_depth: str = Field("Strategic brief", description="Quick / Strategic / Deep research brief.")
+
+
+class AgenticAdvancesResponse(BaseModel):
+    status: str
+    artifact_folder: str
+    agentic_advances_brief: str
+
+
+class NotebookLMRequest(BaseModel):
+    subject: str = Field(..., min_length=3, description="Subject / topic for the NotebookLM package.")
+    purpose: str = Field("Learn", description="Learn / Strategy / Content / Planning / Teaching.")
+    audience: str = Field("Ryan", description="Intended audience for the package.")
+    output_type: str = Field("Full NotebookLM package", description="Source prompt / Audio Overview / Full.")
+    notes: str = Field("", description="Optional notes or context.")
+
+
+class NotebookLMResponse(BaseModel):
+    status: str
+    artifact_folder: str
+    notebooklm_package: str
 
 
 def _settings_view_with_outputs() -> SettingsView:
@@ -337,6 +382,93 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
         caption_package=result.caption_package,
         posting_checklist=result.posting_checklist,
         visual_production=result.visual_production,
+    )
+
+
+@app.post("/workflows/agentic-advances/run", response_model=AgenticAdvancesResponse)
+async def workflows_agentic_advances_run(payload: AgenticAdvancesRequest) -> AgenticAdvancesResponse:
+    """Run the Agentic Advances Daily Brief workflow.
+
+    Uses the OpenAI Agents SDK hosted ``WebSearchTool`` to ground the brief
+    in current sources. The artifact is a single Markdown file:
+    ``agentic_advances_brief.md``.
+    """
+    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+        )
+
+    if payload.time_window and payload.time_window not in AGENTIC_WINDOWS:
+        raise HTTPException(status_code=400, detail=f"time_window must be one of {list(AGENTIC_WINDOWS)}")
+    if payload.output_depth and payload.output_depth not in AGENTIC_DEPTHS:
+        raise HTTPException(status_code=400, detail=f"output_depth must be one of {list(AGENTIC_DEPTHS)}")
+
+    log.info("agentic.start window=%r depth=%r focus=%r",
+             payload.time_window, payload.output_depth, payload.topic_focus[:80])
+
+    try:
+        result = await run_agentic_advances_workflow(
+            AgenticAdvancesInput(
+                topic_focus=payload.topic_focus,
+                time_window=payload.time_window,
+                output_depth=payload.output_depth,
+            )
+        )
+    except Exception as exc:
+        log.exception("agentic.failed")
+        raise HTTPException(status_code=500, detail=f"agentic advances workflow failed: {exc}") from exc
+
+    log.info("agentic.complete folder=%s", result.artifact_folder)
+    return AgenticAdvancesResponse(
+        status="complete",
+        artifact_folder=str(result.artifact_folder),
+        agentic_advances_brief=result.agentic_advances_brief,
+    )
+
+
+@app.post("/workflows/notebooklm/run", response_model=NotebookLMResponse)
+async def workflows_notebooklm_run(payload: NotebookLMRequest) -> NotebookLMResponse:
+    """Run the NotebookLM Prompt + Audio Overview Builder workflow.
+
+    Produces a single Markdown artifact, ``notebooklm_package.md``, with
+    a copy-paste-ready Audio Overview prompt and supporting prompts.
+    """
+    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+        )
+
+    if payload.purpose and payload.purpose not in NLM_PURPOSES:
+        raise HTTPException(status_code=400, detail=f"purpose must be one of {list(NLM_PURPOSES)}")
+    if payload.audience and payload.audience not in NLM_AUDIENCES:
+        raise HTTPException(status_code=400, detail=f"audience must be one of {list(NLM_AUDIENCES)}")
+    if payload.output_type and payload.output_type not in NLM_OUTPUT_TYPES:
+        raise HTTPException(status_code=400, detail=f"output_type must be one of {list(NLM_OUTPUT_TYPES)}")
+
+    log.info("notebooklm.start subject=%r purpose=%r audience=%r type=%r",
+             payload.subject[:80], payload.purpose, payload.audience, payload.output_type)
+
+    try:
+        result = await run_notebooklm_workflow(
+            NotebookLMInput(
+                subject=payload.subject,
+                purpose=payload.purpose,
+                audience=payload.audience,
+                output_type=payload.output_type,
+                notes=payload.notes,
+            )
+        )
+    except Exception as exc:
+        log.exception("notebooklm.failed")
+        raise HTTPException(status_code=500, detail=f"notebooklm workflow failed: {exc}") from exc
+
+    log.info("notebooklm.complete folder=%s", result.artifact_folder)
+    return NotebookLMResponse(
+        status="complete",
+        artifact_folder=str(result.artifact_folder),
+        notebooklm_package=result.notebooklm_package,
     )
 
 
@@ -439,6 +571,171 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
     # (and the next /health probe) see them without a backend restart.
     settings_service.apply_to_environment()
     return _settings_view_with_outputs()
+
+
+# ---------------------------------------------------------------------------
+# Memory + Dashboard (Ridian Command Center)
+# ---------------------------------------------------------------------------
+
+
+class ContactPayload(BaseModel):
+    name: str = ""
+    role: str = ""
+    company: str = ""
+    email: str = ""
+    phone: str = ""
+    notes: str = ""
+    last_contact_iso: str = ""
+
+
+class FactPayload(BaseModel):
+    topic: str = ""
+    fact: str = Field(..., min_length=1)
+    source: str = ""
+
+
+class FollowUpPayload(BaseModel):
+    what: str = Field(..., min_length=1)
+    who: str = ""
+    due_iso: str = ""
+    status: str = "open"
+    source_run: str = ""
+
+
+class FollowUpUpdate(BaseModel):
+    what: str | None = None
+    who: str | None = None
+    due_iso: str | None = None
+    status: str | None = None
+    source_run: str | None = None
+
+
+class DecisionPayload(BaseModel):
+    decision: str = Field(..., min_length=1)
+    context: str = ""
+    date_iso: str = ""
+
+
+class BrandSectionPayload(BaseModel):
+    voice: str = ""
+    audience: str = ""
+    do: list[str] = []
+    avoid: list[str] = []
+    notes: str = ""
+
+
+class BrandPayload(BaseModel):
+    ridian: BrandSectionPayload | None = None
+    open_gulf: BrandSectionPayload | None = None
+    buns: BrandSectionPayload | None = None
+
+
+@app.get("/memory/summary")
+async def memory_summary_get() -> dict:
+    return memory_service.memory_summary()
+
+
+@app.get("/memory/contacts")
+async def memory_contacts_list() -> dict:
+    return {"contacts": memory_service.list_contacts()}
+
+
+@app.post("/memory/contacts")
+async def memory_contacts_create(payload: ContactPayload) -> dict:
+    if not payload.name.strip() and not payload.email.strip():
+        raise HTTPException(status_code=400, detail="name or email required")
+    return memory_service.add_contact(payload.model_dump())
+
+
+@app.put("/memory/contacts/{contact_id}")
+async def memory_contacts_update(contact_id: str, payload: ContactPayload) -> dict:
+    updated = memory_service.update_contact(contact_id, payload.model_dump())
+    if updated is None:
+        raise HTTPException(status_code=404, detail="contact not found")
+    return updated
+
+
+@app.delete("/memory/contacts/{contact_id}")
+async def memory_contacts_delete(contact_id: str) -> dict:
+    if not memory_service.delete_contact(contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    return {"status": "deleted", "id": contact_id}
+
+
+@app.get("/memory/facts")
+async def memory_facts_list() -> dict:
+    return {"facts": memory_service.list_facts()}
+
+
+@app.post("/memory/facts")
+async def memory_facts_create(payload: FactPayload) -> dict:
+    return memory_service.add_fact(payload.model_dump())
+
+
+@app.delete("/memory/facts/{fact_id}")
+async def memory_facts_delete(fact_id: str) -> dict:
+    if not memory_service.delete_fact(fact_id):
+        raise HTTPException(status_code=404, detail="fact not found")
+    return {"status": "deleted", "id": fact_id}
+
+
+@app.get("/memory/follow-ups")
+async def memory_follow_ups_list() -> dict:
+    return {"follow_ups": memory_service.list_follow_ups()}
+
+
+@app.post("/memory/follow-ups")
+async def memory_follow_ups_create(payload: FollowUpPayload) -> dict:
+    return memory_service.add_follow_up(payload.model_dump())
+
+
+@app.put("/memory/follow-ups/{follow_up_id}")
+async def memory_follow_ups_update(follow_up_id: str, payload: FollowUpUpdate) -> dict:
+    updates = payload.model_dump(exclude_unset=True)
+    updated = memory_service.update_follow_up(follow_up_id, updates)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="follow-up not found")
+    return updated
+
+
+@app.delete("/memory/follow-ups/{follow_up_id}")
+async def memory_follow_ups_delete(follow_up_id: str) -> dict:
+    if not memory_service.delete_follow_up(follow_up_id):
+        raise HTTPException(status_code=404, detail="follow-up not found")
+    return {"status": "deleted", "id": follow_up_id}
+
+
+@app.get("/memory/decisions")
+async def memory_decisions_list() -> dict:
+    return {"decisions": memory_service.list_decisions()}
+
+
+@app.post("/memory/decisions")
+async def memory_decisions_create(payload: DecisionPayload) -> dict:
+    return memory_service.add_decision(payload.model_dump())
+
+
+@app.delete("/memory/decisions/{decision_id}")
+async def memory_decisions_delete(decision_id: str) -> dict:
+    if not memory_service.delete_decision(decision_id):
+        raise HTTPException(status_code=404, detail="decision not found")
+    return {"status": "deleted", "id": decision_id}
+
+
+@app.get("/memory/brand")
+async def memory_brand_get() -> dict:
+    return memory_service.get_brand()
+
+
+@app.post("/memory/brand")
+async def memory_brand_save(payload: BrandPayload) -> dict:
+    updates = payload.model_dump(exclude_unset=True)
+    return memory_service.save_brand(updates)
+
+
+@app.get("/dashboard")
+async def dashboard_get() -> dict:
+    return dashboard_service.build_dashboard()
 
 
 @app.post("/email/send-approved", response_model=EmailSendResponse)

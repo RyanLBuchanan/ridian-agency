@@ -35,16 +35,20 @@ log = logging.getLogger("ridian.projects")
 # so the renderer can render either kind with its existing logic.
 LOAD_FIELD_MAP: dict[str, str] = {
     # Business workflow
-    "research_summary.md":       "research_summary",
-    "business_document.md":      "business_document",
-    "slide_outline.md":          "slide_outline",
-    "draft_email.md":            "draft_email",
+    "research_summary.md":        "research_summary",
+    "business_document.md":       "business_document",
+    "slide_outline.md":           "slide_outline",
+    "draft_email.md":             "draft_email",
     # Social media production
-    "social_content_package.md": "content_package",
-    "script.md":                 "script",
-    "caption_package.md":        "caption_package",
-    "posting_checklist.md":      "posting_checklist",
-    "visual_production.md":      "visual_production",
+    "social_content_package.md":  "content_package",
+    "script.md":                  "script",
+    "caption_package.md":         "caption_package",
+    "posting_checklist.md":       "posting_checklist",
+    "visual_production.md":       "visual_production",
+    # Agentic Advances Daily Brief
+    "agentic_advances_brief.md":  "agentic_advances_brief",
+    # NotebookLM Package
+    "notebooklm_package.md":      "notebooklm_package",
 }
 
 _SOCIAL_MARKERS = (
@@ -59,6 +63,8 @@ _BUSINESS_MARKERS = (
     "slide_outline.md",
     "draft_email.md",
 )
+_AGENTIC_MARKERS = ("agentic_advances_brief.md",)
+_NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
 
 # Sibling of .env / local_settings.json. Stores per-machine sidebar
 # preferences (hidden + pinned). Git-ignored. Folders themselves are
@@ -144,7 +150,11 @@ def _read_channel_from_task(folder: Path) -> str:
 
 
 def _detect_workflow(folder: Path) -> str:
-    """Detect 'social', 'business', or 'unknown' from file presence."""
+    """Detect workflow type from artifact file presence.
+
+    Returns one of: ``social``, ``business``, ``agentic``, ``notebooklm``,
+    or ``unknown``.
+    """
     try:
         files = {p.name for p in folder.iterdir() if p.is_file()}
     except OSError:
@@ -153,6 +163,10 @@ def _detect_workflow(folder: Path) -> str:
         return "social"
     if any(m in files for m in _BUSINESS_MARKERS):
         return "business"
+    if any(m in files for m in _AGENTIC_MARKERS):
+        return "agentic"
+    if any(m in files for m in _NOTEBOOKLM_MARKERS):
+        return "notebooklm"
     return "unknown"
 
 

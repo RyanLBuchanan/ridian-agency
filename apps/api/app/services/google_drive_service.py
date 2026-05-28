@@ -57,6 +57,10 @@ UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "caption_package.md",
     "posting_checklist.md",
     "visual_production.md",
+    # Agentic Advances Daily Brief
+    "agentic_advances_brief.md",
+    # NotebookLM Package
+    "notebooklm_package.md",
     # Uploaded thumbnail/image input
     "input_thumbnail.png",
     "input_thumbnail.jpg",
@@ -275,6 +279,8 @@ _BUSINESS_MARKERS = (
     "slide_outline.md",
     "draft_email.md",
 )
+_AGENTIC_MARKERS = ("agentic_advances_brief.md",)
+_NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
 
 # Root path every upload lands under. Concrete subfolders are appended per workflow.
 _DRIVE_ROOT_PATH = ["Ridian Technologies", "Ridian Agency"]
@@ -335,10 +341,16 @@ def infer_drive_destination(artifact_folder: Path) -> list[str]:
     """
     has_social = any((artifact_folder / f).is_file() for f in _SOCIAL_MARKERS)
     has_business = any((artifact_folder / f).is_file() for f in _BUSINESS_MARKERS)
+    has_agentic = any((artifact_folder / f).is_file() for f in _AGENTIC_MARKERS)
+    has_notebooklm = any((artifact_folder / f).is_file() for f in _NOTEBOOKLM_MARKERS)
 
     if has_social:
         channel = _read_channel_from_task(artifact_folder)
         return list(_DRIVE_ROOT_PATH) + map_channel_to_path(channel)
+    if has_agentic:
+        return list(_DRIVE_ROOT_PATH) + ["Agentic Briefs"]
+    if has_notebooklm:
+        return list(_DRIVE_ROOT_PATH) + ["NotebookLM"]
     if has_business:
         return list(_DRIVE_ROOT_PATH) + ["Business Workflows"]
     # Unknown: file under Business Workflows as a sensible default.

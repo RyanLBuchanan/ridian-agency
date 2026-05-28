@@ -52,6 +52,11 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "script.md",
         "caption_package.md",
         "posting_checklist.md",
+        "visual_production.md",
+        # Agentic Advances Daily Brief
+        "agentic_advances_brief.md",
+        # NotebookLM Package
+        "notebooklm_package.md",
     }
 )
 

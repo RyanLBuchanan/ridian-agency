@@ -227,6 +227,20 @@ const TABS_SOCIAL = [
   { label: 'Visual Production', panel: 'social-visual-production-card' },
 ];
 
+const TABS_AGENTIC = [
+  { label: 'Review & Publish', panel: 'review-publish-card' },
+  { label: 'Actions',          panel: 'actions-card' },
+  { label: 'Files',            panel: 'artifact-folder-card' },
+  { label: 'Brief',            panel: 'agentic-brief-card' },
+];
+
+const TABS_NOTEBOOKLM = [
+  { label: 'Review & Publish', panel: 'review-publish-card' },
+  { label: 'Actions',          panel: 'actions-card' },
+  { label: 'Files',            panel: 'artifact-folder-card' },
+  { label: 'Package',          panel: 'notebooklm-package-card' },
+];
+
 /* ============================================================ */
 /*                REVIEW & PUBLISH CHECKLISTS                    */
 /* ============================================================ */
@@ -252,6 +266,21 @@ const REVIEW_CHECKLIST_SOCIAL = [
   { id: 'rv-soc-publish',   text: 'Manually publish or schedule on the chosen platform',    actionPanel: null,                                actionLabel: null },
 ];
 
+const REVIEW_CHECKLIST_AGENTIC = [
+  { id: 'rv-agt-summary',  text: 'Review executive summary',                       actionPanel: 'agentic-brief-card',  actionLabel: 'Open' },
+  { id: 'rv-agt-sources',  text: 'Review sources and confidence flags',            actionPanel: 'agentic-brief-card',  actionLabel: 'Open' },
+  { id: 'rv-agt-ridian',   text: 'Review Ridian opportunities and next actions',   actionPanel: 'agentic-brief-card',  actionLabel: 'Open' },
+  { id: 'rv-agt-upload',   text: 'Upload brief to Google Drive if desired',        actionPanel: 'actions-card',        actionLabel: 'Open' },
+  { id: 'rv-agt-email',    text: 'Email brief to yourself if desired',             actionPanel: 'agentic-brief-card',  actionLabel: 'Open' },
+];
+
+const REVIEW_CHECKLIST_NOTEBOOKLM = [
+  { id: 'rv-nlm-package',  text: 'Review the NotebookLM package',                  actionPanel: 'notebooklm-package-card', actionLabel: 'Open' },
+  { id: 'rv-nlm-copy',     text: 'Copy the Audio Overview prompt into NotebookLM', actionPanel: 'notebooklm-package-card', actionLabel: 'Open' },
+  { id: 'rv-nlm-upload',   text: 'Upload package to Google Drive if desired',      actionPanel: 'actions-card',            actionLabel: 'Open' },
+  { id: 'rv-nlm-email',    text: 'Email package to yourself if desired',           actionPanel: 'notebooklm-package-card', actionLabel: 'Open' },
+];
+
 /* ============================================================ */
 /*                          DOM REFS                             */
 /* ============================================================ */
@@ -261,6 +290,8 @@ const els = {
   sidebarNewWorkflowBtn: document.getElementById('sidebar-new-workflow-btn'),
   sidebarModeBusiness: document.getElementById('sidebar-mode-business'),
   sidebarModeSocial: document.getElementById('sidebar-mode-social'),
+  sidebarModeAgentic: document.getElementById('sidebar-mode-agentic'),
+  sidebarModeNotebooklm: document.getElementById('sidebar-mode-notebooklm'),
   sidebarOutputs: document.getElementById('sidebar-outputs'),
   sidebarOutputsList: document.getElementById('sidebar-outputs-list'),
   sidebarRunsList: document.getElementById('sidebar-runs-list'),
@@ -269,6 +300,7 @@ const els = {
   sidebarRunsShowMore: document.getElementById('sidebar-runs-show-more'),
   sidebarHiddenToggle: document.getElementById('sidebar-hidden-toggle'),
   sidebarHiddenList: document.getElementById('sidebar-hidden-list'),
+  sidebarDashboardBtn: document.getElementById('sidebar-dashboard-btn'),
   sidebarSettingsBtn: document.getElementById('sidebar-settings-btn'),
   sidebarTipsBtn: document.getElementById('sidebar-tips-btn'),
   tipsModal: document.getElementById('tips-modal'),
@@ -294,6 +326,8 @@ const els = {
   viewWelcome: document.getElementById('view-welcome'),
   viewInputBusiness: document.getElementById('view-input-business'),
   viewInputSocial: document.getElementById('view-input-social'),
+  viewInputAgentic: document.getElementById('view-input-agentic'),
+  viewInputNotebooklm: document.getElementById('view-input-notebooklm'),
   viewRun: document.getElementById('view-run'),
 
   // status / error
@@ -324,6 +358,26 @@ const els = {
   thumbnailFilename: document.getElementById('thumbnail-filename'),
   thumbnailClearBtn: document.getElementById('thumbnail-clear-btn'),
 
+  // agentic advances form
+  agenticTimeWindow: document.getElementById('agentic-time-window'),
+  agenticOutputDepth: document.getElementById('agentic-output-depth'),
+  agenticTopicFocus: document.getElementById('agentic-topic-focus'),
+  agenticRunBtn: document.getElementById('agentic-run-btn'),
+  agenticClearBtn: document.getElementById('agentic-clear-btn'),
+  agenticSendEmailBtn: document.getElementById('agentic-send-email-btn'),
+  agenticSendEmailStatus: document.getElementById('agentic-send-email-status'),
+
+  // notebooklm form
+  notebooklmSubject: document.getElementById('notebooklm-subject'),
+  notebooklmPurpose: document.getElementById('notebooklm-purpose'),
+  notebooklmAudience: document.getElementById('notebooklm-audience'),
+  notebooklmOutputType: document.getElementById('notebooklm-output-type'),
+  notebooklmNotes: document.getElementById('notebooklm-notes'),
+  notebooklmRunBtn: document.getElementById('notebooklm-run-btn'),
+  notebooklmClearBtn: document.getElementById('notebooklm-clear-btn'),
+  notebooklmSendEmailBtn: document.getElementById('notebooklm-send-email-btn'),
+  notebooklmSendEmailStatus: document.getElementById('notebooklm-send-email-status'),
+
   // prompt library containers
   promptsTabsBusiness: document.querySelector('#view-input-business .prompts-tabs'),
   promptsPanelsBusiness: document.querySelector('#view-input-business .prompts-panels'),
@@ -335,6 +389,8 @@ const els = {
   resultPanelArea: document.getElementById('result-panel-area'),
   resultsBusiness: document.getElementById('results-business'),
   resultsSocial: document.getElementById('results-social'),
+  resultsAgentic: document.getElementById('results-agentic'),
+  resultsNotebooklm: document.getElementById('results-notebooklm'),
 
   // actions card
   actionsStatus: document.getElementById('actions-status'),
@@ -504,19 +560,29 @@ function setWorkspaceView(view) {
   hide(els.viewWelcome);
   hide(els.viewInputBusiness);
   hide(els.viewInputSocial);
+  hide(els.viewInputAgentic);
+  hide(els.viewInputNotebooklm);
   hide(els.viewRun);
   hide(els.status);
   hide(els.errorRegion);
   if (view === 'welcome') {
     show(els.viewWelcome);
-    updateWorkspaceHeader('Welcome', 'Pick a workflow on the left to begin.');
+    updateWorkspaceHeader('Dashboard', 'Ridian Command Center');
+    loadDashboard();
   } else if (view === 'input') {
-    if (currentMode === 'social') show(els.viewInputSocial);
-    else show(els.viewInputBusiness);
-    updateWorkspaceHeader(
-      currentMode === 'social' ? 'Social Media Production' : 'Business Workflow',
-      currentMode === 'social' ? 'Configure your brief, then run the social workflow.' : 'Describe a task, then run the workflow.'
-    );
+    if (currentMode === 'social') {
+      show(els.viewInputSocial);
+      updateWorkspaceHeader('Social Media Production', 'Configure your brief, then run the social workflow.');
+    } else if (currentMode === 'agentic') {
+      show(els.viewInputAgentic);
+      updateWorkspaceHeader('Agentic Advances Brief', 'Pick a time window and depth, then run the brief.');
+    } else if (currentMode === 'notebooklm') {
+      show(els.viewInputNotebooklm);
+      updateWorkspaceHeader('NotebookLM Builder', 'Pick a subject, purpose, and audience, then build the package.');
+    } else {
+      show(els.viewInputBusiness);
+      updateWorkspaceHeader('Business Workflow', 'Describe a task, then run the workflow.');
+    }
   } else if (view === 'run') {
     show(els.viewRun);
     // header updated by updateRunSummary
@@ -527,6 +593,10 @@ function setWorkspaceView(view) {
   // Back arrow appears on every non-welcome view.
   if (els.workspaceBackBtn) {
     els.workspaceBackBtn.classList.toggle('hidden', view === 'welcome');
+  }
+  // Dashboard sidebar button highlights when on Dashboard (welcome view).
+  if (els.sidebarDashboardBtn) {
+    els.sidebarDashboardBtn.classList.toggle('is-active', view === 'welcome');
   }
   // Welcome tip is visible only on Welcome (and only if not dismissed).
   refreshWelcomeTip();
@@ -541,6 +611,8 @@ function setMode(mode) {
   currentMode = mode;
   els.sidebarModeBusiness && els.sidebarModeBusiness.classList.toggle('is-active', mode === 'business');
   els.sidebarModeSocial && els.sidebarModeSocial.classList.toggle('is-active', mode === 'social');
+  els.sidebarModeAgentic && els.sidebarModeAgentic.classList.toggle('is-active', mode === 'agentic');
+  els.sidebarModeNotebooklm && els.sidebarModeNotebooklm.classList.toggle('is-active', mode === 'notebooklm');
 }
 
 // First-launch welcome tip. Hidden once dismissed; the localStorage flag
@@ -692,8 +764,15 @@ function _renderEmptyState({ kind, query }) {
 
 function _applyRunsFilter(runs) {
   if (runsFilter === 'pinned') return runs.filter((r) => r.pinned);
-  if (runsFilter === 'business') return runs.filter((r) => r.workflow !== 'social');
+  if (runsFilter === 'business') {
+    // "Business" filter excludes social / agentic / notebooklm — pure business runs only.
+    return runs.filter((r) =>
+      r.workflow !== 'social' && r.workflow !== 'agentic' && r.workflow !== 'notebooklm'
+    );
+  }
   if (runsFilter === 'social') return runs.filter((r) => r.workflow === 'social');
+  if (runsFilter === 'agentic') return runs.filter((r) => r.workflow === 'agentic');
+  if (runsFilter === 'notebooklm') return runs.filter((r) => r.workflow === 'notebooklm');
   return runs; // 'all'
 }
 
@@ -707,7 +786,11 @@ function _buildRunLi(run) {
   btn.className = 'sidebar-list-item';
   if (run.artifact_folder === activeRunFolder) btn.classList.add('is-active');
   btn.setAttribute('data-folder', run.artifact_folder);
-  const labelChannel = run.workflow === 'social' ? (run.channel || 'Custom') : 'Business';
+  let labelChannel;
+  if (run.workflow === 'social') labelChannel = run.channel || 'Custom';
+  else if (run.workflow === 'agentic') labelChannel = 'Agentic Brief';
+  else if (run.workflow === 'notebooklm') labelChannel = 'NotebookLM';
+  else labelChannel = 'Business';
   const title = prettifyRunName(run.name);
   btn.innerHTML = `
     <span class="sidebar-run-title">${escapeHtml(title)}</span>
@@ -1016,11 +1099,19 @@ async function openProjectFromSidebar(run) {
       throw new Error((data && data.detail) || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    const mode = data.workflow === 'social' ? 'social' : 'business';
+    let mode = 'business';
+    if (data.workflow === 'social') mode = 'social';
+    else if (data.workflow === 'agentic') mode = 'agentic';
+    else if (data.workflow === 'notebooklm') mode = 'notebooklm';
     setMode(mode);
     activeRunFolder = data.artifact_folder;
-    currentRunMeta = mode === 'social' ? parseSocialTaskMeta(data.task || '') : null;
+    if (mode === 'social') currentRunMeta = parseSocialTaskMeta(data.task || '');
+    else if (mode === 'agentic') currentRunMeta = parseAgenticTaskMeta(data.task || '');
+    else if (mode === 'notebooklm') currentRunMeta = parseNotebookLMTaskMeta(data.task || '');
+    else currentRunMeta = null;
     if (mode === 'social') renderSocialResults(data);
+    else if (mode === 'agentic') renderAgenticResults(data);
+    else if (mode === 'notebooklm') renderNotebookLMResults(data);
     else renderResults(data);
     renderRecentRuns(); // refresh active highlight
     debugLog('project.loaded', { folder: data.artifact_folder, workflow: data.workflow });
@@ -1047,13 +1138,59 @@ function parseSocialTaskMeta(taskText) {
   return meta;
 }
 
+function parseAgenticTaskMeta(taskText) {
+  const meta = { time_window: '', output_depth: '', topic_focus: '' };
+  const lines = (taskText || '').split(/\r?\n/);
+  for (const line of lines) {
+    const m = /^([A-Za-z ]+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const key = m[1].trim().toLowerCase().replace(/\s+/g, '_');
+    if (key in meta) meta[key] = m[2].trim();
+  }
+  const fIdx = taskText.indexOf('Topic focus');
+  if (fIdx >= 0) {
+    const after = taskText.slice(fIdx);
+    const nl = after.indexOf('\n');
+    if (nl >= 0) {
+      meta.topic_focus = after.slice(nl + 1).split('\n\n')[0].trim();
+    }
+  }
+  return meta;
+}
+
+function parseNotebookLMTaskMeta(taskText) {
+  const meta = { subject: '', purpose: '', audience: '', output_type: '' };
+  const lines = (taskText || '').split(/\r?\n/);
+  for (const line of lines) {
+    const m = /^([A-Za-z ]+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const key = m[1].trim().toLowerCase().replace(/\s+/g, '_');
+    if (key in meta) meta[key] = m[2].trim();
+  }
+  return meta;
+}
+
 /* ============================================================ */
 /*               SIDEBAR — OUTPUT NAV + TAB LOGIC                */
 /* ============================================================ */
 
+function _tabsForMode(mode) {
+  if (mode === 'social') return TABS_SOCIAL;
+  if (mode === 'agentic') return TABS_AGENTIC;
+  if (mode === 'notebooklm') return TABS_NOTEBOOKLM;
+  return TABS_BUSINESS;
+}
+
+function _reviewChecklistForMode(mode) {
+  if (mode === 'social') return REVIEW_CHECKLIST_SOCIAL;
+  if (mode === 'agentic') return REVIEW_CHECKLIST_AGENTIC;
+  if (mode === 'notebooklm') return REVIEW_CHECKLIST_NOTEBOOKLM;
+  return REVIEW_CHECKLIST_BUSINESS;
+}
+
 function buildSidebarOutputNav(mode) {
   if (!els.sidebarOutputsList) return;
-  const items = mode === 'social' ? TABS_SOCIAL : TABS_BUSINESS;
+  const items = _tabsForMode(mode);
   currentResultTabs = items;
   els.sidebarOutputsList.innerHTML = '';
   items.forEach((item) => {
@@ -1078,7 +1215,7 @@ function buildSidebarOutputNav(mode) {
 function renderReviewPublishChecklist(mode) {
   const list = document.getElementById('review-publish-list');
   if (!list) return;
-  const items = mode === 'social' ? REVIEW_CHECKLIST_SOCIAL : REVIEW_CHECKLIST_BUSINESS;
+  const items = _reviewChecklistForMode(mode);
   list.innerHTML = '';
   items.forEach((item) => {
     const li = document.createElement('li');
@@ -1175,6 +1312,14 @@ function _buildNextActionsHtml(mode) {
     chips.push({ id: 'review-doc', label: 'Review business document' });
     if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
     chips.push({ id: 'review-email', label: 'Review draft email' });
+  } else if (mode === 'agentic') {
+    chips.push({ id: 'review-agentic', label: 'Review the brief' });
+    chips.push({ id: 'email-agentic', label: 'Email brief to me' });
+    if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
+  } else if (mode === 'notebooklm') {
+    chips.push({ id: 'review-notebooklm', label: 'Review the package' });
+    chips.push({ id: 'email-notebooklm', label: 'Email package to me' });
+    if (googleConnected) chips.push({ id: 'upload-drive', label: 'Upload to Google Drive' });
   } else {
     chips.push({ id: 'review-script', label: 'Review the script' });
     chips.push({ id: 'review-caption', label: 'Review the caption' });
@@ -1212,6 +1357,20 @@ function _handleNextAction(action) {
     case 'review-visual':
       showResultPanel('social-visual-production-card');
       break;
+    case 'review-agentic':
+      showResultPanel('agentic-brief-card');
+      break;
+    case 'email-agentic':
+      showResultPanel('agentic-brief-card');
+      sendAgenticEmail();
+      break;
+    case 'review-notebooklm':
+      showResultPanel('notebooklm-package-card');
+      break;
+    case 'email-notebooklm':
+      showResultPanel('notebooklm-package-card');
+      sendNotebookLMEmail();
+      break;
     case 'upload-drive':
       // Show the Actions panel first so the operator sees the upload status
       // happen, then trigger the same flow the Actions card button does.
@@ -1221,6 +1380,13 @@ function _handleNextAction(action) {
     default:
       break;
   }
+}
+
+function _runAgainForMode(mode) {
+  if (mode === 'social') return runSocialWorkflow();
+  if (mode === 'agentic') return runAgenticAdvancesWorkflow();
+  if (mode === 'notebooklm') return runNotebookLMWorkflow();
+  return runWorkflow();
 }
 
 function updateRunSummary(mode, result) {
@@ -1247,6 +1413,57 @@ function updateRunSummary(mode, result) {
       <div class="run-summary-folder">${escapeHtml(folder)}</div>
     `;
     updateWorkspaceHeader('Business Workflow', folderTail(folder));
+  } else if (mode === 'agentic') {
+    const meta = currentRunMeta || {};
+    const badges = [
+      meta.time_window && `<span class="run-summary-badge">${escapeHtml(meta.time_window)}</span>`,
+      meta.output_depth && `<span class="run-summary-badge">${escapeHtml(meta.output_depth)}</span>`,
+    ].filter(Boolean).join('');
+    const focusPreview = (meta.topic_focus || '').slice(0, 360);
+    html = `
+      <div class="run-summary-head">
+        <div class="run-summary-meta">
+          <span class="run-summary-eyebrow">Agentic Advances Brief</span>
+          <h2 class="run-summary-title">${escapeHtml(meta.topic_focus || 'Daily agentic AI brief')}</h2>
+          <div class="run-summary-badges">${badges}</div>
+        </div>
+        <div class="run-summary-actions">
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-edit">Edit brief</button>
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-rerun">Run again</button>
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-new">New workflow</button>
+        </div>
+      </div>
+      ${focusPreview ? `<div class="run-summary-task">${escapeHtml(focusPreview)}${(meta.topic_focus || '').length > 360 ? '…' : ''}</div>` : ''}
+      ${_buildNextActionsHtml('agentic')}
+      <div class="run-summary-folder">${escapeHtml(folder)}</div>
+    `;
+    updateWorkspaceHeader('Agentic Advances Brief', folderTail(folder));
+  } else if (mode === 'notebooklm') {
+    const meta = currentRunMeta || {};
+    const badges = [
+      meta.purpose && `<span class="run-summary-badge">${escapeHtml(meta.purpose)}</span>`,
+      meta.audience && `<span class="run-summary-badge">${escapeHtml(meta.audience)}</span>`,
+      meta.output_type && `<span class="run-summary-badge">${escapeHtml(meta.output_type)}</span>`,
+    ].filter(Boolean).join('');
+    const subjectPreview = (meta.subject || '').slice(0, 360);
+    html = `
+      <div class="run-summary-head">
+        <div class="run-summary-meta">
+          <span class="run-summary-eyebrow">NotebookLM Builder</span>
+          <h2 class="run-summary-title">${escapeHtml(meta.subject || 'NotebookLM package')}</h2>
+          <div class="run-summary-badges">${badges}</div>
+        </div>
+        <div class="run-summary-actions">
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-edit">Edit package</button>
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-rerun">Run again</button>
+          <button type="button" class="btn btn-ghost btn-compact" id="run-summary-new">New workflow</button>
+        </div>
+      </div>
+      ${subjectPreview ? `<div class="run-summary-task">${escapeHtml(subjectPreview)}</div>` : ''}
+      ${_buildNextActionsHtml('notebooklm')}
+      <div class="run-summary-folder">${escapeHtml(folder)}</div>
+    `;
+    updateWorkspaceHeader('NotebookLM Builder', folderTail(folder));
   } else {
     const meta = currentRunMeta || {};
     const badges = [
@@ -1286,7 +1503,7 @@ function updateRunSummary(mode, result) {
   const rerunBtn = document.getElementById('run-summary-rerun');
   const newBtn = document.getElementById('run-summary-new');
   if (editBtn) editBtn.addEventListener('click', () => setWorkspaceView('input'));
-  if (rerunBtn) rerunBtn.addEventListener('click', () => (mode === 'social' ? runSocialWorkflow() : runWorkflow()));
+  if (rerunBtn) rerunBtn.addEventListener('click', () => _runAgainForMode(mode));
   if (newBtn) newBtn.addEventListener('click', () => startNewWorkflow(mode));
 
   // Delegated handler for the next-action chips.
@@ -1654,17 +1871,36 @@ function _wizardSelectOption(key) {
 
 function startNewWorkflow(mode) {
   audioStop();
-  if (mode === 'business' || (!mode && currentMode === 'business')) {
+  const targetMode = mode || currentMode;
+  if (targetMode === 'business') {
     if (els.taskInput) els.taskInput.value = '';
-  } else {
+  } else if (targetMode === 'social') {
     clearSocialFormValuesOnly();
+  } else if (targetMode === 'agentic') {
+    clearAgenticFormValuesOnly();
+  } else if (targetMode === 'notebooklm') {
+    clearNotebookLMFormValuesOnly();
   }
   currentResult = null;
   currentRunMeta = null;
   activeRunFolder = null;
   renderRecentRuns();
-  setMode(mode || currentMode);
+  setMode(targetMode);
   setWorkspaceView('input');
+}
+
+function clearAgenticFormValuesOnly() {
+  if (els.agenticTimeWindow) els.agenticTimeWindow.value = 'Last 7 days';
+  if (els.agenticOutputDepth) els.agenticOutputDepth.value = 'Strategic brief';
+  if (els.agenticTopicFocus) els.agenticTopicFocus.value = '';
+}
+
+function clearNotebookLMFormValuesOnly() {
+  if (els.notebooklmSubject) els.notebooklmSubject.value = '';
+  if (els.notebooklmPurpose) els.notebooklmPurpose.value = 'Learn';
+  if (els.notebooklmAudience) els.notebooklmAudience.value = 'Ryan';
+  if (els.notebooklmOutputType) els.notebooklmOutputType.value = 'Full NotebookLM package';
+  if (els.notebooklmNotes) els.notebooklmNotes.value = '';
 }
 
 function clearSocialFormValuesOnly() {
@@ -1741,7 +1977,11 @@ function stopElapsed() {
 function setRunningStatusForMode(mode) {
   if (!els.statusSub) return;
   if (mode === 'social') {
-    els.statusSub.innerHTML = 'This typically takes <strong>30&ndash;90 seconds</strong>. The social media agent builds a four-section package: content, script, caption, posting checklist.';
+    els.statusSub.innerHTML = 'This typically takes <strong>30&ndash;90 seconds</strong>. The social media agent builds a five-section package: content, script, caption, posting checklist, visual production.';
+  } else if (mode === 'agentic') {
+    els.statusSub.innerHTML = 'This typically takes <strong>60&ndash;180 seconds</strong>. The analyst is running live web searches across the agentic AI ecosystem and citing sources.';
+  } else if (mode === 'notebooklm') {
+    els.statusSub.innerHTML = 'This typically takes <strong>20&ndash;60 seconds</strong>. The builder is composing the source prompt, Audio Overview prompt, and study-guide prompts.';
   } else {
     els.statusSub.innerHTML = 'This typically takes <strong>60&ndash;90 seconds</strong>. The five agents run in sequence: research &rarr; writer &rarr; reviewer &rarr; presentation &rarr; email.';
   }
@@ -1855,9 +2095,127 @@ async function runSocialWorkflow() {
   }
 }
 
+async function runAgenticAdvancesWorkflow() {
+  const payload = {
+    topic_focus: (els.agenticTopicFocus && els.agenticTopicFocus.value) || '',
+    time_window: (els.agenticTimeWindow && els.agenticTimeWindow.value) || 'Last 7 days',
+    output_depth: (els.agenticOutputDepth && els.agenticOutputDepth.value) || 'Strategic brief',
+  };
+  if (backendUp === false) { showError('Backend is not running.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+
+  currentRunMeta = { ...payload };
+
+  hide(els.errorRegion);
+  if (els.agenticRunBtn) { els.agenticRunBtn.disabled = true; els.agenticRunBtn.textContent = 'Running…'; }
+  if (els.agenticClearBtn) els.agenticClearBtn.disabled = true;
+  setRunningStatusForMode('agentic');
+  show(els.status);
+  hide(els.viewInputBusiness);
+  hide(els.viewInputSocial);
+  hide(els.viewInputAgentic);
+  hide(els.viewInputNotebooklm);
+  hide(els.viewRun);
+  startElapsed();
+
+  try {
+    const res = await fetch(`${BACKEND}/workflows/agentic-advances/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { const j = await res.json(); if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    setMode('agentic');
+    renderAgenticResults(data);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      showError('Backend is not reachable.');
+      setBackendStatus(false);
+    } else { showError(msg); }
+    setWorkspaceView('input');
+  } finally {
+    if (els.agenticRunBtn) { els.agenticRunBtn.disabled = false; els.agenticRunBtn.textContent = 'Run Agentic Advances brief'; }
+    if (els.agenticClearBtn) els.agenticClearBtn.disabled = false;
+    hide(els.status);
+    stopElapsed();
+  }
+}
+
+async function runNotebookLMWorkflow() {
+  const subject = (els.notebooklmSubject && els.notebooklmSubject.value || '').trim();
+  if (subject.length < 3) {
+    showError('Please give the NotebookLM package a subject (at least 3 characters).');
+    return;
+  }
+  const payload = {
+    subject,
+    purpose: (els.notebooklmPurpose && els.notebooklmPurpose.value) || 'Learn',
+    audience: (els.notebooklmAudience && els.notebooklmAudience.value) || 'Ryan',
+    output_type: (els.notebooklmOutputType && els.notebooklmOutputType.value) || 'Full NotebookLM package',
+    notes: (els.notebooklmNotes && els.notebooklmNotes.value) || '',
+  };
+  if (backendUp === false) { showError('Backend is not running.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+
+  currentRunMeta = { ...payload };
+
+  hide(els.errorRegion);
+  if (els.notebooklmRunBtn) { els.notebooklmRunBtn.disabled = true; els.notebooklmRunBtn.textContent = 'Running…'; }
+  if (els.notebooklmClearBtn) els.notebooklmClearBtn.disabled = true;
+  setRunningStatusForMode('notebooklm');
+  show(els.status);
+  hide(els.viewInputBusiness);
+  hide(els.viewInputSocial);
+  hide(els.viewInputAgentic);
+  hide(els.viewInputNotebooklm);
+  hide(els.viewRun);
+  startElapsed();
+
+  try {
+    const res = await fetch(`${BACKEND}/workflows/notebooklm/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { const j = await res.json(); if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    setMode('notebooklm');
+    renderNotebookLMResults(data);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      showError('Backend is not reachable.');
+      setBackendStatus(false);
+    } else { showError(msg); }
+    setWorkspaceView('input');
+  } finally {
+    if (els.notebooklmRunBtn) { els.notebooklmRunBtn.disabled = false; els.notebooklmRunBtn.textContent = 'Build NotebookLM package'; }
+    if (els.notebooklmClearBtn) els.notebooklmClearBtn.disabled = false;
+    hide(els.status);
+    stopElapsed();
+  }
+}
+
 /* ============================================================ */
 /*                       RENDER RESULTS                          */
 /* ============================================================ */
+
+function _hideAllResultsModes() {
+  hide(els.resultsBusiness);
+  hide(els.resultsSocial);
+  hide(els.resultsAgentic);
+  hide(els.resultsNotebooklm);
+}
 
 function renderResults(result) {
   currentResult = result;
@@ -1867,8 +2225,8 @@ function renderResults(result) {
   document.querySelector('[data-field="slide_outline"]').innerHTML = renderMarkdown(result.slide_outline);
   document.querySelector('[data-field="draft_email"]').innerHTML = renderMarkdown(result.draft_email);
 
+  _hideAllResultsModes();
   show(els.resultsBusiness);
-  hide(els.resultsSocial);
   resetEmailStatus();
   resetActionsStatus();
   _resetAllAudioStatuses();
@@ -1890,7 +2248,7 @@ function renderSocialResults(result) {
   const vpEl = document.querySelector('[data-field="visual_production"]');
   if (vpEl) vpEl.innerHTML = renderMarkdown(result.visual_production || '');
 
-  hide(els.resultsBusiness);
+  _hideAllResultsModes();
   show(els.resultsSocial);
   resetEmailStatus();
   resetActionsStatus();
@@ -1901,6 +2259,49 @@ function renderSocialResults(result) {
   updateRunSummary('social', result);
   setWorkspaceView('run');
   buildSidebarOutputNav('social');
+}
+
+function renderAgenticResults(result) {
+  currentResult = result;
+  document.querySelector('[data-field="artifact_folder"]').textContent = result.artifact_folder;
+  const briefEl = document.querySelector('[data-field="agentic_advances_brief"]');
+  if (briefEl) briefEl.innerHTML = renderMarkdown(result.agentic_advances_brief || '');
+
+  _hideAllResultsModes();
+  show(els.resultsAgentic);
+  // Reveal the single agentic result card so showResultPanel can flip it later.
+  const card = document.getElementById('agentic-brief-card');
+  if (card) card.classList.remove('hidden');
+  resetAgenticEmailStatus();
+  resetActionsStatus();
+  _resetAllAudioStatuses();
+
+  setMode('agentic');
+  recordRecentRunFromResult(result, 'agentic');
+  updateRunSummary('agentic', result);
+  setWorkspaceView('run');
+  buildSidebarOutputNav('agentic');
+}
+
+function renderNotebookLMResults(result) {
+  currentResult = result;
+  document.querySelector('[data-field="artifact_folder"]').textContent = result.artifact_folder;
+  const pkgEl = document.querySelector('[data-field="notebooklm_package"]');
+  if (pkgEl) pkgEl.innerHTML = renderMarkdown(result.notebooklm_package || '');
+
+  _hideAllResultsModes();
+  show(els.resultsNotebooklm);
+  const card = document.getElementById('notebooklm-package-card');
+  if (card) card.classList.remove('hidden');
+  resetNotebookLMEmailStatus();
+  resetActionsStatus();
+  _resetAllAudioStatuses();
+
+  setMode('notebooklm');
+  recordRecentRunFromResult(result, 'notebooklm');
+  updateRunSummary('notebooklm', result);
+  setWorkspaceView('run');
+  buildSidebarOutputNav('notebooklm');
 }
 
 /* ============================================================ */
@@ -2236,6 +2637,78 @@ function parseDraftEmail(raw) {
     return { subject, body };
   }
   return { subject: '', body: (raw || '').trim() };
+}
+
+function resetAgenticEmailStatus() {
+  if (!els.agenticSendEmailStatus) return;
+  els.agenticSendEmailStatus.textContent = '';
+  els.agenticSendEmailStatus.className = 'email-status';
+}
+
+function resetNotebookLMEmailStatus() {
+  if (!els.notebooklmSendEmailStatus) return;
+  els.notebooklmSendEmailStatus.textContent = '';
+  els.notebooklmSendEmailStatus.className = 'email-status';
+}
+
+async function _sendApprovedArtifactEmail({ subject, body, btn, statusEl, confirmText, doneLabel }) {
+  if (!body || !body.trim()) {
+    statusEl.className = 'email-status is-err';
+    statusEl.textContent = 'Nothing to send — the artifact is empty.';
+    return;
+  }
+  const ok = window.confirm(confirmText);
+  if (!ok) return;
+  if (btn) btn.disabled = true;
+  statusEl.className = 'email-status';
+  statusEl.textContent = 'Sending…';
+  try {
+    const res = await fetch(`${BACKEND}/email/send-approved`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, body }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    statusEl.className = 'email-status is-ok';
+    const to = data && data.to_email ? ` to ${data.to_email}` : '';
+    statusEl.textContent = `${doneLabel}${to}.`;
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    statusEl.className = 'email-status is-err';
+    statusEl.textContent = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+      ? 'Backend is not reachable.'
+      : msg;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function sendAgenticEmail() {
+  if (!currentResult || !currentResult.agentic_advances_brief) return;
+  await _sendApprovedArtifactEmail({
+    subject: 'Ridian Command Center — Agentic Advances Brief',
+    body: currentResult.agentic_advances_brief,
+    btn: els.agenticSendEmailBtn,
+    statusEl: els.agenticSendEmailStatus,
+    confirmText: 'Send this Agentic Advances brief to your configured email address?',
+    doneLabel: 'Brief sent successfully',
+  });
+}
+
+async function sendNotebookLMEmail() {
+  if (!currentResult || !currentResult.notebooklm_package) return;
+  await _sendApprovedArtifactEmail({
+    subject: 'Ridian Command Center — NotebookLM Package',
+    body: currentResult.notebooklm_package,
+    btn: els.notebooklmSendEmailBtn,
+    statusEl: els.notebooklmSendEmailStatus,
+    confirmText: 'Send this NotebookLM package to your configured email address?',
+    doneLabel: 'Package sent successfully',
+  });
 }
 
 async function sendApprovedEmail() {
@@ -2774,7 +3247,7 @@ function startHealthPolling() {
 document.querySelectorAll('.welcome-card').forEach((card) => {
   card.addEventListener('click', () => {
     const mode = card.getAttribute('data-mode');
-    if (mode === 'business' || mode === 'social') {
+    if (mode === 'business' || mode === 'social' || mode === 'agentic' || mode === 'notebooklm') {
       setMode(mode);
       setWorkspaceView('input');
     }
@@ -2787,6 +3260,12 @@ if (els.sidebarModeBusiness) {
 }
 if (els.sidebarModeSocial) {
   els.sidebarModeSocial.addEventListener('click', () => { setMode('social'); setWorkspaceView('input'); });
+}
+if (els.sidebarModeAgentic) {
+  els.sidebarModeAgentic.addEventListener('click', () => { setMode('agentic'); setWorkspaceView('input'); });
+}
+if (els.sidebarModeNotebooklm) {
+  els.sidebarModeNotebooklm.addEventListener('click', () => { setMode('notebooklm'); setWorkspaceView('input'); });
 }
 
 // Workspace back arrow
@@ -2881,6 +3360,26 @@ if (els.taskInput) {
 if (els.socialRunBtn) els.socialRunBtn.addEventListener('click', runSocialWorkflow);
 if (els.socialClearBtn) els.socialClearBtn.addEventListener('click', () => startNewWorkflow('social'));
 
+// Agentic Advances form
+if (els.agenticRunBtn) els.agenticRunBtn.addEventListener('click', runAgenticAdvancesWorkflow);
+if (els.agenticClearBtn) els.agenticClearBtn.addEventListener('click', () => startNewWorkflow('agentic'));
+if (els.agenticSendEmailBtn) els.agenticSendEmailBtn.addEventListener('click', sendAgenticEmail);
+if (els.agenticTopicFocus) {
+  els.agenticTopicFocus.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runAgenticAdvancesWorkflow(); }
+  });
+}
+
+// NotebookLM form
+if (els.notebooklmRunBtn) els.notebooklmRunBtn.addEventListener('click', runNotebookLMWorkflow);
+if (els.notebooklmClearBtn) els.notebooklmClearBtn.addEventListener('click', () => startNewWorkflow('notebooklm'));
+if (els.notebooklmSendEmailBtn) els.notebooklmSendEmailBtn.addEventListener('click', sendNotebookLMEmail);
+if (els.notebooklmSubject) {
+  els.notebooklmSubject.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runNotebookLMWorkflow(); }
+  });
+}
+
 // Panel back-to-review navigation
 const panelBackBtn = document.getElementById('panel-back-btn');
 if (panelBackBtn) panelBackBtn.addEventListener('click', () => showResultPanel('review-publish-card'));
@@ -2919,6 +3418,679 @@ if (els.resultPanelArea) {
   els.resultPanelArea.addEventListener('click', handleCardAction);
   els.resultPanelArea.addEventListener('click', handleAudioClick);
 }
+
+/* ============================================================ */
+/*           DASHBOARD + MEMORY (Ridian Command Center)          */
+/* ============================================================ */
+
+async function loadDashboard() {
+  try {
+    const res = await fetch(`${BACKEND}/dashboard`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderDashboard(data);
+  } catch (err) {
+    debugLog('dashboard.load_failed', { error: err && err.message });
+  }
+}
+
+function _iconForTarget(target) {
+  if (!target) return '→';
+  if (target === 'wizard') return '✦';
+  if (target.startsWith('memory:')) return 'M';
+  if (target.startsWith('run:')) return '▶';
+  return '→';
+}
+
+function _ctaLabelForTarget(target) {
+  if (!target) return 'Open';
+  if (target === 'wizard') return 'Open wizard';
+  if (target === 'memory:contacts') return 'Open contacts';
+  if (target === 'memory:brand') return 'Open brand';
+  if (target === 'memory:facts') return 'Open facts';
+  if (target === 'memory:follow-ups') return 'Open follow-ups';
+  if (target === 'memory:decisions') return 'Open decisions';
+  if (target.startsWith('memory:')) return 'Open memory';
+  if (target.startsWith('run:')) return 'Open run';
+  return 'Open';
+}
+
+function _statusLineFor(data) {
+  const counts = data.memory_counts || {};
+  const open = (data.open_follow_ups || []).length;
+  const recent = (data.recent_runs || []).length;
+  const memoryEmpty = !(counts.contacts || counts.facts || counts.decisions || counts.brand_voices);
+
+  if (memoryEmpty && recent === 0) {
+    return "Welcome back. Set up your context, then launch your first workflow when you're ready.";
+  }
+  if (open > 0) {
+    return `${open} follow-up${open === 1 ? '' : 's'} need attention. Pick one below or jump into recent work.`;
+  }
+  if (recent > 0) {
+    return "Inbox is clear. Pick up where you left off or launch something new.";
+  }
+  return "All caught up. Ready when you are.";
+}
+
+function _renderFocus(actions, data) {
+  const body = document.getElementById('dashboard-focus-body');
+  const meta = document.getElementById('dashboard-focus-meta');
+  if (!body) return;
+  body.innerHTML = '';
+
+  if (!actions || !actions.length) {
+    if (meta) meta.textContent = '';
+    const block = document.createElement('div');
+    block.className = 'dashboard-focus-allclear';
+    block.innerHTML = `
+      <span class="dashboard-focus-allclear-icon" aria-hidden="true">✓</span>
+      <span class="dashboard-focus-allclear-text">
+        <span class="dashboard-focus-allclear-title">You're all caught up.</span>
+        <span class="dashboard-focus-allclear-hint">Use Quick launch below to start something new.</span>
+      </span>
+    `;
+    body.appendChild(block);
+    return;
+  }
+
+  if (meta) meta.textContent = `${actions.length} suggestion${actions.length === 1 ? '' : 's'}`;
+
+  const primary = actions[0];
+  const primaryRow = document.createElement('div');
+  primaryRow.className = 'dashboard-focus-primary';
+  const primaryText = document.createElement('div');
+  primaryText.className = 'dashboard-focus-primary-text';
+  primaryText.innerHTML = `
+    <span class="dashboard-focus-primary-label">${escapeHtml(primary.label || '')}</span>
+    ${primary.hint ? `<span class="dashboard-focus-primary-hint">${escapeHtml(primary.hint)}</span>` : ''}
+  `;
+  const primaryCta = document.createElement('button');
+  primaryCta.type = 'button';
+  primaryCta.className = 'dashboard-focus-primary-cta';
+  primaryCta.textContent = _ctaLabelForTarget(primary.target) + ' →';
+  primaryCta.addEventListener('click', () => _handleDashboardActionTarget(primary.target));
+  primaryRow.appendChild(primaryText);
+  primaryRow.appendChild(primaryCta);
+  body.appendChild(primaryRow);
+
+  const rest = actions.slice(1, 4);
+  if (rest.length) {
+    const secondaries = document.createElement('div');
+    secondaries.className = 'dashboard-focus-secondaries';
+    rest.forEach((a) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dashboard-focus-secondary';
+      btn.innerHTML = `
+        <span class="dashboard-focus-secondary-icon" aria-hidden="true">${escapeHtml(_iconForTarget(a.target))}</span>
+        <span class="dashboard-focus-secondary-body">
+          <span class="dashboard-focus-secondary-label">${escapeHtml(a.label || '')}</span>
+          ${a.hint ? `<span class="dashboard-focus-secondary-hint">${escapeHtml(a.hint)}</span>` : ''}
+        </span>
+        <span class="dashboard-focus-secondary-chevron" aria-hidden="true">→</span>
+      `;
+      btn.addEventListener('click', () => _handleDashboardActionTarget(a.target));
+      secondaries.appendChild(btn);
+    });
+    body.appendChild(secondaries);
+  }
+}
+
+function _renderFollowUps(items) {
+  const fuEl = document.getElementById('dashboard-follow-ups');
+  const metaEl = document.getElementById('dashboard-followups-meta');
+  if (!fuEl) return;
+  fuEl.innerHTML = '';
+  const list = items || [];
+  if (metaEl) metaEl.textContent = list.length ? `${list.length} open` : 'All clear';
+
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'dashboard-empty';
+    li.textContent = "Your follow-up list is clear. Add one when you need to remember a next step.";
+    fuEl.appendChild(li);
+    return;
+  }
+
+  list.slice(0, 6).forEach((f) => {
+    const li = document.createElement('li');
+    li.className = 'dashboard-follow-up-item';
+    const meta = [f.who, f.due_iso].filter(Boolean).join(' · ');
+    li.innerHTML = `
+      <span class="dashboard-follow-up-check" aria-hidden="true"></span>
+      <span class="dashboard-follow-up-item-text">
+        <span class="dashboard-follow-up-what">${escapeHtml(f.what || '')}</span>
+        ${meta ? `<span class="dashboard-follow-up-meta">${escapeHtml(meta)}</span>` : ''}
+      </span>
+    `;
+    const doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'dashboard-follow-up-done';
+    doneBtn.textContent = 'Mark done';
+    doneBtn.setAttribute('aria-label', `Mark follow-up done: ${f.what || ''}`);
+    doneBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      markFollowUpDone(f.id);
+    });
+    li.appendChild(doneBtn);
+    fuEl.appendChild(li);
+  });
+
+  if (list.length > 6) {
+    const more = document.createElement('li');
+    more.className = 'dashboard-empty';
+    more.textContent = `+${list.length - 6} more — open Edit memory to see all.`;
+    fuEl.appendChild(more);
+  }
+}
+
+function _renderRecent(items) {
+  const recentEl = document.getElementById('dashboard-recent');
+  const metaEl = document.getElementById('dashboard-recent-meta');
+  if (!recentEl) return;
+  recentEl.innerHTML = '';
+  const list = (items || []).slice(0, 6);
+  if (metaEl) metaEl.textContent = list.length ? `Last ${list.length}` : '';
+
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'dashboard-empty';
+    li.textContent = "Nothing yet. Use Quick launch above to start your first workflow.";
+    recentEl.appendChild(li);
+    return;
+  }
+
+  list.forEach((r) => {
+    const li = document.createElement('li');
+    li.className = 'dashboard-recent-item';
+    let channel, icon;
+    if (r.workflow === 'social') { channel = r.channel || 'Social'; icon = 'S'; }
+    else if (r.workflow === 'agentic') { channel = 'Agentic Brief'; icon = 'A'; }
+    else if (r.workflow === 'notebooklm') { channel = 'NotebookLM'; icon = 'N'; }
+    else { channel = 'Business'; icon = 'B'; }
+    const title = prettifyRunName(r.name || '');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dashboard-recent-item-button';
+    btn.innerHTML = `
+      <span class="dashboard-recent-item-icon" aria-hidden="true">${icon}</span>
+      <span class="dashboard-recent-item-text">
+        <span class="dashboard-recent-item-title">${escapeHtml(title)}</span>
+        <span class="dashboard-recent-item-meta">${escapeHtml(channel)} · ${escapeHtml(fmtDateShort(r.mtime_iso))}</span>
+      </span>
+      <span class="dashboard-recent-item-chevron" aria-hidden="true">→</span>
+    `;
+    btn.addEventListener('click', () => openProjectFromSidebar(r));
+    li.appendChild(btn);
+    recentEl.appendChild(li);
+  });
+}
+
+function _renderContext(counts) {
+  const map = {
+    contacts: counts.contacts || 0,
+    brand_voices: counts.brand_voices || 0,
+    facts: counts.facts || 0,
+    decisions: counts.decisions || 0,
+    open_follow_ups: counts.open_follow_ups || 0,
+  };
+  Object.keys(map).forEach((k) => {
+    const el = document.querySelector(`[data-count="${k}"]`);
+    if (el) el.textContent = String(map[k]);
+  });
+
+  // Show the "memory is empty" friendly explainer only when nothing is set.
+  const emptyEl = document.getElementById('dashboard-context-empty');
+  const memoryEmpty = !(
+    map.contacts || map.facts || map.decisions || map.brand_voices || map.open_follow_ups
+  );
+  if (emptyEl) {
+    if (memoryEmpty) emptyEl.removeAttribute('hidden');
+    else emptyEl.setAttribute('hidden', '');
+  }
+
+  // Wire each context row to open the matching memory tab.
+  document.querySelectorAll('[data-ctx-target]').forEach((row) => {
+    if (row.dataset.ctxWired === 'true') return;
+    row.dataset.ctxWired = 'true';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    const tab = row.getAttribute('data-ctx-target');
+    const open = () => openMemoryModal(tab);
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
+}
+
+function renderDashboard(data) {
+  const todayEl = document.getElementById('dashboard-today');
+  if (todayEl) todayEl.textContent = data.today || '';
+
+  const statusEl = document.getElementById('dashboard-status-line');
+  if (statusEl) statusEl.textContent = _statusLineFor(data);
+
+  _renderFocus(data.suggested_next_actions || [], data);
+  _renderFollowUps(data.open_follow_ups || []);
+  _renderRecent(data.recent_runs || []);
+  _renderContext(data.memory_counts || {});
+}
+
+function _handleQuickLaunch(key) {
+  if (!key) return;
+  if (key === 'new-business') { startNewWorkflow('business'); return; }
+  if (key === 'new-social') { startNewWorkflow('social'); return; }
+  if (key === 'agentic-brief') { startNewWorkflow('agentic'); return; }
+  if (key === 'notebooklm') { startNewWorkflow('notebooklm'); return; }
+  if (key === 'open-wizard') { openWizard(); return; }
+  if (key === 'add-contact') { openMemoryModal('contacts'); return; }
+  if (key === 'add-follow-up') { openMemoryModal('follow-ups'); return; }
+  if (key === 'edit-memory') { openMemoryModal('contacts'); return; }
+}
+
+async function markFollowUpDone(id) {
+  if (!id) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/follow-ups/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'done' }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadDashboard();
+  } catch (err) {
+    debugLog('follow_up.mark_done_failed', { error: err && err.message });
+  }
+}
+
+function _handleDashboardActionTarget(target) {
+  if (!target) return;
+  if (target === 'wizard') {
+    openWizard();
+  } else if (target.startsWith('workflow:')) {
+    const mode = target.split(':')[1];
+    if (mode === 'agentic' || mode === 'notebooklm' || mode === 'business' || mode === 'social') {
+      startNewWorkflow(mode);
+    }
+  } else if (target.startsWith('memory:')) {
+    const tab = target.split(':')[1];
+    openMemoryModal(tab);
+  } else if (target.startsWith('run:')) {
+    const folder = target.slice(4);
+    if (folder) openProjectFromSidebar({ artifact_folder: folder });
+  }
+}
+
+/* ---------- Memory modal ---------- */
+
+let memoryActiveTab = 'contacts';
+
+function openMemoryModal(tab) {
+  const modal = document.getElementById('memory-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  document.addEventListener('keydown', _handleMemoryKeydown);
+  if (tab) _switchMemoryTab(tab);
+  else _switchMemoryTab(memoryActiveTab);
+}
+
+function closeMemoryModal() {
+  const modal = document.getElementById('memory-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  document.removeEventListener('keydown', _handleMemoryKeydown);
+  loadDashboard(); // refresh counts after possible edits
+}
+
+function _handleMemoryKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeMemoryModal(); }
+}
+
+function _switchMemoryTab(tab) {
+  memoryActiveTab = tab;
+  document.querySelectorAll('[data-memory-tab]').forEach((t) => {
+    t.classList.toggle('is-active', t.getAttribute('data-memory-tab') === tab);
+  });
+  document.querySelectorAll('[data-memory-panel]').forEach((p) => {
+    p.classList.toggle('hidden', p.getAttribute('data-memory-panel') !== tab);
+  });
+  if (tab === 'contacts') loadMemoryContacts();
+  else if (tab === 'brand') loadMemoryBrand();
+  else if (tab === 'facts') loadMemoryFacts();
+  else if (tab === 'follow-ups') loadMemoryFollowUps();
+  else if (tab === 'decisions') loadMemoryDecisions();
+}
+
+function _setMemoryStatus(text, kind) {
+  const el = document.getElementById('memory-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'modal-status';
+  if (kind === 'ok') el.classList.add('is-ok');
+  if (kind === 'err') el.classList.add('is-err');
+}
+
+async function loadMemoryContacts() {
+  const listEl = document.getElementById('memory-contacts-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/contacts`);
+    const data = await res.json();
+    const items = (data && data.contacts) || [];
+    listEl.innerHTML = '';
+    if (!items.length) {
+      listEl.innerHTML = '<li class="memory-empty">No contacts yet.</li>';
+      return;
+    }
+    items.forEach((c) => {
+      const li = document.createElement('li');
+      li.className = 'memory-list-item';
+      const meta = [c.role, c.company, c.email, c.phone].filter(Boolean).join(' · ');
+      li.innerHTML = `
+        <span class="memory-list-item-text">
+          <span class="memory-list-item-title">${escapeHtml(c.name || '(no name)')}</span>
+          ${meta ? `<span class="memory-list-item-meta">${escapeHtml(meta)}</span>` : ''}
+          ${c.notes ? `<span class="memory-list-item-meta">${escapeHtml(c.notes)}</span>` : ''}
+        </span>
+        <span class="memory-list-item-actions"></span>
+      `;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'memory-delete-btn';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteMemoryEntry('contacts', c.id, loadMemoryContacts));
+      li.querySelector('.memory-list-item-actions').appendChild(del);
+      listEl.appendChild(li);
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load contacts.', 'err');
+  }
+}
+
+async function loadMemoryFacts() {
+  const listEl = document.getElementById('memory-facts-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/facts`);
+    const data = await res.json();
+    const items = (data && data.facts) || [];
+    listEl.innerHTML = '';
+    if (!items.length) {
+      listEl.innerHTML = '<li class="memory-empty">No facts yet.</li>';
+      return;
+    }
+    items.forEach((f) => {
+      const li = document.createElement('li');
+      li.className = 'memory-list-item';
+      const meta = [f.topic, f.source].filter(Boolean).join(' · ');
+      li.innerHTML = `
+        <span class="memory-list-item-text">
+          <span class="memory-list-item-title">${escapeHtml(f.fact || '')}</span>
+          ${meta ? `<span class="memory-list-item-meta">${escapeHtml(meta)}</span>` : ''}
+        </span>
+        <span class="memory-list-item-actions"></span>
+      `;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'memory-delete-btn';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteMemoryEntry('facts', f.id, loadMemoryFacts));
+      li.querySelector('.memory-list-item-actions').appendChild(del);
+      listEl.appendChild(li);
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load facts.', 'err');
+  }
+}
+
+async function loadMemoryFollowUps() {
+  const listEl = document.getElementById('memory-follow-ups-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/follow-ups`);
+    const data = await res.json();
+    const items = (data && data.follow_ups) || [];
+    listEl.innerHTML = '';
+    if (!items.length) {
+      listEl.innerHTML = '<li class="memory-empty">No follow-ups yet.</li>';
+      return;
+    }
+    items.forEach((f) => {
+      const li = document.createElement('li');
+      li.className = 'memory-list-item';
+      const meta = [f.who, f.due_iso, f.status === 'done' ? '✓ done' : 'open'].filter(Boolean).join(' · ');
+      li.innerHTML = `
+        <span class="memory-list-item-text">
+          <span class="memory-list-item-title">${escapeHtml(f.what || '')}</span>
+          ${meta ? `<span class="memory-list-item-meta">${escapeHtml(meta)}</span>` : ''}
+        </span>
+        <span class="memory-list-item-actions"></span>
+      `;
+      const actions = li.querySelector('.memory-list-item-actions');
+      if (f.status !== 'done') {
+        const doneBtn = document.createElement('button');
+        doneBtn.type = 'button';
+        doneBtn.className = 'memory-delete-btn';
+        doneBtn.textContent = 'Mark done';
+        doneBtn.addEventListener('click', async () => {
+          await fetch(`${BACKEND}/memory/follow-ups/${encodeURIComponent(f.id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'done' }),
+          });
+          loadMemoryFollowUps();
+        });
+        actions.appendChild(doneBtn);
+      }
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'memory-delete-btn';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteMemoryEntry('follow-ups', f.id, loadMemoryFollowUps));
+      actions.appendChild(del);
+      listEl.appendChild(li);
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load follow-ups.', 'err');
+  }
+}
+
+async function loadMemoryDecisions() {
+  const listEl = document.getElementById('memory-decisions-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/decisions`);
+    const data = await res.json();
+    const items = (data && data.decisions) || [];
+    listEl.innerHTML = '';
+    if (!items.length) {
+      listEl.innerHTML = '<li class="memory-empty">No decisions logged yet.</li>';
+      return;
+    }
+    items.forEach((d) => {
+      const li = document.createElement('li');
+      li.className = 'memory-list-item';
+      const meta = [d.date_iso, d.context].filter(Boolean).join(' · ');
+      li.innerHTML = `
+        <span class="memory-list-item-text">
+          <span class="memory-list-item-title">${escapeHtml(d.decision || '')}</span>
+          ${meta ? `<span class="memory-list-item-meta">${escapeHtml(meta)}</span>` : ''}
+        </span>
+        <span class="memory-list-item-actions"></span>
+      `;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'memory-delete-btn';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteMemoryEntry('decisions', d.id, loadMemoryDecisions));
+      li.querySelector('.memory-list-item-actions').appendChild(del);
+      listEl.appendChild(li);
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load decisions.', 'err');
+  }
+}
+
+async function loadMemoryBrand() {
+  try {
+    const res = await fetch(`${BACKEND}/memory/brand`);
+    const brand = await res.json();
+    document.querySelectorAll('[data-brand]').forEach((el) => {
+      const [section, field] = el.getAttribute('data-brand').split('.');
+      const val = (brand[section] && brand[section][field]) || '';
+      if (field === 'do' || field === 'avoid') {
+        el.value = Array.isArray(val) ? val.join(', ') : '';
+      } else {
+        el.value = val || '';
+      }
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load brand.', 'err');
+  }
+}
+
+async function saveBrandForm(e) {
+  if (e) e.preventDefault();
+  const payload = { ridian: {}, open_gulf: {}, buns: {} };
+  document.querySelectorAll('[data-brand]').forEach((el) => {
+    const [section, field] = el.getAttribute('data-brand').split('.');
+    if (field === 'do' || field === 'avoid') {
+      payload[section][field] = el.value.split(',').map((s) => s.trim()).filter(Boolean);
+    } else {
+      payload[section][field] = el.value;
+    }
+  });
+  try {
+    const res = await fetch(`${BACKEND}/memory/brand`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    _setMemoryStatus('Brand saved.', 'ok');
+    setTimeout(() => _setMemoryStatus(''), 2000);
+  } catch (err) {
+    _setMemoryStatus('Could not save brand.', 'err');
+  }
+}
+
+async function deleteMemoryEntry(kind, id, reload) {
+  if (!id) return;
+  if (!window.confirm('Delete this entry?')) return;
+  try {
+    const res = await fetch(`${BACKEND}/memory/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (typeof reload === 'function') reload();
+  } catch (err) {
+    _setMemoryStatus('Could not delete.', 'err');
+  }
+}
+
+function _wireMemoryForms() {
+  const contactForm = document.getElementById('memory-contact-form');
+  if (contactForm) contactForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(contactForm);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.name && !payload.email) { _setMemoryStatus('Name or email required.', 'err'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/memory/contacts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      contactForm.reset();
+      _setMemoryStatus('Contact added.', 'ok');
+      setTimeout(() => _setMemoryStatus(''), 1500);
+      loadMemoryContacts();
+    } catch (err) { _setMemoryStatus('Could not add contact.', 'err'); }
+  });
+
+  const factForm = document.getElementById('memory-fact-form');
+  if (factForm) factForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(factForm);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.fact) { _setMemoryStatus('Fact required.', 'err'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/memory/facts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      factForm.reset();
+      _setMemoryStatus('Fact added.', 'ok');
+      setTimeout(() => _setMemoryStatus(''), 1500);
+      loadMemoryFacts();
+    } catch (err) { _setMemoryStatus('Could not add fact.', 'err'); }
+  });
+
+  const fuForm = document.getElementById('memory-follow-up-form');
+  if (fuForm) fuForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(fuForm);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.what) { _setMemoryStatus('What is required.', 'err'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/memory/follow-ups`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fuForm.reset();
+      _setMemoryStatus('Follow-up added.', 'ok');
+      setTimeout(() => _setMemoryStatus(''), 1500);
+      loadMemoryFollowUps();
+    } catch (err) { _setMemoryStatus('Could not add follow-up.', 'err'); }
+  });
+
+  const decForm = document.getElementById('memory-decision-form');
+  if (decForm) decForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(decForm);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.decision) { _setMemoryStatus('Decision required.', 'err'); return; }
+    try {
+      const res = await fetch(`${BACKEND}/memory/decisions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      decForm.reset();
+      _setMemoryStatus('Decision logged.', 'ok');
+      setTimeout(() => _setMemoryStatus(''), 1500);
+      loadMemoryDecisions();
+    } catch (err) { _setMemoryStatus('Could not log decision.', 'err'); }
+  });
+
+  const brandForm = document.getElementById('memory-brand-form');
+  if (brandForm) brandForm.addEventListener('submit', saveBrandForm);
+}
+
+// Wire memory tabs + close button
+document.querySelectorAll('[data-memory-tab]').forEach((tab) => {
+  tab.addEventListener('click', () => _switchMemoryTab(tab.getAttribute('data-memory-tab')));
+});
+const memoryCloseBtn = document.getElementById('memory-close-btn');
+if (memoryCloseBtn) memoryCloseBtn.addEventListener('click', closeMemoryModal);
+
+// Dashboard buttons
+if (els.sidebarDashboardBtn) {
+  els.sidebarDashboardBtn.addEventListener('click', () => setWorkspaceView('welcome'));
+}
+const dashEditMemoryBtn = document.getElementById('dashboard-edit-memory-btn');
+if (dashEditMemoryBtn) dashEditMemoryBtn.addEventListener('click', () => openMemoryModal('contacts'));
+const dashAddFollowUpBtn = document.getElementById('dashboard-add-follow-up-btn');
+if (dashAddFollowUpBtn) dashAddFollowUpBtn.addEventListener('click', () => openMemoryModal('follow-ups'));
+const dashNewWorkflowBtn = document.getElementById('dashboard-new-workflow-btn');
+if (dashNewWorkflowBtn) dashNewWorkflowBtn.addEventListener('click', () => openWizard());
+
+// Quick Launch row
+document.querySelectorAll('[data-ql]').forEach((btn) => {
+  btn.addEventListener('click', () => _handleQuickLaunch(btn.getAttribute('data-ql')));
+});
+
+_wireMemoryForms();
 
 /* ============================================================ */
 /*                       INITIAL LOAD                            */

@@ -22,6 +22,12 @@
 
         <div class="sidebar-section sidebar-primary">
           <button
+            id="sidebar-dashboard-btn"
+            type="button"
+            class="sidebar-btn sidebar-dashboard-btn is-active"
+          >Dashboard</button>
+
+          <button
             id="sidebar-new-workflow-btn"
             type="button"
             class="sidebar-btn sidebar-btn-primary"
@@ -45,6 +51,24 @@
             >
               <span class="sidebar-mode-icon">S</span>
               <span class="sidebar-mode-label">Social Media Production</span>
+            </button>
+            <button
+              id="sidebar-mode-agentic"
+              type="button"
+              class="sidebar-mode-btn"
+              data-mode="agentic"
+            >
+              <span class="sidebar-mode-icon">A</span>
+              <span class="sidebar-mode-label">Agentic Advances Brief</span>
+            </button>
+            <button
+              id="sidebar-mode-notebooklm"
+              type="button"
+              class="sidebar-mode-btn"
+              data-mode="notebooklm"
+            >
+              <span class="sidebar-mode-icon">N</span>
+              <span class="sidebar-mode-label">NotebookLM Builder</span>
             </button>
           </div>
         </div>
@@ -187,15 +211,28 @@
 
           <!-- ======================== WELCOME STATE ======================== -->
           <section id="view-welcome" class="workspace-view">
-            <div class="welcome">
+            <div class="dashboard">
+
+              <!-- Hero / briefing -->
+              <header class="dashboard-hero">
+                <div class="dashboard-hero-meta">
+                  <span class="dashboard-eyebrow">Ridian Command Center</span>
+                  <h2 class="dashboard-title">Your private digital staff.</h2>
+                  <p class="dashboard-today" id="dashboard-today">—</p>
+                </div>
+                <div class="dashboard-hero-status" role="status" aria-live="polite">
+                  <span class="dashboard-hero-status-eyebrow">Today</span>
+                  <span class="dashboard-hero-status-line" id="dashboard-status-line">
+                    Loading your command center…
+                  </span>
+                </div>
+              </header>
+
               <div id="welcome-tip" class="welcome-tip hidden" role="note">
                 <div class="welcome-tip-icon" aria-hidden="true">💡</div>
                 <div class="welcome-tip-body">
-                  <strong>Quick orientation.</strong> Pick a workflow card below to begin.
-                  As runs accumulate they'll appear in <strong>Recent runs</strong> on the
-                  left — hover over any of them to pin (★) or hide (×).
-                  Your OpenAI key, SMTP, and Google Drive live in
-                  <strong>Settings</strong> at the bottom of the sidebar.
+                  <strong>First time?</strong> Use <strong>Quick launch</strong> below to start a workflow, add a
+                  contact, or log a follow-up. Nothing is sent, posted, or uploaded without your approval.
                 </div>
                 <button
                   id="welcome-tip-dismiss"
@@ -204,31 +241,179 @@
                   aria-label="Dismiss welcome tip"
                 >Got it</button>
               </div>
-              <h2 class="welcome-title">Pick a workflow to begin</h2>
-              <p class="welcome-lead">
-                Ridian Agency turns a brief into a polished package you can
-                review, export, and publish. Everything runs on your
-                computer; the model calls go to OpenAI.
-              </p>
 
-              <div class="welcome-cards">
-                <button type="button" class="welcome-card" data-mode="business">
-                  <span class="welcome-card-eyebrow">Business Workflow</span>
-                  <span class="welcome-card-title">Research → document → slides → email</span>
-                  <span class="welcome-card-desc">
-                    A five-agent pipeline that produces a research summary,
-                    business document, slide outline, and a draft email.
-                  </span>
-                </button>
-                <button type="button" class="welcome-card" data-mode="social">
-                  <span class="welcome-card-eyebrow">Social Media Production</span>
-                  <span class="welcome-card-title">Channel-aware content package</span>
-                  <span class="welcome-card-desc">
-                    Content concept, script, caption, posting checklist.
-                    Open Gulf, Buns, or any custom channel.
-                  </span>
-                </button>
+              <!-- Today's Focus: primary CTA + supporting actions -->
+              <section class="dashboard-focus" aria-labelledby="dashboard-focus-heading">
+                <div class="dashboard-focus-head">
+                  <h3 id="dashboard-focus-heading" class="dashboard-focus-title">Today's focus</h3>
+                  <span id="dashboard-focus-meta" class="dashboard-focus-meta"></span>
+                </div>
+                <div id="dashboard-focus-body" class="dashboard-focus-body">
+                  <p class="dashboard-empty">Loading…</p>
+                </div>
+              </section>
+
+              <!-- Quick Launch: one-click common moves -->
+              <section class="dashboard-quicklaunch" aria-labelledby="dashboard-quicklaunch-heading">
+                <h3 id="dashboard-quicklaunch-heading" class="dashboard-section-title">Quick launch</h3>
+                <div class="dashboard-quicklaunch-row">
+                  <button type="button" class="dashboard-ql-btn" data-ql="new-business">
+                    <span class="dashboard-ql-icon" aria-hidden="true">B</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">New business workflow</span>
+                      <span class="dashboard-ql-sub">Research, doc, slides, email.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="new-social">
+                    <span class="dashboard-ql-icon" aria-hidden="true">S</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">New social workflow</span>
+                      <span class="dashboard-ql-sub">Script, caption, visuals.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="agentic-brief">
+                    <span class="dashboard-ql-icon" aria-hidden="true">A</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">Agentic advances brief</span>
+                      <span class="dashboard-ql-sub">Today's significant AI advances.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="notebooklm">
+                    <span class="dashboard-ql-icon" aria-hidden="true">N</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">NotebookLM package</span>
+                      <span class="dashboard-ql-sub">Audio Overview + prompts.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="open-wizard">
+                    <span class="dashboard-ql-icon" aria-hidden="true">✦</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">Guided wizard</span>
+                      <span class="dashboard-ql-sub">Pick a workflow template.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="add-contact">
+                    <span class="dashboard-ql-icon" aria-hidden="true">+</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">Add contact</span>
+                      <span class="dashboard-ql-sub">Save someone to memory.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="add-follow-up">
+                    <span class="dashboard-ql-icon" aria-hidden="true">✓</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">Add follow-up</span>
+                      <span class="dashboard-ql-sub">Remember a next step.</span>
+                    </span>
+                  </button>
+                  <button type="button" class="dashboard-ql-btn" data-ql="edit-memory">
+                    <span class="dashboard-ql-icon" aria-hidden="true">M</span>
+                    <span class="dashboard-ql-text">
+                      <span class="dashboard-ql-label">Edit memory</span>
+                      <span class="dashboard-ql-sub">Brand, facts, decisions.</span>
+                    </span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Main grid: left = work, right = context -->
+              <div class="dashboard-main">
+                <div class="dashboard-main-left">
+                  <section class="dashboard-panel" aria-labelledby="dashboard-followups-heading">
+                    <div class="dashboard-panel-head">
+                      <div class="dashboard-panel-head-text">
+                        <h3 id="dashboard-followups-heading" class="dashboard-panel-title">Follow-ups</h3>
+                        <span id="dashboard-followups-meta" class="dashboard-panel-meta"></span>
+                      </div>
+                      <button
+                        type="button"
+                        class="dashboard-panel-action"
+                        id="dashboard-add-follow-up-btn"
+                      >+ Add follow-up</button>
+                    </div>
+                    <ul id="dashboard-follow-ups" class="dashboard-follow-ups">
+                      <li class="dashboard-empty">Loading…</li>
+                    </ul>
+                  </section>
+
+                  <section class="dashboard-panel" aria-labelledby="dashboard-recent-heading">
+                    <div class="dashboard-panel-head">
+                      <div class="dashboard-panel-head-text">
+                        <h3 id="dashboard-recent-heading" class="dashboard-panel-title">Recent work</h3>
+                        <span id="dashboard-recent-meta" class="dashboard-panel-meta"></span>
+                      </div>
+                      <button
+                        type="button"
+                        class="dashboard-panel-action"
+                        id="dashboard-new-workflow-btn"
+                      >+ New workflow</button>
+                    </div>
+                    <ul id="dashboard-recent" class="dashboard-recent">
+                      <li class="dashboard-empty">Loading…</li>
+                    </ul>
+                  </section>
+                </div>
+
+                <aside class="dashboard-main-right">
+                  <section class="dashboard-panel dashboard-context" aria-labelledby="dashboard-context-heading">
+                    <div class="dashboard-panel-head">
+                      <div class="dashboard-panel-head-text">
+                        <h3 id="dashboard-context-heading" class="dashboard-panel-title">Ridian Context</h3>
+                        <span class="dashboard-panel-meta">What your digital staff remembers.</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="dashboard-panel-action"
+                        id="dashboard-edit-memory-btn"
+                      >Edit memory</button>
+                    </div>
+
+                    <ul class="dashboard-context-list" id="dashboard-context-list">
+                      <li class="dashboard-context-row" data-ctx-target="contacts">
+                        <span class="dashboard-context-num" data-count="contacts">0</span>
+                        <span class="dashboard-context-text">
+                          <span class="dashboard-context-label">Contacts saved</span>
+                          <span class="dashboard-context-hint">People your agents can reference.</span>
+                        </span>
+                      </li>
+                      <li class="dashboard-context-row" data-ctx-target="brand">
+                        <span class="dashboard-context-num"><span data-count="brand_voices">0</span><span class="dashboard-context-denom">/3</span></span>
+                        <span class="dashboard-context-text">
+                          <span class="dashboard-context-label">Brand voices defined</span>
+                          <span class="dashboard-context-hint">Ridian, Open Gulf, Buns.</span>
+                        </span>
+                      </li>
+                      <li class="dashboard-context-row" data-ctx-target="facts">
+                        <span class="dashboard-context-num" data-count="facts">0</span>
+                        <span class="dashboard-context-text">
+                          <span class="dashboard-context-label">Facts logged</span>
+                          <span class="dashboard-context-hint">Reusable context for every run.</span>
+                        </span>
+                      </li>
+                      <li class="dashboard-context-row" data-ctx-target="decisions">
+                        <span class="dashboard-context-num" data-count="decisions">0</span>
+                        <span class="dashboard-context-text">
+                          <span class="dashboard-context-label">Decisions recorded</span>
+                          <span class="dashboard-context-hint">Why you chose this path.</span>
+                        </span>
+                      </li>
+                      <li class="dashboard-context-row" data-ctx-target="follow-ups">
+                        <span class="dashboard-context-num" data-count="open_follow_ups">0</span>
+                        <span class="dashboard-context-text">
+                          <span class="dashboard-context-label">Open follow-ups</span>
+                          <span class="dashboard-context-hint">Things to come back to.</span>
+                        </span>
+                      </li>
+                    </ul>
+
+                    <p class="dashboard-context-empty" id="dashboard-context-empty" hidden>
+                      Memory is empty. It helps your digital staff remember people, brand voice,
+                      decisions, and follow-ups so every workflow feels personal — not generic.
+                    </p>
+                  </section>
+                </aside>
               </div>
+
             </div>
           </section>
 
@@ -421,6 +606,141 @@
               <p class="run-helper-text">
                 This creates drafts only. Nothing is posted, emailed, or
                 uploaded without your approval.
+              </p>
+            </section>
+          </section>
+
+          <!-- ======================== INPUT (AGENTIC ADVANCES) ======================== -->
+          <section id="view-input-agentic" class="workspace-view hidden">
+            <section class="card" aria-labelledby="agentic-heading">
+              <div class="card-head">
+                <h2 id="agentic-heading">Agentic Advances Daily Brief</h2>
+              </div>
+              <p class="prompts-sub">
+                Web-research-grounded brief of significant agentic AI developments
+                relevant to Ridian. Uses live web search; sources are cited in the
+                output.
+              </p>
+
+              <div class="social-grid">
+                <label class="field">
+                  <span class="field-label">Time window</span>
+                  <select id="agentic-time-window" name="time_window">
+                    <option>Last 24 hours</option>
+                    <option selected>Last 7 days</option>
+                    <option>Last 30 days</option>
+                    <option>Last 90 days</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Output depth</span>
+                  <select id="agentic-output-depth" name="output_depth">
+                    <option>Quick brief</option>
+                    <option selected>Strategic brief</option>
+                    <option>Deep research brief</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Topic focus (optional)</span>
+                <textarea
+                  id="agentic-topic-focus"
+                  name="topic_focus"
+                  rows="3"
+                  placeholder="Optional. Narrow the brief to a specific angle. Example: &quot;agent memory systems for private workforce setups&quot; or &quot;browser agents for local-business automation&quot;. Leave blank to use the standard Ridian focus areas."
+                ></textarea>
+              </label>
+
+              <div class="card-actions">
+                <button id="agentic-run-btn" type="button" class="btn btn-primary">
+                  Run Agentic Advances brief
+                </button>
+                <button id="agentic-clear-btn" type="button" class="btn btn-ghost">
+                  Clear &amp; reset
+                </button>
+              </div>
+              <p class="run-helper-text">
+                This calls live web search through the OpenAI Agents SDK. Brief
+                is saved locally; nothing is posted, emailed, or uploaded without
+                your approval.
+              </p>
+            </section>
+          </section>
+
+          <!-- ======================== INPUT (NOTEBOOKLM) ======================== -->
+          <section id="view-input-notebooklm" class="workspace-view hidden">
+            <section class="card" aria-labelledby="notebooklm-heading">
+              <div class="card-head">
+                <h2 id="notebooklm-heading">NotebookLM Builder</h2>
+              </div>
+              <p class="prompts-sub">
+                Generates a copy-paste-ready NotebookLM package: source-gathering
+                prompt, Audio Overview prompt, briefing prompt, and key questions.
+              </p>
+
+              <label class="field">
+                <span class="field-label">Subject / topic</span>
+                <textarea
+                  id="notebooklm-subject"
+                  name="subject"
+                  rows="2"
+                  placeholder="What's the notebook about? Example: &quot;agentic AI workflows for small business productivity&quot;."
+                ></textarea>
+              </label>
+
+              <div class="social-grid">
+                <label class="field">
+                  <span class="field-label">Purpose</span>
+                  <select id="notebooklm-purpose" name="purpose">
+                    <option selected>Learn</option>
+                    <option>Strategy</option>
+                    <option>Content creation</option>
+                    <option>Business planning</option>
+                    <option>Teaching / training</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Audience</span>
+                  <select id="notebooklm-audience" name="audience">
+                    <option selected>Ryan</option>
+                    <option>Entrepreneurs</option>
+                    <option>Educators</option>
+                    <option>Clients</option>
+                    <option>General audience</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Output type</span>
+                  <select id="notebooklm-output-type" name="output_type">
+                    <option>NotebookLM source prompt</option>
+                    <option>Audio Overview prompt</option>
+                    <option selected>Full NotebookLM package</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Notes / context (optional)</span>
+                <textarea
+                  id="notebooklm-notes"
+                  name="notes"
+                  rows="3"
+                  placeholder="Anything else the builder should know? Specific angles, existing source material, intended downstream output."
+                ></textarea>
+              </label>
+
+              <div class="card-actions">
+                <button id="notebooklm-run-btn" type="button" class="btn btn-primary">
+                  Build NotebookLM package
+                </button>
+                <button id="notebooklm-clear-btn" type="button" class="btn btn-ghost">
+                  Clear &amp; reset
+                </button>
+              </div>
+              <p class="run-helper-text">
+                This creates drafts only. Package is saved locally; nothing is
+                posted, emailed, or uploaded without your approval.
               </p>
             </section>
           </section>
@@ -726,6 +1046,62 @@
                   </div>
                 </article>
               </div><!-- /#results-social -->
+
+              <!-- ===== Agentic Advances result cards ===== -->
+              <div id="results-agentic" class="results-mode hidden">
+                <article id="agentic-brief-card" data-result-panel="agentic-brief-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>Agentic Advances Brief</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="agentic_advances_brief">Copy</button>
+                  </div>
+                  <div class="review-marker">Review brief</div>
+                  <div class="result-body" data-field="agentic_advances_brief"></div>
+                  <div class="audio-controls" data-audio-card="agentic-brief-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to agentic advances brief">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="email-actions">
+                    <button id="agentic-send-email-btn" type="button" class="btn btn-primary">
+                      Email Brief to Me
+                    </button>
+                    <span id="agentic-send-email-status" class="email-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="agentic_advances_brief.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+              </div><!-- /#results-agentic -->
+
+              <!-- ===== NotebookLM result cards ===== -->
+              <div id="results-notebooklm" class="results-mode hidden">
+                <article id="notebooklm-package-card" data-result-panel="notebooklm-package-card" class="card result-card hidden">
+                  <div class="card-head">
+                    <h2>NotebookLM Package</h2>
+                    <button class="btn btn-ghost copy-btn" type="button" data-target="notebooklm_package">Copy</button>
+                  </div>
+                  <div class="review-marker">Review package</div>
+                  <div class="result-body" data-field="notebooklm_package"></div>
+                  <div class="audio-controls" data-audio-card="notebooklm-package-card">
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="listen" aria-label="Listen to NotebookLM package">Listen</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="pause" disabled>Pause</button>
+                    <button type="button" class="btn btn-ghost audio-btn" data-audio-action="stop" disabled>Stop</button>
+                    <span class="audio-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="email-actions">
+                    <button id="notebooklm-send-email-btn" type="button" class="btn btn-primary">
+                      Email NotebookLM Package to Me
+                    </button>
+                    <span id="notebooklm-send-email-status" class="email-status" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="card-actions-row">
+                    <button type="button" class="btn btn-ghost" data-action="open-file" data-filename="notebooklm_package.md">Open markdown file</button>
+                    <span class="card-action-status" role="status" aria-live="polite"></span>
+                  </div>
+                </article>
+              </div><!-- /#results-notebooklm -->
             </div><!-- /#result-panel-area -->
           </section><!-- /#view-run -->
         </div><!-- /.workspace-body -->
@@ -938,6 +1314,127 @@
           <button id="settings-cancel-btn" type="button" class="btn btn-ghost">Cancel</button>
           <button id="settings-save-btn" type="submit" form="settings-form" class="btn btn-primary">Save settings</button>
         </footer>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--                         MEMORY MODAL                          -->
+    <!-- ============================================================ -->
+    <div
+      id="memory-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="memory-heading"
+      aria-hidden="true"
+    >
+      <div class="modal-card memory-card">
+        <header class="modal-head">
+          <h2 id="memory-heading">Memory</h2>
+          <button
+            id="memory-close-btn"
+            type="button"
+            class="modal-close"
+            aria-label="Close memory"
+          >&times;</button>
+        </header>
+
+        <div class="memory-tabs" role="tablist" aria-label="Memory tabs">
+          <button type="button" class="memory-tab is-active" data-memory-tab="contacts">Contacts</button>
+          <button type="button" class="memory-tab" data-memory-tab="brand">Brand</button>
+          <button type="button" class="memory-tab" data-memory-tab="facts">Facts</button>
+          <button type="button" class="memory-tab" data-memory-tab="follow-ups">Follow-ups</button>
+          <button type="button" class="memory-tab" data-memory-tab="decisions">Decisions</button>
+        </div>
+
+        <div class="memory-body">
+          <!-- Contacts -->
+          <div class="memory-panel" data-memory-panel="contacts">
+            <form id="memory-contact-form" class="memory-form">
+              <input name="name" type="text" placeholder="Name" />
+              <input name="role" type="text" placeholder="Role" />
+              <input name="company" type="text" placeholder="Company" />
+              <input name="email" type="email" placeholder="Email" />
+              <input name="phone" type="text" placeholder="Phone" />
+              <textarea name="notes" rows="2" placeholder="Notes (optional)"></textarea>
+              <button type="submit" class="btn btn-primary btn-compact">Add contact</button>
+            </form>
+            <ul id="memory-contacts-list" class="memory-list">
+              <li class="memory-empty">No contacts yet.</li>
+            </ul>
+          </div>
+
+          <!-- Brand -->
+          <div class="memory-panel hidden" data-memory-panel="brand">
+            <form id="memory-brand-form" class="memory-brand-form">
+              <fieldset class="memory-brand-section">
+                <legend>Ridian Technologies</legend>
+                <label class="field"><span class="field-label">Voice</span><input data-brand="ridian.voice" type="text" /></label>
+                <label class="field"><span class="field-label">Audience</span><input data-brand="ridian.audience" type="text" /></label>
+                <label class="field"><span class="field-label">Do (comma-separated)</span><input data-brand="ridian.do" type="text" /></label>
+                <label class="field"><span class="field-label">Avoid (comma-separated)</span><input data-brand="ridian.avoid" type="text" /></label>
+                <label class="field"><span class="field-label">Notes</span><textarea data-brand="ridian.notes" rows="2"></textarea></label>
+              </fieldset>
+              <fieldset class="memory-brand-section">
+                <legend>Open Gulf</legend>
+                <label class="field"><span class="field-label">Voice</span><input data-brand="open_gulf.voice" type="text" /></label>
+                <label class="field"><span class="field-label">Audience</span><input data-brand="open_gulf.audience" type="text" /></label>
+                <label class="field"><span class="field-label">Do (comma-separated)</span><input data-brand="open_gulf.do" type="text" /></label>
+                <label class="field"><span class="field-label">Avoid (comma-separated)</span><input data-brand="open_gulf.avoid" type="text" /></label>
+                <label class="field"><span class="field-label">Notes</span><textarea data-brand="open_gulf.notes" rows="2"></textarea></label>
+              </fieldset>
+              <fieldset class="memory-brand-section">
+                <legend>Buns</legend>
+                <label class="field"><span class="field-label">Voice</span><input data-brand="buns.voice" type="text" /></label>
+                <label class="field"><span class="field-label">Audience</span><input data-brand="buns.audience" type="text" /></label>
+                <label class="field"><span class="field-label">Do (comma-separated)</span><input data-brand="buns.do" type="text" /></label>
+                <label class="field"><span class="field-label">Avoid (comma-separated)</span><input data-brand="buns.avoid" type="text" /></label>
+                <label class="field"><span class="field-label">Notes</span><textarea data-brand="buns.notes" rows="2"></textarea></label>
+              </fieldset>
+              <button type="submit" class="btn btn-primary btn-compact">Save brand</button>
+            </form>
+          </div>
+
+          <!-- Facts -->
+          <div class="memory-panel hidden" data-memory-panel="facts">
+            <form id="memory-fact-form" class="memory-form">
+              <input name="topic" type="text" placeholder="Topic (optional)" />
+              <textarea name="fact" rows="2" placeholder="Fact" required></textarea>
+              <input name="source" type="text" placeholder="Source (optional)" />
+              <button type="submit" class="btn btn-primary btn-compact">Add fact</button>
+            </form>
+            <ul id="memory-facts-list" class="memory-list">
+              <li class="memory-empty">No facts yet.</li>
+            </ul>
+          </div>
+
+          <!-- Follow-ups -->
+          <div class="memory-panel hidden" data-memory-panel="follow-ups">
+            <form id="memory-follow-up-form" class="memory-form">
+              <textarea name="what" rows="2" placeholder="What needs follow-up?" required></textarea>
+              <input name="who" type="text" placeholder="Who (optional)" />
+              <input name="due_iso" type="text" placeholder="When (e.g. 2026-06-15 or 'next Tuesday')" />
+              <button type="submit" class="btn btn-primary btn-compact">Add follow-up</button>
+            </form>
+            <ul id="memory-follow-ups-list" class="memory-list">
+              <li class="memory-empty">No follow-ups yet.</li>
+            </ul>
+          </div>
+
+          <!-- Decisions -->
+          <div class="memory-panel hidden" data-memory-panel="decisions">
+            <form id="memory-decision-form" class="memory-form">
+              <textarea name="decision" rows="2" placeholder="What was decided?" required></textarea>
+              <textarea name="context" rows="2" placeholder="Context (optional)"></textarea>
+              <button type="submit" class="btn btn-primary btn-compact">Log decision</button>
+            </form>
+            <ul id="memory-decisions-list" class="memory-list">
+              <li class="memory-empty">No decisions logged yet.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div id="memory-status" class="modal-status" role="status" aria-live="polite"></div>
       </div>
     </div>
 
