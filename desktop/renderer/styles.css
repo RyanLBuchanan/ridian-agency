@@ -1211,6 +1211,33 @@ body {
   gap: 4px;
 }
 
+.operator-command-echo {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.operator-command-echo-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-soft);
+}
+
+.operator-command-echo-body {
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .operator-step {
   display: grid;
   grid-template-columns: auto 1fr auto;

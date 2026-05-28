@@ -798,12 +798,79 @@ async def operations_recent(limit: int = 20) -> dict:
     return {"operations": operation_log_service.list_recent(limit=limit)}
 
 
-@app.get("/operations/{operation_id}")
-async def operations_get(operation_id: str) -> dict:
-    rec = operation_log_service.get_operation(operation_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="operation not found")
-    return rec
+# IMPORTANT: register fixed-path routes (/operations/load, /operations/audio,
+# /operations/recent) BEFORE the dynamic /operations/{operation_id} route, or
+# FastAPI's first-match ordering will swallow them as if "load"/"audio" were
+# operation IDs.
+
+@app.get("/operations/load")
+async def operations_load(artifact_folder: str) -> dict:
+    """Rehydrate a completed Operator run from its on-disk artifacts.
+
+    The renderer uses this to reopen a recent Operator run from the sidebar:
+    we return the parsed operation_log.json, the text of sources_packet.md
+    and script.md, and a presence flag for audiobook.mp3. Anything expected
+    but missing is reported in ``missing`` so the renderer can show a
+    warning instead of silently failing.
+    """
+    try:
+        folder = project_service._resolve_project_folder(artifact_folder)
+    except project_service.ProjectError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+    log_path = folder / "operation_log.json"
+    sources_path = folder / "sources_packet.md"
+    script_path = folder / "script.md"
+    audio_path = folder / "audiobook.mp3"
+
+    operation_log = None
+    if log_path.is_file():
+        try:
+            operation_log = json.loads(log_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            operation_log = None
+
+    sources_packet = ""
+    if sources_path.is_file():
+        try:
+            sources_packet = sources_path.read_text(encoding="utf-8")
+        except OSError:
+            sources_packet = ""
+
+    script_md = ""
+    if script_path.is_file():
+        try:
+            script_md = script_path.read_text(encoding="utf-8")
+        except OSError:
+            script_md = ""
+
+    has_audio = audio_path.is_file()
+    audio_bytes = audio_path.stat().st_size if has_audio else 0
+
+    missing: list[str] = []
+    if not log_path.is_file():
+        missing.append("operation_log.json")
+    if not sources_path.is_file():
+        missing.append("sources_packet.md")
+    if not script_path.is_file():
+        missing.append("script.md")
+    # audiobook.mp3 is "optional" in the sense that failed runs legitimately
+    # don't produce one — surface that as a warning only when the log shows
+    # audio was supposed to have been generated.
+    if operation_log and operation_log.get("audio_generated") and not has_audio:
+        missing.append("audiobook.mp3")
+
+    return {
+        "artifact_folder": str(folder),
+        "name": folder.name,
+        "workflow": "operator",
+        "operation_log": operation_log,
+        "sources_packet": sources_packet,
+        "script": script_md,
+        "has_audio": has_audio,
+        "audio_bytes": audio_bytes,
+        "missing": missing,
+    }
 
 
 @app.get("/operations/audio")
@@ -823,6 +890,19 @@ async def operations_audio(artifact_folder: str, filename: str = "audiobook.mp3"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="audio file not found")
     return FileResponse(str(path), media_type="audio/mpeg", filename=filename)
+
+
+@app.get("/operations/{operation_id}")
+async def operations_get(operation_id: str) -> dict:
+    """Single operation record from the persisted operations.json log.
+
+    Registered AFTER the fixed-path operations routes so that "load"/"audio"
+    aren't swallowed as operation IDs.
+    """
+    rec = operation_log_service.get_operation(operation_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="operation not found")
+    return rec
 
 
 @app.post("/email/send-approved", response_model=EmailSendResponse)

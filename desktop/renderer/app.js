@@ -1100,18 +1100,13 @@ async function openProjectFromSidebar(run) {
       throw new Error((data && data.detail) || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    // Operator runs aren't replayable in v1 — they're streaming-only artifacts.
-    // Open the output folder so the operator can play the mp3 + read the files.
+    // Operator runs rehydrate into the Operator panel — read operation_log.json
+    // from disk, restore operatorState, re-render the timeline + artifacts, and
+    // wire the audio player. No prompt-wrapper card UI.
     if (data.workflow === 'operator') {
-      try {
-        await fetch(`${BACKEND}/artifacts/open-folder`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ artifact_folder: data.artifact_folder }),
-        });
-      } catch (_) { /* best-effort */ }
       activeRunFolder = data.artifact_folder;
       renderRecentRuns();
+      await loadOperatorRun({ artifact_folder: data.artifact_folder, name: data.name });
       return;
     }
     let mode = 'business';
@@ -2914,6 +2909,20 @@ function setSettingsStatus(text, kind) {
 /*                     THEME / APPEARANCE                        */
 /* ============================================================ */
 
+const THEME_STORAGE_KEY = 'ridian.appearance';
+
+function _readSavedTheme() {
+  try { return window.localStorage.getItem(THEME_STORAGE_KEY) || ''; }
+  catch (_) { return ''; }
+}
+
+function _writeSavedTheme(pref) {
+  try {
+    if (pref) window.localStorage.setItem(THEME_STORAGE_KEY, pref);
+    else window.localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch (_) { /* private mode / disabled storage */ }
+}
+
 function applyTheme(pref) {
   const val = (pref || 'system').toLowerCase();
   if (val === 'dark') {
@@ -2925,12 +2934,23 @@ function applyTheme(pref) {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
   }
+  _writeSavedTheme(val);
 }
+
+// Apply the saved theme IMMEDIATELY at script eval time so the UI doesn't
+// flash light on startup while the backend /settings fetch is still in
+// flight, and so a slow or unreachable backend doesn't wipe the user's
+// preference back to 'system'. The later /settings fetch updates this
+// once a fresh value is available.
+(function bootstrapTheme() {
+  const saved = _readSavedTheme();
+  applyTheme(saved || 'system');
+})();
 
 // Listen for OS theme changes when in system mode
 try {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    const saved = (cachedSettings && cachedSettings.appearance) || 'system';
+    const saved = (cachedSettings && cachedSettings.appearance) || _readSavedTheme() || 'system';
     if (saved === 'system' || !saved) applyTheme('system');
   });
 } catch (_) { /* matchMedia listener not supported */ }
@@ -4121,10 +4141,14 @@ loadRecentRunsFromBackend();
 setMode('business');
 setWorkspaceView('welcome');
 
-// Load saved theme on startup
+// Load saved theme on startup. The bootstrap above already applied the
+// localStorage-cached value synchronously, so this fetch only refines the
+// theme if the backend disagrees. If the backend is unreachable we keep
+// whatever the bootstrap chose — do NOT fall back to 'system' and wipe the
+// user's saved preference.
 fetch(`${BACKEND}/settings`).then(r => r.ok ? r.json() : null).then(data => {
-  if (data) { cachedSettings = data; applyTheme(data.appearance); }
-}).catch(() => { applyTheme('system'); });
+  if (data) { cachedSettings = data; if (data.appearance) applyTheme(data.appearance); }
+}).catch(() => { /* keep the bootstrap theme */ });
 
 
 /* ============================================================ */
@@ -4634,6 +4658,178 @@ async function _opEmailMe() {
   } catch (err) {
     _opSetStatus(`Email failed: ${err && err.message ? err.message : err}`, 'err');
   }
+}
+
+/**
+ * Rehydrate a completed Operator run from disk into the Operator panel.
+ *
+ * Called when the user clicks a recent run with workflow === 'operator' in
+ * the sidebar. Reads /operations/load on the backend, restores
+ * operatorState (active / finalRecord / drive), and re-renders the timeline
+ * + artifacts + audio player using the same helpers the live SSE path uses.
+ * Missing artifacts surface as warnings instead of silent no-ops.
+ */
+async function loadOperatorRun(run) {
+  if (!run || !run.artifact_folder) return;
+
+  // Always land on the Operator surface (welcome view).
+  setWorkspaceView('welcome');
+  _opResetUI();
+
+  // Reveal panels even before the fetch resolves so the user has feedback.
+  if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+  if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.remove('hidden');
+  if (OPERATOR.folder) OPERATOR.folder.textContent = run.artifact_folder;
+  _opSetStatusDot('running');
+  if (OPERATOR.statusLabel) OPERATOR.statusLabel.textContent = 'Loading saved run…';
+
+  let data = null;
+  try {
+    const url = `${BACKEND}/operations/load?artifact_folder=${encodeURIComponent(run.artifact_folder)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error((errBody && errBody.detail) || `HTTP ${res.status}`);
+    }
+    data = await res.json();
+  } catch (err) {
+    _opRenderRehydrateError(run.artifact_folder, err && err.message ? err.message : String(err));
+    return;
+  }
+
+  const log = data.operation_log;
+  const folder = data.artifact_folder || run.artifact_folder;
+
+  // If the log itself is missing or unparseable, show a real error state with
+  // the folder path + an Open folder button. Not silent.
+  if (!log) {
+    _opRenderRehydrateError(
+      folder,
+      "This operator run has no readable operation_log.json. The folder may have been partially written or hand-edited.",
+    );
+    return;
+  }
+
+  // Restore state so the Operator action buttons (Open folder, Upload Drive,
+  // Email package) work against the reloaded run, not the live session.
+  operatorState.active = {
+    id: log.id || '',
+    artifact_folder: folder,
+    command: log.command || '',
+    intent: log.intent || '',
+  };
+  operatorState.finalRecord = log;
+  operatorState.drive = null; // unknown — user can re-upload if desired
+
+  _opSetStatusDot(log.status || 'completed');
+
+  // Echo the command above the timeline so the operator knows what's loaded.
+  _opRenderCommandEcho(log.command || run.name || '(no command recorded)');
+
+  // Replay the timeline using the same helper the live SSE path uses.
+  (log.steps || []).forEach((step) => _opRenderStep(step));
+
+  // Replay artifacts. For audio, check the presence flag from the backend so
+  // a stale log path that no longer exists doesn't show a broken player.
+  const artifacts = Array.isArray(log.artifacts) ? log.artifacts : [];
+  artifacts.forEach((a) => {
+    if (a.kind === 'audio' && a.name === 'audiobook.mp3' && !data.has_audio) {
+      // Don't render an audio artifact if the file is no longer on disk;
+      // _opRenderRehydrateWarnings will list it below.
+      return;
+    }
+    _opRenderArtifact(a);
+  });
+
+  // Show warnings for anything expected but missing on disk.
+  if (Array.isArray(data.missing) && data.missing.length) {
+    _opRenderRehydrateWarnings(data.missing);
+  }
+
+  // Replay any errors logged at run time.
+  (log.errors || []).forEach((m) => _opRenderError(m));
+
+  debugLog('operator.rehydrated', {
+    id: log.id, status: log.status, sources: log.sources_count,
+    has_audio: data.has_audio, missing: data.missing,
+  });
+}
+
+function _opRenderCommandEcho(text) {
+  if (!OPERATOR.active) return;
+  // Reuse a single command-echo node so re-renders don't stack.
+  let echo = OPERATOR.active.querySelector('.operator-command-echo');
+  if (!echo) {
+    echo = document.createElement('div');
+    echo.className = 'operator-command-echo';
+    // Insert after the active-head, before the timeline.
+    const head = OPERATOR.active.querySelector('.operator-active-head');
+    if (head && head.nextSibling) {
+      OPERATOR.active.insertBefore(echo, head.nextSibling);
+    } else {
+      OPERATOR.active.appendChild(echo);
+    }
+  }
+  echo.innerHTML = '';
+  const label = document.createElement('span');
+  label.className = 'operator-command-echo-label';
+  label.textContent = 'Command';
+  const body = document.createElement('span');
+  body.className = 'operator-command-echo-body';
+  body.textContent = text;
+  echo.appendChild(label);
+  echo.appendChild(body);
+}
+
+function _opRenderRehydrateWarnings(missing) {
+  if (!OPERATOR.errors || !missing || !missing.length) return;
+  OPERATOR.errors.classList.remove('hidden');
+  if (!OPERATOR.errors.querySelector('.operator-errors-title')) {
+    OPERATOR.errors.innerHTML = `
+      <div class="operator-errors-title">Missing artifacts on disk</div>
+      <ul class="operator-errors-list"></ul>
+    `;
+  } else {
+    // If the title is for live errors, change it; otherwise keep it.
+    const title = OPERATOR.errors.querySelector('.operator-errors-title');
+    if (title.textContent.indexOf('Missing') === -1) {
+      title.textContent = 'Missing artifacts on disk';
+    }
+  }
+  const ul = OPERATOR.errors.querySelector('.operator-errors-list');
+  missing.forEach((name) => {
+    const li = document.createElement('li');
+    li.textContent = `${name} — expected but not found in the run folder`;
+    ul.appendChild(li);
+  });
+}
+
+function _opRenderRehydrateError(folder, message) {
+  if (OPERATOR.statusLabel) OPERATOR.statusLabel.textContent = 'Could not load run';
+  _opSetStatusDot('failed');
+  if (OPERATOR.folder) OPERATOR.folder.textContent = folder || '';
+  if (OPERATOR.errors) {
+    OPERATOR.errors.classList.remove('hidden');
+    OPERATOR.errors.innerHTML = `
+      <div class="operator-errors-title">Could not rehydrate this operator run</div>
+      <ul class="operator-errors-list">
+        <li>${escapeHtml(message || 'Unknown error')}</li>
+        <li>Folder: <code>${escapeHtml(folder || '(unknown)')}</code></li>
+      </ul>
+    `;
+  }
+  // Show the artifacts card so the "Open output folder" button is reachable.
+  if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.remove('hidden');
+  if (OPERATOR.artifactsList) {
+    OPERATOR.artifactsList.innerHTML =
+      '<li class="dashboard-empty">No artifacts could be loaded for this run.</li>';
+  }
+  // Wire activeRunFolder so Open output folder still works even without a log.
+  operatorState.active = {
+    id: '', artifact_folder: folder || '', command: '', intent: '',
+  };
+  operatorState.finalRecord = null;
+  operatorState.drive = null;
 }
 
 // Wire up the operator surface (only fires if elements exist).
