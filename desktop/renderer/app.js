@@ -4167,6 +4167,7 @@ const operatorState = {
   artifacts: [],
   elapsedTimer: null,
   elapsedStart: null,
+  drive: null,         // { drive_path, drive_folder_url, uploaded_files }  set after a successful upload
 };
 
 function _opSetStatus(text, kind) {
@@ -4225,6 +4226,7 @@ function _opResetUI() {
   _opSetStatus('');
   operatorState.artifacts = [];
   operatorState.finalRecord = null;
+  operatorState.drive = null;
 }
 
 const STEP_LABELS = {
@@ -4503,10 +4505,105 @@ async function _opUploadDrive() {
       throw new Error((data && data.detail) || `HTTP ${res.status}`);
     }
     const path = (data && data.drive_path) || (data && data.drive_folder_name) || 'Drive';
-    _opSetStatus(`Uploaded to ${path} (${(data.uploaded_files || []).length} files).`, 'ok');
+    const files = (data && data.uploaded_files) || [];
+    operatorState.drive = {
+      drive_path: data.drive_path || '',
+      drive_folder_name: data.drive_folder_name || '',
+      drive_folder_url: data.drive_folder_url || '',
+      uploaded_files: files,
+    };
+    _opSetStatus(`Uploaded to ${path} (${files.length} files).`, 'ok');
   } catch (err) {
     _opSetStatus(`Upload failed: ${err && err.message ? err.message : err}`, 'err');
   }
+}
+
+function _opBuildEmailSummary() {
+  const rec = operatorState.finalRecord || {};
+  const active = operatorState.active || {};
+  const drive = operatorState.drive || null;
+
+  const command = (active.command || '').trim() || '(no command captured)';
+  const folder = active.artifact_folder || '(unknown local folder)';
+  const status = rec.status || 'unknown';
+  const sourcesCount = rec.sources_count || 0;
+  const audioOK = !!rec.audio_generated;
+  const durationSec = rec.audio_duration_seconds || 0;
+
+  // Pretty-print artifact names (paths shown separately under "Where the files live").
+  const artifactList = (rec.artifacts || []).map((a) => `  - ${a.name}`).join('\n')
+    || '  (no artifacts recorded)';
+
+  // Drive line — only present after a successful upload happened in this UI session.
+  let driveLine;
+  if (drive && drive.drive_path) {
+    driveLine = `Drive:  ${drive.drive_path}` +
+      (drive.drive_folder_url ? `\n        ${drive.drive_folder_url}` : '');
+  } else if (drive && drive.drive_folder_name) {
+    driveLine = `Drive:  ${drive.drive_folder_name}` +
+      (drive.drive_folder_url ? `\n        ${drive.drive_folder_url}` : '');
+  } else {
+    driveLine = 'Drive:  (not yet uploaded in this session — use "Upload to Google Drive")';
+  }
+
+  const runtimeStr = durationSec > 0
+    ? `${Math.floor(durationSec / 60)} min ${durationSec % 60} sec spoken`
+    : 'audio runtime not recorded';
+
+  const audioLine = audioOK
+    ? `The audiobook MP3 was generated locally with OpenAI TTS (two voices) and is playable directly in the app — ${runtimeStr}.`
+    : `The audiobook MP3 was NOT generated for this run. Operator did not fabricate audio; see operation_log.json for the failure reason.`;
+
+  return [
+    'Operator v1 just produced a real audiobook from a single natural-language command.',
+    '',
+    'What I asked Ridian to do',
+    `  "${command}"`,
+    '',
+    'What Ridian did, end to end',
+    `  - Live web research across ${sourcesCount} cited sources`,
+    '  - Wrote a polished two-host conversational script (NotebookLM-style)',
+    audioOK
+      ? '  - Synthesized the full audiobook as MP3 using OpenAI TTS (two voices)'
+      : '  - Audio synthesis was skipped or failed (see operation_log.json)',
+    '  - Saved every artifact to a local per-run output folder',
+    drive && drive.drive_path
+      ? '  - Uploaded the package to Google Drive (approval-based button click)'
+      : '  - Drive upload not yet run for this operation',
+    '',
+    'Artifacts',
+    artifactList,
+    '',
+    'Where the files live',
+    `Local:  ${folder}`,
+    driveLine,
+    '',
+    'Audiobook',
+    audioLine,
+    '',
+    'Why this matters',
+    'This is the moment Ridian stopped being a prompt wrapper and started behaving like',
+    'a business operator. The old shape of the app would have produced a NotebookLM prompt',
+    'for me to paste into another tool. This run produced a finished audiobook I can press',
+    'play on — the deliverable itself, not a recipe for the deliverable.',
+    '',
+    'Suggested next checks',
+    '  1. Listen to audiobook.mp3 end to end.',
+    '  2. Skim sources_packet.md for citation quality and confidence flags.',
+    '  3. Skim script.md for tone, pacing, and factual accuracy.',
+    '  4. Confirm the Google Drive folder shows the four files.',
+    '  5. Decide whether to merge feature/operator-v1 into main.',
+    '',
+    'Run details',
+    `  Status:           ${status}`,
+    `  Sources gathered: ${sourcesCount}`,
+    `  Audio generated:  ${audioOK ? 'yes' : 'no'}`,
+    rec.started_at   ? `  Started:          ${rec.started_at}` : null,
+    rec.completed_at ? `  Completed:        ${rec.completed_at}` : null,
+    '',
+    '— Sent from Ridian Command Center, Operator v1.',
+    '',
+  ].filter((line) => line !== null).join('\n');
 }
 
 async function _opEmailMe() {
@@ -4514,30 +4611,19 @@ async function _opEmailMe() {
     _opSetStatus('Wait for the operation to finish first.', 'err');
     return;
   }
-  const folder = (operatorState.active && operatorState.active.artifact_folder) || '';
-  const name = folder.split(/[\\/]/).pop() || 'Operation';
-  const body =
-    `Ridian Operator package: ${name}\n\n` +
-    `Command:\n${operatorState.active && operatorState.active.command || ''}\n\n` +
-    `Status: ${operatorState.finalRecord.status}\n` +
-    `Sources: ${operatorState.finalRecord.sources_count}\n` +
-    `Audio generated: ${operatorState.finalRecord.audio_generated}\n` +
-    `Artifacts:\n` +
-    (operatorState.finalRecord.artifacts || [])
-      .map((a) => `  - ${a.name} (${a.path})`)
-      .join('\n') +
-    `\n\nLocal folder:\n${folder}\n`;
-  const ok = window.confirm('Send this operation package summary to your configured email address?');
+  const body = _opBuildEmailSummary();
+  const subject = 'Ridian Operator v1 Test Complete — AGI Audiobook Package Created';
+
+  const ok = window.confirm(
+    'Send the Operator v1 package summary email to your configured recipient?'
+  );
   if (!ok) return;
   _opSetStatus('Sending email…');
   try {
     const res = await fetch(`${BACKEND}/email/send-approved`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subject: `Ridian Operator — ${name}`,
-        body,
-      }),
+      body: JSON.stringify({ subject, body }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
