@@ -4311,6 +4311,7 @@ function _opIconForKind(kind) {
   if (kind === 'audio') return '♪';
   if (kind === 'markdown') return 'M';
   if (kind === 'json') return 'J';
+  if (kind === 'gmail_draft') return '✉';
   return '·';
 }
 
@@ -4324,19 +4325,34 @@ function _opRenderArtifact(art) {
   const li = document.createElement('li');
   li.className = 'operator-artifact-item';
   li.setAttribute('data-artifact-name', art.name);
+  // Gmail drafts: meta line shows it's external + the recipient if encoded in name.
+  const metaLine = art.kind === 'gmail_draft' ? 'Gmail draft (sits in Drafts until you send)' : art.kind;
   li.innerHTML = `
     <span class="operator-artifact-icon" aria-hidden="true">${escapeHtml(_opIconForKind(art.kind))}</span>
     <span>
       <span class="operator-artifact-name">${escapeHtml(art.name)}</span>
-      <span class="operator-artifact-meta">${escapeHtml(art.kind)}</span>
+      <span class="operator-artifact-meta">${escapeHtml(metaLine)}</span>
     </span>
   `;
-  const openBtn = document.createElement('button');
-  openBtn.type = 'button';
-  openBtn.className = 'operator-artifact-open';
-  openBtn.textContent = 'Open';
-  openBtn.addEventListener('click', () => _opOpenArtifactFile(art.name));
-  li.appendChild(openBtn);
+
+  if (art.kind === 'gmail_draft' && art.path && art.path.startsWith('http')) {
+    // Open in Gmail in the user's default browser (Electron renderer respects
+    // target=_blank for http(s) URLs via shell.openExternal in main process).
+    const openA = document.createElement('a');
+    openA.className = 'operator-artifact-open';
+    openA.textContent = 'Open in Gmail';
+    openA.href = art.path;
+    openA.target = '_blank';
+    openA.rel = 'noopener noreferrer';
+    li.appendChild(openA);
+  } else {
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'operator-artifact-open';
+    openBtn.textContent = 'Open';
+    openBtn.addEventListener('click', () => _opOpenArtifactFile(art.name));
+    li.appendChild(openBtn);
+  }
   OPERATOR.artifactsList.appendChild(li);
 
   if (art.kind === 'audio' && art.name.toLowerCase().endsWith('.mp3')) {

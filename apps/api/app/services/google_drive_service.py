@@ -32,8 +32,21 @@ from .settings_service import load_settings
 
 log = logging.getLogger("ridian.google")
 
-# Narrowest scope: only files this app creates. Never request full drive.
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# Narrowest scopes per capability. Never request full Drive or Gmail.
+#
+#   drive.file      — see + create only the files this app itself makes.
+#   gmail.compose   — create + edit Gmail drafts. CAN NOT send. Drafts sit
+#                     in the user's Drafts folder until they decide to send,
+#                     matching the memo's approval philosophy: drafts are
+#                     not external action, sends are.
+#
+# Adding gmail.compose requires every previously-connected user to reconnect
+# Google Drive once so the new scope is consented. The renderer surfaces
+# this as "insufficient scope — Reconnect Google" rather than failing silently.
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 
 # apps/api/app/services/google_drive_service.py -> apps/api/<file>
 _API_DIR = Path(__file__).resolve().parent.parent.parent

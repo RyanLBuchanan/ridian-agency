@@ -31,7 +31,7 @@ from pathlib import Path
 from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_tool, trace
 
 from ..agents import default_model, load_prompt
-from . import tts_service
+from . import gmail_service, tts_service
 from .artifact_service import write_artifact
 from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
 
@@ -391,6 +391,66 @@ async def propose_memory_update(
     return {"id": proposal["id"], "kind": proposal["kind"], "status": proposal["status"]}
 
 
+@function_tool
+async def draft_gmail(
+    ctx: RunContextWrapper[OperatorContext],
+    to: str,
+    subject: str,
+    body: str,
+) -> dict:
+    """Create a Gmail draft. Drafts are NOT sent — they sit in the user's
+    Drafts folder waiting for review.
+
+    Use this when the command asks to draft / compose / write an email.
+    Never use this to send. Per the operator's approval philosophy, drafts
+    are internal artifacts; sends require explicit user approval through
+    the renderer's email button (which is a separate path).
+
+    Args:
+        to: Recipient email address (must contain "@").
+        subject: Draft subject line.
+        body: Plain-text email body. Markdown is fine; Gmail renders it as text.
+
+    Returns:
+        {"draft_id": str, "compose_url": str, "to": str} on success.
+        {"error": str} if Gmail isn't connected or the API call failed.
+    """
+    operator = ctx.context
+    operator.note_tool("draft_gmail")
+    await operator.emit_step(
+        name="gmail_draft", status="running",
+        detail=f"Creating Gmail draft to {to}…",
+    )
+
+    try:
+        meta = await asyncio.to_thread(
+            gmail_service.create_draft, to, subject, body,
+        )
+    except gmail_service.GmailError as exc:
+        await operator.emit_step(name="gmail_draft", status="failed", detail=exc.detail)
+        await operator.emit_error(f"draft_gmail failed: {exc.detail}")
+        return {"error": exc.detail}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"draft_gmail failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="gmail_draft", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    # The draft is a real, durable artifact in Gmail. Surface it on the
+    # artifacts panel with the compose_url so the renderer can show
+    # "Open in Gmail" — same shape as a Drive folder link.
+    await operator.emit_artifact(
+        name=f"gmail_draft_{meta['draft_id'][:10]}",
+        path=meta["compose_url"],
+        kind="gmail_draft",
+    )
+    await operator.emit_step(
+        name="gmail_draft", status="completed",
+        detail=f"Draft saved to Gmail Drafts (to: {to}). Open in Gmail to review or send.",
+    )
+    return meta
+
+
 # Exposed registry — what the planner sees. Order matters only for the
 # system prompt's "available tools" list.
 PLANNER_TOOLS = [
@@ -400,6 +460,7 @@ PLANNER_TOOLS = [
     synthesize_audio,
     write_file,
     propose_memory_update,
+    draft_gmail,
 ]
 
 
