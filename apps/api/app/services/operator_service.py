@@ -36,7 +36,7 @@ from agents.items import (
 from agents.stream_events import RunItemStreamEvent
 
 from ..agents.planner_agent import build_planner_agent
-from . import operation_log_service
+from . import memory_service, operation_log_service
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext
 from .settings_service import apply_to_environment, get_effective_value
@@ -73,7 +73,60 @@ def _finalized_view(record: dict) -> dict:
         "audio_duration_seconds": record["audio_duration_seconds"],
         "artifacts": record["artifacts"],
         "errors": record["errors"],
+        # v1.2: memory proposals from this operation. Each carries its own
+        # status ("proposed" | "committed" | "dismissed") so reloaded runs
+        # don't re-prompt for items the operator already decided on.
+        "proposed_memory_updates": record.get("proposed_memory_updates", []),
     }
+
+
+def _memory_context_snippet() -> str:
+    """Compact, plain-text summary of current memory state for the planner.
+
+    Read at the start of every operation so the planner can ground its plan
+    in what Ridian already knows (and avoid re-proposing facts that are
+    already on file). Kept short — the planner's main work is the operation,
+    not summarizing memory.
+    """
+    parts: list[str] = []
+    try:
+        counts = memory_service.memory_summary()
+        parts.append(
+            "Memory snapshot — "
+            f"{counts.get('contacts', 0)} contacts, "
+            f"{counts.get('facts', 0)} facts, "
+            f"{counts.get('open_follow_ups', 0)} open follow-ups, "
+            f"{counts.get('decisions', 0)} decisions on file."
+        )
+    except Exception:
+        parts.append("Memory snapshot unavailable.")
+
+    try:
+        brand = memory_service.get_brand() or {}
+        defined = [k for k in ("ridian", "open_gulf", "buns")
+                   if (brand.get(k, {}).get("voice") or "").strip()]
+        if defined:
+            parts.append("Brand voices defined: " + ", ".join(defined) + ".")
+        else:
+            parts.append("Brand voices: none defined yet.")
+    except Exception:
+        pass
+
+    # A few recent operations help the planner avoid re-doing yesterday's brief.
+    try:
+        recent = operation_log_service.list_recent(limit=3)
+        if recent:
+            lines = []
+            for op in recent:
+                lines.append(
+                    f"  - {op.get('completed_at', '?')} [{op.get('status', '?')}]"
+                    f" {op.get('command', '')[:90]}"
+                )
+            parts.append("Last few operations:\n" + "\n".join(lines))
+    except Exception:
+        pass
+
+    return "\n".join(parts)
 
 
 async def _drain_planner_events(streamed, operator: OperatorContext) -> None:
@@ -198,12 +251,20 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     operator = OperatorContext(folder=folder, record=record, emit=emit)
 
     # Capability discovery: the planner needs the command + a reminder that
-    # the registry list in its system prompt is the entire toolset.
+    # the registry list in its system prompt is the entire toolset, plus a
+    # snapshot of what Ridian already remembers so it doesn't re-propose
+    # facts already on file (or repeat yesterday's brief).
     planner_input = (
         f"Operator command:\n{command}\n\n"
+        f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
         "Plan the minimum-viable sequence of tool calls from your registry, "
         "execute them, verify each result, and then give a short final "
-        "receipt of what landed on disk. Do not invent tools."
+        "receipt of what landed on disk. Do not invent tools.\n\n"
+        "After the artifact tools finish (and only if the operation produced "
+        "real artifacts), you MAY call propose_memory_update for up to three "
+        "items the user would want Ridian to remember from this run — facts, "
+        "contacts, follow-ups, or decisions that surfaced organically. Do not "
+        "propose anything that was already in memory above. Do not invent."
     )
 
     try:

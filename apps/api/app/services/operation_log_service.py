@@ -84,6 +84,9 @@ def build_record(*, command: str, intent: str, artifact_folder: str) -> dict:
         "completed_at": "",
         "status": "running",
         "steps": [],
+        # v1.2: memory proposals from the planner — each carries its own
+        # {id, kind, payload, reason, status} so reloaded runs don't re-prompt.
+        "proposed_memory_updates": [],
         "tools_used": [],
         "sources_count": 0,
         "audio_generated": False,
@@ -97,3 +100,37 @@ def finalize(record: dict, *, status: str) -> dict:
     record["status"] = status
     record["completed_at"] = _now_iso()
     return record
+
+
+def update_proposal_statuses(
+    operation_id: str,
+    *,
+    statuses: dict[str, str],
+) -> Optional[dict]:
+    """Flip ``status`` on memory proposals inside a stored operation.
+
+    Used by POST /operations/{id}/memory/commit to mark each proposal as
+    "committed" or "dismissed". Returns the updated operation record, or
+    None if the operation id isn't found. Allowed status values are
+    enforced by the caller; this helper writes whatever it's given so it
+    stays a thin, testable persistence primitive.
+    """
+    if not operation_id or not statuses:
+        return None
+    items = state_store.load_list(_OPS_NAME)
+    for i, item in enumerate(items):
+        if item.get("id") != operation_id:
+            continue
+        proposals = item.get("proposed_memory_updates", [])
+        for prop in proposals:
+            new_status = statuses.get(prop.get("id", ""))
+            if new_status:
+                prop["status"] = new_status
+        items[i] = item
+        state_store.save(_OPS_NAME, items)
+        log.info(
+            "operation.proposals_updated id=%s updates=%d",
+            operation_id, len(statuses),
+        )
+        return item
+    return None

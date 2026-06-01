@@ -33,7 +33,7 @@ from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_too
 from ..agents import default_model, load_prompt
 from . import tts_service
 from .artifact_service import write_artifact
-from .operator_context import OperatorContext
+from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
 
 log = logging.getLogger("ridian.operator.tools")
 
@@ -318,6 +318,79 @@ async def write_file(
     return {"path": str(path), "bytes": size}
 
 
+# Per-kind required-field set. The planner must pass at least these fields
+# in ``payload``; anything else is allowed but ignored. Mirrors the memory
+# tables' minimum useful schemas — no field validation reaches the operator
+# unless the user later confirms the proposal.
+_PROPOSAL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "fact":      ("fact",),
+    "contact":   ("name",),
+    "follow_up": ("what",),
+    "decision":  ("decision",),
+}
+
+
+# strict_mode=False because ``payload`` is intentionally a free-form dict
+# whose schema depends on ``kind`` (each kind validates differently inside
+# the function body). The Agents SDK's strict mode rejects ``dict`` params
+# because they emit ``additionalProperties`` in the JSON schema.
+@function_tool(strict_mode=False)
+async def propose_memory_update(
+    ctx: RunContextWrapper[OperatorContext],
+    kind: str,
+    payload: dict,
+    reason: str = "",
+) -> dict:
+    """Propose a memory update for the user to confirm at operation end.
+
+    The planner uses this when a run surfaces something worth remembering for
+    future operations — a person mentioned in sources, a fact worth keeping,
+    a follow-up the operator should chase, a decision implied by the run.
+
+    THIS TOOL DOES NOT WRITE TO MEMORY. It only queues a proposal. The user
+    sees every proposal at completion and can confirm or dismiss each one;
+    confirmed proposals are written by the backend via the existing
+    memory_service. No silent writes.
+
+    Args:
+        kind: One of "fact" | "contact" | "follow_up" | "decision".
+        payload: Kind-specific fields. Minimum required:
+            - fact:      {"fact": str, optional "topic": str, "source": str}
+            - contact:   {"name": str, optional "role", "company", "email", ...}
+            - follow_up: {"what": str, optional "who": str, "due_iso": str}
+            - decision:  {"decision": str, optional "context": str}
+        reason: Short explanation of why this came up in the current run.
+
+    Returns:
+        {"id": str, "kind": str, "status": "proposed"} on success,
+        {"error": str} on validation failure.
+    """
+    operator = ctx.context
+    operator.note_tool("propose_memory_update")
+
+    if kind not in ALLOWED_PROPOSAL_KINDS:
+        msg = f"propose_memory_update rejected: kind {kind!r} not in {list(ALLOWED_PROPOSAL_KINDS)}"
+        await operator.emit_error(msg)
+        return {"error": msg}
+
+    if not isinstance(payload, dict):
+        msg = f"propose_memory_update rejected: payload must be a dict, got {type(payload).__name__}"
+        await operator.emit_error(msg)
+        return {"error": msg}
+
+    required = _PROPOSAL_REQUIRED_FIELDS[kind]
+    missing = [f for f in required if not str(payload.get(f, "")).strip()]
+    if missing:
+        msg = f"propose_memory_update({kind}) missing required fields: {missing}"
+        await operator.emit_error(msg)
+        return {"error": msg}
+
+    proposal = await operator.emit_memory_proposal(
+        kind=kind, payload=payload, reason=reason,
+    )
+    return {"id": proposal["id"], "kind": proposal["kind"], "status": proposal["status"]}
+
+
 # Exposed registry — what the planner sees. Order matters only for the
 # system prompt's "available tools" list.
 PLANNER_TOOLS = [
@@ -326,6 +399,7 @@ PLANNER_TOOLS = [
     write_audiobook_script,
     synthesize_audio,
     write_file,
+    propose_memory_update,
 ]
 
 

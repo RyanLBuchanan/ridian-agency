@@ -280,6 +280,20 @@
                     <span id="operator-audio-name">audiobook.mp3</span>
                   </div>
                 </div>
+                <div id="operator-proposals" class="operator-proposals hidden" aria-labelledby="operator-proposals-title">
+                  <div class="operator-proposals-head">
+                    <h4 id="operator-proposals-title" class="operator-proposals-title">Memory proposals</h4>
+                    <div class="operator-proposals-batch">
+                      <button id="operator-proposals-confirm-all" type="button" class="btn btn-ghost btn-compact">Confirm all</button>
+                      <button id="operator-proposals-dismiss-all" type="button" class="btn btn-ghost btn-compact">Dismiss all</button>
+                    </div>
+                  </div>
+                  <p class="operator-proposals-intro">
+                    The planner suggests these to remember for future operations. Nothing is saved without your approval.
+                  </p>
+                  <ul id="operator-proposals-list" class="operator-proposals-list"></ul>
+                  <span id="operator-proposals-status" class="operator-actions-status" role="status" aria-live="polite"></span>
+                </div>
                 <div id="operator-errors" class="operator-errors hidden"></div>
                 <span id="operator-actions-status" class="operator-actions-status" role="status" aria-live="polite"></span>
               </div>

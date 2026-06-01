@@ -19,9 +19,15 @@ and broadcast progress to the user.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+
+# Proposal kinds the planner may suggest. Each maps 1:1 to a memory_service
+# write API. Anything outside this set is rejected at tool-call time so a
+# hallucinating planner can't invent a "category" that bypasses validation.
+ALLOWED_PROPOSAL_KINDS: tuple[str, ...] = ("fact", "contact", "follow_up", "decision")
 
 # An emit function pushes a single dict event into the SSE queue. Mirrors
 # the operator_service.EmitFn alias so the two stay interchangeable.
@@ -83,3 +89,27 @@ class OperatorContext:
         """Add a tool name to record.tools_used (deduped at finalize)."""
         if name and name not in self.record["tools_used"]:
             self.record["tools_used"].append(name)
+
+    async def emit_memory_proposal(self, *, kind: str, payload: dict, reason: str = "") -> dict:
+        """Record a proposed memory write + broadcast it to the renderer.
+
+        Per the memo's approval philosophy: the planner only PROPOSES — it
+        never writes to memory directly. The user confirms / dismisses each
+        proposal in a single batch at operation completion through
+        POST /operations/{id}/memory/commit.
+
+        Returns the persisted proposal dict so the tool body can include
+        the ``id`` in its tool-output for the planner's own bookkeeping.
+        """
+        proposal = {
+            "id": "prop_" + uuid.uuid4().hex[:10],
+            "kind": kind,
+            "payload": payload,
+            "reason": (reason or "").strip(),
+            "status": "proposed",  # set to 'committed' or 'dismissed' later
+        }
+        if "proposed_memory_updates" not in self.record:
+            self.record["proposed_memory_updates"] = []
+        self.record["proposed_memory_updates"].append(proposal)
+        await self.emit({"event": "memory_proposal", "data": dict(proposal)})
+        return proposal

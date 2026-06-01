@@ -4182,6 +4182,12 @@ const OPERATOR = {
   openFolderBtn:  document.getElementById('operator-open-folder'),
   uploadDriveBtn: document.getElementById('operator-upload-drive'),
   emailMeBtn:     document.getElementById('operator-email-me'),
+  // v1.2: memory proposals panel
+  proposalsPanel:    document.getElementById('operator-proposals'),
+  proposalsList:     document.getElementById('operator-proposals-list'),
+  proposalsConfirmAll: document.getElementById('operator-proposals-confirm-all'),
+  proposalsDismissAll: document.getElementById('operator-proposals-dismiss-all'),
+  proposalsStatus:   document.getElementById('operator-proposals-status'),
 };
 
 const operatorState = {
@@ -4192,6 +4198,7 @@ const operatorState = {
   elapsedTimer: null,
   elapsedStart: null,
   drive: null,         // { drive_path, drive_folder_url, uploaded_files }  set after a successful upload
+  proposals: [],       // v1.2: planner-proposed memory updates awaiting user decision
 };
 
 function _opSetStatus(text, kind) {
@@ -4247,10 +4254,14 @@ function _opResetUI() {
   if (OPERATOR.audioPlayer) OPERATOR.audioPlayer.classList.add('hidden');
   if (OPERATOR.audio) { OPERATOR.audio.pause(); OPERATOR.audio.removeAttribute('src'); }
   if (OPERATOR.folder) OPERATOR.folder.textContent = '';
+  if (OPERATOR.proposalsPanel) OPERATOR.proposalsPanel.classList.add('hidden');
+  if (OPERATOR.proposalsList) OPERATOR.proposalsList.innerHTML = '';
+  if (OPERATOR.proposalsStatus) { OPERATOR.proposalsStatus.textContent = ''; OPERATOR.proposalsStatus.className = 'operator-actions-status'; }
   _opSetStatus('');
   operatorState.artifacts = [];
   operatorState.finalRecord = null;
   operatorState.drive = null;
+  operatorState.proposals = [];
 }
 
 const STEP_LABELS = {
@@ -4356,6 +4367,125 @@ function _opRenderError(message) {
   ul.appendChild(li);
 }
 
+function _opProposalSummary(prop) {
+  const k = prop.kind;
+  const p = prop.payload || {};
+  if (k === 'fact')      return p.fact || '(empty fact)';
+  if (k === 'contact')   return [p.name, p.role, p.company].filter(Boolean).join(' · ') || '(empty contact)';
+  if (k === 'follow_up') return [p.what, p.due_iso && `due ${p.due_iso}`, p.who && `for ${p.who}`].filter(Boolean).join(' · ') || '(empty follow-up)';
+  if (k === 'decision')  return p.decision || '(empty decision)';
+  return JSON.stringify(p).slice(0, 200);
+}
+
+function _opRenderMemoryProposal(prop) {
+  if (!OPERATOR.proposalsPanel || !OPERATOR.proposalsList) return;
+  OPERATOR.proposalsPanel.classList.remove('hidden');
+
+  let li = OPERATOR.proposalsList.querySelector(`[data-proposal-id="${prop.id}"]`);
+  if (!li) {
+    li = document.createElement('li');
+    li.className = 'operator-proposal-item';
+    li.setAttribute('data-proposal-id', prop.id);
+    li.innerHTML = `
+      <span class="operator-proposal-kind"></span>
+      <span class="operator-proposal-body">
+        <span class="operator-proposal-summary"></span>
+        <span class="operator-proposal-reason"></span>
+      </span>
+      <span class="operator-proposal-actions">
+        <button type="button" class="operator-proposal-btn is-confirm">Confirm</button>
+        <button type="button" class="operator-proposal-btn is-dismiss">Dismiss</button>
+      </span>
+    `;
+    li.querySelector('.operator-proposal-actions .is-confirm')
+      .addEventListener('click', () => _opCommitProposals({ confirmed: [prop.id] }));
+    li.querySelector('.operator-proposal-actions .is-dismiss')
+      .addEventListener('click', () => _opCommitProposals({ dismissed: [prop.id] }));
+    OPERATOR.proposalsList.appendChild(li);
+  }
+
+  li.querySelector('.operator-proposal-kind').textContent = (prop.kind || '').replace('_', ' ');
+  li.querySelector('.operator-proposal-summary').textContent = _opProposalSummary(prop);
+  const reasonEl = li.querySelector('.operator-proposal-reason');
+  reasonEl.textContent = prop.reason ? `Why: ${prop.reason}` : '';
+  _opPaintProposalStatus(li, prop.status || 'proposed');
+}
+
+function _opPaintProposalStatus(li, status) {
+  li.classList.remove('is-committed', 'is-dismissed');
+  if (status === 'committed') li.classList.add('is-committed');
+  if (status === 'dismissed') li.classList.add('is-dismissed');
+  li.querySelectorAll('.operator-proposal-btn').forEach((b) => {
+    b.disabled = status === 'committed' || status === 'dismissed';
+  });
+  if (status === 'committed' || status === 'dismissed') {
+    const actions = li.querySelector('.operator-proposal-actions');
+    if (actions && !actions.querySelector('.operator-proposal-tag')) {
+      const tag = document.createElement('span');
+      tag.className = 'operator-proposal-tag';
+      tag.style.fontSize = 'var(--fs-xs)';
+      tag.style.color = status === 'committed' ? 'var(--color-success)' : 'var(--color-muted-soft)';
+      tag.style.fontWeight = '600';
+      tag.style.alignSelf = 'center';
+      tag.textContent = status === 'committed' ? 'Saved' : 'Dismissed';
+      actions.appendChild(tag);
+    }
+  }
+}
+
+function _opSetProposalsStatus(text, kind) {
+  if (!OPERATOR.proposalsStatus) return;
+  OPERATOR.proposalsStatus.textContent = text || '';
+  OPERATOR.proposalsStatus.className = 'operator-actions-status';
+  if (kind === 'ok') OPERATOR.proposalsStatus.classList.add('is-ok');
+  if (kind === 'err') OPERATOR.proposalsStatus.classList.add('is-err');
+}
+
+async function _opCommitProposals({ confirmed = [], dismissed = [] }) {
+  if (!operatorState.active || !operatorState.active.id) {
+    _opSetProposalsStatus('No active operation id — cannot save proposals.', 'err');
+    return;
+  }
+  if (!confirmed.length && !dismissed.length) return;
+  _opSetProposalsStatus('Saving…');
+  try {
+    const res = await fetch(`${BACKEND}/operations/${encodeURIComponent(operatorState.active.id)}/memory/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed, dismissed }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    (data.written || []).forEach((w) => {
+      const li = OPERATOR.proposalsList.querySelector(`[data-proposal-id="${w.id}"]`);
+      if (li) _opPaintProposalStatus(li, 'committed');
+      const prop = operatorState.proposals.find((p) => p.id === w.id);
+      if (prop) prop.status = 'committed';
+    });
+    (data.dismissed || []).forEach((id) => {
+      const li = OPERATOR.proposalsList.querySelector(`[data-proposal-id="${id}"]`);
+      if (li) _opPaintProposalStatus(li, 'dismissed');
+      const prop = operatorState.proposals.find((p) => p.id === id);
+      if (prop) prop.status = 'dismissed';
+    });
+    const summary = [];
+    if ((data.written || []).length) summary.push(`${data.written.length} saved to memory`);
+    if ((data.dismissed || []).length) summary.push(`${data.dismissed.length} dismissed`);
+    if ((data.skipped || []).length) summary.push(`${data.skipped.length} skipped`);
+    _opSetProposalsStatus(summary.join(' · ') || 'Done.', 'ok');
+  } catch (err) {
+    _opSetProposalsStatus(`Could not save: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+function _opPendingProposalIds() {
+  return operatorState.proposals
+    .filter((p) => (p.status || 'proposed') === 'proposed')
+    .map((p) => p.id);
+}
+
 async function _opParseSSE(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -4402,6 +4532,14 @@ function _opHandleEvent(evt) {
       const a = evt.data || {};
       operatorState.artifacts.push(a);
       _opRenderArtifact(a);
+      break;
+    }
+    case 'memory_proposal': {
+      const prop = evt.data || {};
+      if (prop && prop.id) {
+        operatorState.proposals.push(prop);
+        _opRenderMemoryProposal(prop);
+      }
       break;
     }
     case 'message':
@@ -4749,6 +4887,15 @@ async function loadOperatorRun(run) {
   // Replay any errors logged at run time.
   (log.errors || []).forEach((m) => _opRenderError(m));
 
+  // v1.2: replay memory proposals. Render ALL of them (proposed + committed
+  // + dismissed) so the user can see what happened on prior reviews; only
+  // "proposed" rows are still actionable (Confirm/Dismiss buttons stay live).
+  const proposals = Array.isArray(log.proposed_memory_updates) ? log.proposed_memory_updates : [];
+  proposals.forEach((p) => {
+    operatorState.proposals.push(p);
+    _opRenderMemoryProposal(p);
+  });
+
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
     has_audio: data.has_audio, missing: data.missing,
@@ -4849,6 +4996,18 @@ if (OPERATOR.cancelBtn) {
 if (OPERATOR.openFolderBtn) OPERATOR.openFolderBtn.addEventListener('click', _opOpenArtifactFolder);
 if (OPERATOR.uploadDriveBtn) OPERATOR.uploadDriveBtn.addEventListener('click', _opUploadDrive);
 if (OPERATOR.emailMeBtn) OPERATOR.emailMeBtn.addEventListener('click', _opEmailMe);
+if (OPERATOR.proposalsConfirmAll) {
+  OPERATOR.proposalsConfirmAll.addEventListener('click', () => {
+    const ids = _opPendingProposalIds();
+    if (ids.length) _opCommitProposals({ confirmed: ids });
+  });
+}
+if (OPERATOR.proposalsDismissAll) {
+  OPERATOR.proposalsDismissAll.addEventListener('click', () => {
+    const ids = _opPendingProposalIds();
+    if (ids.length) _opCommitProposals({ dismissed: ids });
+  });
+}
 
 // Example chips populate the textarea.
 document.querySelectorAll('[data-operator-example]').forEach((btn) => {

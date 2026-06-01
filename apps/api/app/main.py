@@ -892,6 +892,130 @@ async def operations_audio(artifact_folder: str, filename: str = "audiobook.mp3"
     return FileResponse(str(path), media_type="audio/mpeg", filename=filename)
 
 
+class MemoryCommitRequest(BaseModel):
+    """User decision on a batch of planner-proposed memory updates.
+
+    Each proposal id MUST appear in exactly one of ``confirmed`` or
+    ``dismissed``; the operator never auto-decides on the user's behalf.
+    """
+    confirmed: list[str] = Field(default_factory=list)
+    dismissed: list[str] = Field(default_factory=list)
+
+
+class MemoryCommitResponse(BaseModel):
+    operation_id: str
+    written: list[dict]                   # what actually got committed to memory
+    dismissed: list[str]                  # proposal ids the user chose to drop
+    skipped: list[dict]                   # proposals we couldn't write + why
+
+
+@app.post("/operations/{operation_id}/memory/commit", response_model=MemoryCommitResponse)
+async def operations_memory_commit(operation_id: str, payload: MemoryCommitRequest) -> MemoryCommitResponse:
+    """Apply a user's decision on a batch of planner-proposed memory updates.
+
+    Approval-only by construction: the planner only ever queues proposals
+    via the ``propose_memory_update`` tool. This endpoint is the single
+    write path — it reads the proposal from the stored operation log,
+    validates it against the existing memory_service write APIs, and
+    commits. Dismissed proposals are marked as such on the log; confirmed
+    proposals are written through memory_service and also marked.
+    """
+    rec = operation_log_service.get_operation(operation_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="operation not found")
+
+    proposals = {p["id"]: p for p in rec.get("proposed_memory_updates", [])}
+    written: list[dict] = []
+    skipped: list[dict] = []
+    statuses: dict[str, str] = {}
+
+    for prop_id in payload.confirmed:
+        prop = proposals.get(prop_id)
+        if not prop:
+            skipped.append({"id": prop_id, "reason": "proposal not found on this operation"})
+            continue
+        if prop.get("status") in ("committed", "dismissed"):
+            skipped.append({"id": prop_id, "reason": f"already {prop['status']}"})
+            continue
+        try:
+            entry = _commit_proposal(prop)
+            written.append({"id": prop_id, "kind": prop["kind"], "entry_id": entry.get("id", "")})
+            statuses[prop_id] = "committed"
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — never let one bad payload tank the batch
+            skipped.append({"id": prop_id, "reason": f"{type(exc).__name__}: {exc}"})
+
+    for prop_id in payload.dismissed:
+        if prop_id not in proposals:
+            skipped.append({"id": prop_id, "reason": "proposal not found on this operation"})
+            continue
+        if proposals[prop_id].get("status") in ("committed", "dismissed"):
+            skipped.append({"id": prop_id, "reason": f"already {proposals[prop_id]['status']}"})
+            continue
+        statuses[prop_id] = "dismissed"
+
+    if statuses:
+        operation_log_service.update_proposal_statuses(operation_id, statuses=statuses)
+
+    return MemoryCommitResponse(
+        operation_id=operation_id,
+        written=written,
+        dismissed=[p for p in payload.dismissed if statuses.get(p) == "dismissed"],
+        skipped=skipped,
+    )
+
+
+def _commit_proposal(prop: dict) -> dict:
+    """Route a single proposal to the matching memory_service write API.
+
+    Validates payload shape per kind. Anything the planner sent that doesn't
+    match the kind's required fields is rejected here, before it touches
+    memory state. Returns the persisted memory entry.
+    """
+    kind = prop.get("kind")
+    payload = prop.get("payload") or {}
+    if kind == "fact":
+        if not str(payload.get("fact", "")).strip():
+            raise ValueError("fact proposal missing 'fact' text")
+        return memory_service.add_fact({
+            "topic": str(payload.get("topic", "") or ""),
+            "fact": str(payload.get("fact", "") or ""),
+            "source": str(payload.get("source", "") or ""),
+        })
+    if kind == "contact":
+        if not str(payload.get("name", "")).strip():
+            raise ValueError("contact proposal missing 'name'")
+        return memory_service.add_contact({
+            "name": str(payload.get("name", "") or ""),
+            "role": str(payload.get("role", "") or ""),
+            "company": str(payload.get("company", "") or ""),
+            "email": str(payload.get("email", "") or ""),
+            "phone": str(payload.get("phone", "") or ""),
+            "notes": str(payload.get("notes", "") or ""),
+            "last_contact_iso": str(payload.get("last_contact_iso", "") or ""),
+        })
+    if kind == "follow_up":
+        if not str(payload.get("what", "")).strip():
+            raise ValueError("follow_up proposal missing 'what'")
+        return memory_service.add_follow_up({
+            "what": str(payload.get("what", "") or ""),
+            "who": str(payload.get("who", "") or ""),
+            "due_iso": str(payload.get("due_iso", "") or ""),
+            "status": "open",
+            "source_run": str(payload.get("source_run", "") or ""),
+        })
+    if kind == "decision":
+        if not str(payload.get("decision", "")).strip():
+            raise ValueError("decision proposal missing 'decision'")
+        return memory_service.add_decision({
+            "decision": str(payload.get("decision", "") or ""),
+            "context": str(payload.get("context", "") or ""),
+            "date_iso": str(payload.get("date_iso", "") or ""),
+        })
+    raise ValueError(f"unknown proposal kind: {kind!r}")
+
+
 @app.get("/operations/{operation_id}")
 async def operations_get(operation_id: str) -> dict:
     """Single operation record from the persisted operations.json log.
