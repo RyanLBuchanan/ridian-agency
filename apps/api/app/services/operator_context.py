@@ -1,0 +1,85 @@
+"""Per-operation context passed to every Operator tool.
+
+The OpenAI Agents SDK lets you attach an arbitrary context object to a run
+and access it inside any ``@function_tool`` via ``RunContextWrapper``. We
+use that to give every tool:
+
+  - the on-disk run folder (so tools know where to write artifacts),
+  - the in-flight operation record (so tools can append steps + artifacts
+    to the same log the renderer will see), and
+  - the async ``emit`` function that pushes SSE timeline events to the
+    renderer.
+
+Holding state out-of-band like this keeps tool signatures clean — the
+planner agent never has to remember to thread folder paths through every
+tool call — while still letting tools produce real side effects on disk
+and broadcast progress to the user.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Awaitable, Callable
+
+# An emit function pushes a single dict event into the SSE queue. Mirrors
+# the operator_service.EmitFn alias so the two stay interchangeable.
+EmitFn = Callable[[dict], Awaitable[None]]
+
+
+@dataclass
+class OperatorContext:
+    """In-flight operation state shared with every tool call.
+
+    ``folder``  — per-run output directory (``outputs/<timestamp>_<slug>/``).
+                  Tools that write artifacts MUST stay inside this folder.
+    ``record``  — the mutable operation log being built. Tools should append
+                  step/artifact entries via the helpers below rather than
+                  reaching in directly, so the SSE feed stays in sync.
+    ``emit``    — async callable that puts a single event onto the SSE queue.
+    """
+
+    folder: Path
+    record: dict
+    emit: EmitFn
+
+    # Cache of intermediate text artifacts the planner may want to pass to
+    # the next tool without re-reading from disk. Optional; tools may write
+    # directly to disk and return the path, or write here as a convenience.
+    sources_packet_text: str = ""
+    script_text: str = ""
+
+    async def emit_step(self, *, name: str, status: str, detail: str = "") -> None:
+        """Append a step to the record and broadcast it via SSE."""
+        from datetime import datetime  # local import keeps module top tidy
+        now = datetime.now().isoformat(timespec="seconds")
+        step = next((s for s in self.record["steps"] if s["name"] == name), None)
+        if step is None:
+            step = {
+                "name": name, "status": status,
+                "started_at": now, "completed_at": "",
+                "detail": detail,
+            }
+            self.record["steps"].append(step)
+        else:
+            step["status"] = status
+            step["detail"] = detail or step.get("detail", "")
+            if status in ("completed", "failed", "skipped"):
+                step["completed_at"] = now
+        await self.emit({"event": "step", "data": dict(step)})
+
+    async def emit_artifact(self, *, name: str, path: str, kind: str) -> None:
+        """Record an artifact + broadcast it (renderer adds to artifacts panel)."""
+        artifact = {"name": name, "path": path, "kind": kind}
+        self.record["artifacts"].append(artifact)
+        await self.emit({"event": "artifact", "data": artifact})
+
+    async def emit_error(self, message: str) -> None:
+        self.record["errors"].append(message)
+        await self.emit({"event": "error", "data": {"message": message}})
+
+    def note_tool(self, name: str) -> None:
+        """Add a tool name to record.tools_used (deduped at finalize)."""
+        if name and name not in self.record["tools_used"]:
+            self.record["tools_used"].append(name)
