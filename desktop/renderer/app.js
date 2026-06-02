@@ -201,6 +201,10 @@ const SETTINGS_FIELDS = [
   'appearance',
 ];
 const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
+// Bool fields are stored on the backend as "true"/"false" strings but rendered
+// as checkboxes here. Handled separately because FormData omits unchecked
+// boxes entirely (which would otherwise look like "unset" instead of "false").
+const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive'];
 
 /* ============================================================ */
 /*                    TABS PER WORKFLOW MODE                     */
@@ -2966,6 +2970,16 @@ function applySettingsToForm(settings) {
       input.value = settings[name] || '';
     }
   });
+  SETTINGS_BOOL_FIELDS.forEach((name) => {
+    const input = els.settingsForm.elements.namedItem(name);
+    if (!input) return;
+    // Treat "true"/"1"/"yes"/"on" as checked; everything else (including
+    // empty / missing) as unchecked. operator_auto_upload_drive defaults
+    // server-side to "true" but if the key is missing entirely we still
+    // want the box checked on first launch — mirror the backend default.
+    const raw = (settings[name] == null ? 'true' : String(settings[name])).toLowerCase().trim();
+    input.checked = (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on');
+  });
   SETTINGS_SECRET_FIELDS.forEach((name) => {
     const input = els.settingsForm.elements.namedItem(name);
     if (input) input.value = '';
@@ -3060,6 +3074,12 @@ async function saveSettings(e) {
   SETTINGS_SECRET_FIELDS.forEach((name) => {
     const v = (fd.get(name) || '').toString();
     if (v !== '') payload[name] = v;
+  });
+  // Bool fields: read .checked directly because FormData omits unchecked boxes,
+  // and "omitted" on the backend means "leave alone" rather than "false."
+  SETTINGS_BOOL_FIELDS.forEach((name) => {
+    const input = els.settingsForm.elements.namedItem(name);
+    if (input) payload[name] = input.checked ? 'true' : 'false';
   });
   els.settingsSaveBtn.disabled = true;
   setSettingsStatus('Saving…');
@@ -4376,6 +4396,7 @@ function _opIconForKind(kind) {
   if (kind === 'markdown') return 'M';
   if (kind === 'json') return 'J';
   if (kind === 'gmail_draft') return '✉';
+  if (kind === 'drive_folder') return '☁';
   return '·';
 }
 
@@ -4389,8 +4410,10 @@ function _opRenderArtifact(art) {
   const li = document.createElement('li');
   li.className = 'operator-artifact-item';
   li.setAttribute('data-artifact-name', art.name);
-  // Gmail drafts: meta line shows it's external + the recipient if encoded in name.
-  const metaLine = art.kind === 'gmail_draft' ? 'Gmail draft (sits in Drafts until you send)' : art.kind;
+  // External-artifact meta lines (don't show the raw kind token).
+  let metaLine = art.kind;
+  if (art.kind === 'gmail_draft') metaLine = 'Gmail draft (sits in Drafts until you send)';
+  else if (art.kind === 'drive_folder') metaLine = 'Google Drive folder (auto-filed by Ridian)';
   li.innerHTML = `
     <span class="operator-artifact-icon" aria-hidden="true">${escapeHtml(_opIconForKind(art.kind))}</span>
     <span>
@@ -4399,12 +4422,13 @@ function _opRenderArtifact(art) {
     </span>
   `;
 
-  if (art.kind === 'gmail_draft' && art.path && art.path.startsWith('http')) {
-    // Open in Gmail in the user's default browser (Electron renderer respects
-    // target=_blank for http(s) URLs via shell.openExternal in main process).
+  if ((art.kind === 'gmail_draft' || art.kind === 'drive_folder') && art.path && art.path.startsWith('http')) {
+    // External artifacts (Gmail draft URL, Drive folder URL) open in the
+    // user's default browser. Electron renderer respects target=_blank for
+    // http(s) URLs via shell.openExternal in the main process.
     const openA = document.createElement('a');
     openA.className = 'operator-artifact-open';
-    openA.textContent = 'Open in Gmail';
+    openA.textContent = art.kind === 'drive_folder' ? 'Open in Drive' : 'Open in Gmail';
     openA.href = art.path;
     openA.target = '_blank';
     openA.rel = 'noopener noreferrer';

@@ -218,7 +218,7 @@
                 <span class="operator-eyebrow">Operator v1</span>
                 <h2 id="operator-heading" class="operator-title">Tell Ridian what to do.</h2>
                 <p class="operator-sub">
-                  Ridian researches, drafts, generates audio, and saves a finished package locally.
+                  Ridian researches, drafts, files the result in Google Drive, and remembers what matters.
                   External actions like sending email require your approval.
                 </p>
               </header>
@@ -229,7 +229,7 @@
                   id="operator-command"
                   name="command"
                   rows="3"
-                  placeholder="Tell Ridian what to do…  (try: &quot;Research the newest in AGI and give me a NotebookLM-style audiobook.&quot;)"
+                  placeholder="Tell Ridian what to do…  (try: &quot;Brief me on the newest in AGI.&quot;)"
                   spellcheck="false"
                 ></textarea>
                 <div class="operator-actions">
@@ -247,7 +247,8 @@
                 </div>
                 <div class="operator-examples">
                   <span class="operator-examples-label">Try:</span>
-                  <button type="button" class="operator-example" data-operator-example="Research the newest in AGI and give me a NotebookLM-style audiobook.">Research the newest in AGI and give me a NotebookLM-style audiobook.</button>
+                  <button type="button" class="operator-example" data-operator-example="Brief me on the newest in AGI.">Brief me on the newest in AGI.</button>
+                  <button type="button" class="operator-example" data-operator-example="Brief me on AI productivity tools for small business owners in 2026.">Brief me on AI productivity tools for small business owners.</button>
                 </div>
               </form>
 
@@ -1402,9 +1403,28 @@
                 it hasn't touched.
                 <br /><br />
                 <strong>If uploads fail with this set:</strong> clear the
-                field and save. Ridian will create its own app folder
-                (<em>Ridian Technologies / Ridian Agency / &hellip;</em>) and
+                field and save. Ridian will create its own folder named
+                <em>Ridian Operator</em> at the root of your Drive and
                 reuse it on every upload — no duplicates.
+              </span>
+            </label>
+
+            <label class="field operator-auto-upload-field">
+              <span class="operator-auto-upload-row">
+                <input
+                  type="checkbox"
+                  name="operator_auto_upload_drive"
+                  id="settings-auto-upload-checkbox"
+                  value="true"
+                />
+                <span class="field-label">Auto-upload completed runs to Google Drive</span>
+              </span>
+              <span class="field-hint">
+                When on (default), every operator run files its artifacts
+                into Drive at the end — no manual click needed. Turn off if
+                you want to keep runs purely local until you press
+                <em>Upload to Google Drive</em> on the artifacts panel.
+                Disabled automatically when Drive isn't connected.
               </span>
             </label>
           </fieldset>

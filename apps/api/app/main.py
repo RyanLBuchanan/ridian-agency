@@ -135,6 +135,10 @@ class SettingsView(BaseModel):
     smtp_from_email: str = ""
     smtp_password_configured: bool = False
     google_drive_root_folder_id: str = ""
+    # v1.4: when True (default), every operator run auto-uploads its artifact
+    # folder to Google Drive at the end of the run, no manual click required.
+    # Stored as "true"/"false" string in local_settings.json.
+    operator_auto_upload_drive: str = "true"
     appearance: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
@@ -162,6 +166,7 @@ class SettingsUpdate(BaseModel):
     smtp_password: str | None = None
     smtp_from_email: str | None = None
     google_drive_root_folder_id: str | None = None
+    operator_auto_upload_drive: str | None = None
     appearance: str | None = None
 
 

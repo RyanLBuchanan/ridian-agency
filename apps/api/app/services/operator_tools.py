@@ -31,7 +31,7 @@ from pathlib import Path
 from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_tool, trace
 
 from ..agents import default_model, load_prompt
-from . import gmail_service, tts_service
+from . import gmail_service, google_drive_service, tts_service
 from .artifact_service import write_artifact
 from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
 
@@ -451,16 +451,90 @@ async def draft_gmail(
     return meta
 
 
+@function_tool
+async def auto_upload_drive(
+    ctx: RunContextWrapper[OperatorContext],
+) -> dict:
+    """File the current run's artifacts in the operator's Google Drive.
+
+    Approval-free: it's the operator's OWN Drive, and the app uses the narrow
+    drive.file scope (it can only see files/folders it created itself). Call
+    this tool ONCE per run, AFTER the artifact tools succeed, BEFORE the final
+    summary message. Skip the call if Google Drive isn't connected.
+
+    Returns:
+        {"drive_path": str, "drive_folder_url": str, "uploaded_files": [str]}
+        on success.
+        {"error": str, "reason": str} on failure (planner should mention this
+        in the final summary but NOT retry — the manual Upload button is the
+        re-try path).
+    """
+    operator = ctx.context
+    operator.note_tool("auto_upload_drive")
+    await operator.emit_step(
+        name="drive_upload", status="running",
+        detail="Uploading the run to Google Drive (operator's own Drive, drive.file scope).",
+    )
+
+    if not operator.record.get("artifacts"):
+        msg = "Nothing to upload yet — no artifacts on this run."
+        await operator.emit_step(name="drive_upload", status="skipped", detail=msg)
+        return {"error": msg, "reason": "no_artifacts"}
+
+    try:
+        result = await asyncio.to_thread(
+            google_drive_service.upload_artifact_folder,
+            str(operator.folder),
+        )
+    except google_drive_service.GoogleDriveError as exc:
+        await operator.emit_step(name="drive_upload", status="failed", detail=exc.detail)
+        await operator.emit_error(f"auto_upload_drive failed: {exc.detail}")
+        return {"error": exc.detail, "reason": "drive_error"}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"auto_upload_drive failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="drive_upload", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc), "reason": "unexpected"}
+
+    drive_path = result.get("drive_path") or result.get("drive_folder_name") or "Drive"
+    drive_url = result.get("drive_folder_url") or ""
+    uploaded = result.get("uploaded_files") or []
+
+    if drive_url:
+        # Surface the Drive folder as a real artifact row with an "Open in Drive"
+        # link. Same shape as the gmail_draft artifact — the renderer recognizes
+        # http(s) paths on non-file artifacts and renders an external anchor.
+        await operator.emit_artifact(
+            name=f"drive_folder ({len(uploaded)} files)",
+            path=drive_url,
+            kind="drive_folder",
+        )
+    await operator.emit_step(
+        name="drive_upload", status="completed",
+        detail=f"Uploaded {len(uploaded)} files to {drive_path}.",
+    )
+    return {
+        "drive_path": drive_path,
+        "drive_folder_url": drive_url,
+        "uploaded_files": uploaded,
+    }
+
+
 # Exposed registry — what the planner sees. Order matters only for the
 # system prompt's "available tools" list.
+#
+# Audio tools (synthesize_audio, write_audiobook_script) are intentionally
+# absent in v1.4+. NotebookLM produces better audiobooks for free and OpenAI
+# TTS billing made the audiobook path the most expensive per-run capability.
+# The tool functions stay defined in this file for backward compat and to
+# allow easy re-introduction; they're just not exposed to the planner.
 PLANNER_TOOLS = [
     web_research,
     write_sources_packet,
-    write_audiobook_script,
-    synthesize_audio,
     write_file,
     propose_memory_update,
     draft_gmail,
+    auto_upload_drive,
 ]
 
 

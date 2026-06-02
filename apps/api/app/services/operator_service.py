@@ -36,10 +36,10 @@ from agents.items import (
 from agents.stream_events import RunItemStreamEvent
 
 from ..agents.planner_agent import build_planner_agent
-from . import memory_service, operation_log_service
+from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext
-from .settings_service import apply_to_environment, get_effective_value
+from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
 
 log = logging.getLogger("ridian.operator")
 
@@ -250,6 +250,22 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
 
     operator = OperatorContext(folder=folder, record=record, emit=emit)
 
+    # v1.4: auto-upload state. The planner reads this verbatim and decides
+    # whether to call auto_upload_drive at the end of the run. Two gates:
+    # the user's setting (default ON) and whether Google Drive is actually
+    # connected. If either is false, the line below tells the planner to skip.
+    auto_upload_on = get_bool_setting("operator_auto_upload_drive", default=True)
+    try:
+        drive_connected = bool(google_drive_service.get_status().get("connected"))
+    except Exception:
+        drive_connected = False
+    if auto_upload_on and drive_connected:
+        upload_state_line = "Drive auto-upload: on (Google Drive connected). Call auto_upload_drive after artifacts."
+    elif auto_upload_on and not drive_connected:
+        upload_state_line = "Drive auto-upload: on, BUT Google Drive is not connected. Skip auto_upload_drive and mention in your summary."
+    else:
+        upload_state_line = "Drive auto-upload: off (user disabled). Skip auto_upload_drive."
+
     # Capability discovery: the planner needs the command + a reminder that
     # the registry list in its system prompt is the entire toolset, plus a
     # snapshot of what Ridian already remembers so it doesn't re-propose
@@ -257,6 +273,7 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     planner_input = (
         f"Operator command:\n{command}\n\n"
         f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
+        f"Auto-upload state: {upload_state_line}\n\n"
         "Plan the minimum-viable sequence of tool calls from your registry, "
         "execute them, verify each result, and then give a short final "
         "receipt of what landed on disk. Do not invent tools.\n\n"

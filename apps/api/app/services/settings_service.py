@@ -41,6 +41,7 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "smtp_password",
     "smtp_from_email",
     "google_drive_root_folder_id",
+    "operator_auto_upload_drive",
     "appearance",
 )
 
@@ -143,6 +144,20 @@ def apply_to_environment() -> None:
         val = (s.get(snake) or "").strip()
         if val:
             os.environ[env_key] = val
+
+
+def get_bool_setting(key: str, default: bool = False) -> bool:
+    """Read a boolean setting stored as a string ("true"/"false"/"1"/"0").
+
+    Returns ``default`` for missing / empty / unrecognized values so callers
+    can stay simple. Used for v1.4+ toggles like ``operator_auto_upload_drive``.
+    """
+    raw = (load_settings().get(key) or "").strip().lower()
+    if raw in ("true", "1", "yes", "on"):
+        return True
+    if raw in ("false", "0", "no", "off"):
+        return False
+    return default
 
 
 def get_effective_value(env_key: str) -> str | None:

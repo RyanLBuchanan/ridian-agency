@@ -304,12 +304,23 @@ _NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
 _OPERATOR_MARKERS = ("operation_log.json",)
 _AUDIOBOOK_MARKERS = ("audiobook.mp3",)
 
-# Root path every upload lands under. Concrete subfolders are appended per workflow.
-_DRIVE_ROOT_PATH = ["Ridian Technologies", "Ridian Agency"]
+# Root path every upload lands under. Concrete subfolders are appended per
+# workflow. Renamed to a single unambiguous "Ridian Operator" folder in v1.4
+# so it stops colliding with the user's own personal "Ridian Technologies"
+# folder — the narrow drive.file scope can never see a manually-created
+# personal folder, so even with the same name the app would just create a
+# duplicate. The single-word "Ridian Operator" makes it obvious which folder
+# the app owns; the operator can drag it inside any personal folder and then
+# paste THAT folder's URL into Settings → Google Drive root folder so future
+# uploads continue to find it (drive.file remembers folders the app touched
+# even after they're moved).
+_DRIVE_ROOT_PATH = ["Ridian Operator"]
 
 # When the operator configures an existing Drive folder as the root, we treat
-# that folder as the "Ridian Technologies" parent and skip recreating it.
-_CONFIGURED_ROOT_SUBPATH = ["Ridian Agency"]
+# that folder as the root and walk straight into the per-category subfolder.
+# (Pre-v1.4 this was ["Ridian Agency"] — kept empty so no extra nesting layer
+# is created inside a user-picked folder.)
+_CONFIGURED_ROOT_SUBPATH: list[str] = []
 
 
 def _read_channel_from_task(folder: Path) -> str:
@@ -681,15 +692,17 @@ def upload_artifact_folder(folder_str: str) -> dict:
             "google.upload root_mode=configured_root id=%s",
             configured_root_id,
         )
-        # Treat the configured folder as the "Ridian Technologies" root and
-        # walk from "Ridian Agency" downward inside it.
-        if drive_path_parts and drive_path_parts[0] == "Ridian Technologies":
+        # Treat the configured folder as the root and walk straight into the
+        # per-category subfolder. We strip whatever default top-level name
+        # (legacy "Ridian Technologies" or current "Ridian Operator") so the
+        # configured folder isn't nested an extra layer deep.
+        if drive_path_parts and drive_path_parts[0] in ("Ridian Technologies", "Ridian Operator"):
             path_under_root = drive_path_parts[1:]
         else:
             path_under_root = list(drive_path_parts)
         root_display = (
             _lookup_root_folder_name(service, configured_root_id)
-            or "Ridian Technologies"
+            or "Ridian Operator"
         )
         log.info(
             "google.upload configured_root display_name=%s walk=%s",

@@ -3786,6 +3786,21 @@ body {
   flex-wrap: wrap;
 }
 
+.operator-auto-upload-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.operator-auto-upload-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
 .readonly-row { display: flex; flex-direction: column; gap: 0.3rem; }
 .readonly-value {
   background: var(--color-bg-soft);
