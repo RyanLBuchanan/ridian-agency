@@ -3775,6 +3775,16 @@ body {
 
 .field-hint { font-size: var(--fs-xs); color: var(--color-muted-soft); line-height: 1.4; }
 .field-hint.is-ok { color: var(--color-success); font-weight: 600; }
+.field-hint.is-err { color: var(--color-error-text); font-weight: 600; }
+.field-hint.is-warn { color: var(--color-warn-text); font-weight: 600; }
+
+.root-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
 
 .readonly-row { display: flex; flex-direction: column; gap: 0.3rem; }
 .readonly-value {

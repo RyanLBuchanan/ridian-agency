@@ -3078,7 +3078,17 @@ async function saveSettings(e) {
     applySettingsToForm(data);
     applyTheme(data.appearance);
     pollHealth();
-    setSettingsStatus('Settings saved.', 'ok');
+    // Surface the Drive root-folder validation result inline. The save
+    // itself succeeded; this only tells the operator whether uploads into
+    // the configured folder will work.
+    if (data.root_folder_validation) {
+      renderRootFolderValidation(data.root_folder_validation);
+      // If validation has anything actionable to say, keep the toast neutral
+      // and let the inline message carry the detail.
+      setSettingsStatus('Settings saved.', 'ok');
+    } else {
+      setSettingsStatus('Settings saved.', 'ok');
+    }
     setTimeout(() => {
       if (els.settingsStatus && els.settingsStatus.textContent === 'Settings saved.') setSettingsStatus('');
     }, 2500);
@@ -3086,6 +3096,51 @@ async function saveSettings(e) {
     const msg = err && err.message ? err.message : String(err);
     setSettingsStatus(/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg) ? 'Backend is not reachable.' : `Could not save: ${msg}`, 'err');
   } finally { els.settingsSaveBtn.disabled = false; }
+}
+
+function renderRootFolderValidation(result) {
+  const status = document.getElementById('settings-root-folder-status');
+  if (!status) return;
+  status.classList.remove('is-ok', 'is-err', 'is-warn');
+  if (!result) { status.textContent = ''; return; }
+  if (result.ok && result.blank) {
+    status.classList.add('is-ok');
+    status.textContent = result.detail || 'No root folder set — Ridian will manage its own folder.';
+  } else if (result.ok) {
+    status.classList.add('is-ok');
+    status.textContent = result.detail || `Connected to '${result.folder_name || result.folder_id}'.`;
+  } else {
+    status.classList.add('is-err');
+    status.textContent = result.detail || 'Folder is not accessible.';
+  }
+}
+
+async function testRootFolderAccess() {
+  const input = document.getElementById('settings-root-folder-input');
+  const status = document.getElementById('settings-root-folder-status');
+  if (!input || !status) return;
+  const value = (input.value || '').trim();
+  status.classList.remove('is-ok', 'is-err', 'is-warn');
+  status.textContent = 'Checking Drive access…';
+  try {
+    const res = await fetch(
+      `${BACKEND}/google/validate-root-folder?folder_id_or_url=${encodeURIComponent(value)}`,
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = (data && data.detail) || `HTTP ${res.status}`;
+      status.classList.add('is-err');
+      status.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      return;
+    }
+    renderRootFolderValidation(data);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    status.classList.add('is-err');
+    status.textContent = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+      ? 'Backend is not reachable.'
+      : `Check failed: ${msg}`;
+  }
 }
 
 async function testEmailSettings() {
@@ -3377,6 +3432,15 @@ if (els.settingsCloseBtn) els.settingsCloseBtn.addEventListener('click', closeSe
 if (els.settingsCancelBtn) els.settingsCancelBtn.addEventListener('click', closeSettings);
 if (els.settingsForm) els.settingsForm.addEventListener('submit', saveSettings);
 if (els.settingsTestEmailBtn) els.settingsTestEmailBtn.addEventListener('click', testEmailSettings);
+const _rootFolderTestBtn = document.getElementById('settings-root-folder-test-btn');
+if (_rootFolderTestBtn) _rootFolderTestBtn.addEventListener('click', testRootFolderAccess);
+// When the input changes, clear stale validation copy so the user isn't
+// staring at a green "connected" line for a folder they just edited.
+const _rootFolderInput = document.getElementById('settings-root-folder-input');
+if (_rootFolderInput) _rootFolderInput.addEventListener('input', () => {
+  const status = document.getElementById('settings-root-folder-status');
+  if (status) { status.textContent = ''; status.classList.remove('is-ok', 'is-err', 'is-warn'); }
+});
 if (els.settingsModal) {
   els.settingsModal.addEventListener('click', (e) => { if (e.target === els.settingsModal) closeSettings(); });
 }

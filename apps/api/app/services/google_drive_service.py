@@ -462,27 +462,169 @@ def ensure_drive_path(
     return parent_id, names
 
 
-def _normalize_root_folder_id(raw: Optional[str]) -> str:
-    """Return a bare folder ID from the operator's settings value.
+# A Drive folder ID is base64-url-ish: alphanumeric, dash, underscore.
+# Real folder IDs from share URLs are 28-44 chars (current format is 33).
+# Minimum 20 here is conservative — long enough to reject obviously-typed
+# garbage like "not-a-folder" (12) without ever blocking a real ID.
+_FOLDER_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{20,80}$")
+# Accept variations on the Drive folder URL: bare hosts, https://, trailing
+# slashes, query strings, and the "/folderview" legacy path.
+_URL_FOLDER_RE = re.compile(r"(?:/folders/|/folderview\?id=|[?&]id=)([A-Za-z0-9_\-]+)")
 
-    Accepts either a raw ID or a pasted Drive folder URL. Returns "" when the
-    input is blank.
+
+def _normalize_root_folder_id(raw: Optional[str]) -> str:
+    """Return a bare Drive folder ID from whatever the operator pasted.
+
+    Accepts:
+      - raw ID:                 ``1Dk6p8IR69N66j3KI5i8yix3kDLS4slhx``
+      - share URL:              ``https://drive.google.com/drive/folders/<ID>``
+      - URL without scheme:     ``drive.google.com/drive/folders/<ID>``
+      - URL with trailing path: ``.../folders/<ID>/``
+      - URL with query string:  ``.../folders/<ID>?usp=sharing``
+      - legacy folderview URL:  ``.../folderview?id=<ID>``
+      - surrounding whitespace, including newlines from a copy-paste
+
+    Returns ``""`` when the input is blank OR cannot be parsed into something
+    that looks like a folder ID. Returning empty means "fall back to the
+    app-created folder tree" — never a partial / garbage ID that would just
+    cause a confusing 404 from Drive later.
     """
     if not raw:
         return ""
     s = raw.strip()
     if not s:
         return ""
-    m = re.search(r"/folders/([A-Za-z0-9_\-]+)", s)
+
+    # Prefer URL extraction first — a bare ID can also appear at the end of
+    # a URL, so the URL regex would match incorrectly if we tried it second.
+    m = _URL_FOLDER_RE.search(s)
     if m:
-        return m.group(1)
-    return s
+        candidate = m.group(1)
+    else:
+        # Treat the whole input as a raw ID candidate.
+        candidate = s
+
+    if _FOLDER_ID_RE.match(candidate):
+        return candidate
+    # Doesn't look like a Drive folder ID — caller should treat as blank.
+    return ""
 
 
 def _get_configured_root_id() -> str:
     return _normalize_root_folder_id(
         load_settings().get("google_drive_root_folder_id")
     )
+
+
+# Single, operator-facing copy for "we can't use this folder." Surfaced
+# verbatim by the upload endpoint AND the settings-validation response so the
+# user sees the same actionable wording in both places.
+ROOT_FOLDER_INACCESSIBLE_MSG = (
+    "Ridian cannot access this Drive folder with the current Google "
+    "permission. The app uses the narrow drive.file scope, which lets it "
+    "see only files and folders it created itself. To fix this: clear the "
+    "Google Drive root folder ID in Settings and let Ridian create its own "
+    "app folder, OR move uploads to a folder Ridian has already created."
+)
+
+
+def validate_root_folder_access(folder_id_or_url: str) -> dict:
+    """Probe whether the current Google credentials can read a given folder.
+
+    Returns a structured result the API + renderer can both use:
+      {
+        "ok":         bool,                # safe to upload into this folder
+        "blank":      bool,                # input was blank → use app folder
+        "folder_id":  str,                 # normalized ID (or "")
+        "folder_name": str | None,         # resolved name on success
+        "detail":     str,                 # operator-facing message
+        "reason":     str,                 # short token for telemetry / logs
+                                           # ("blank" | "ok" | "not_connected"
+                                           #  | "invalid_id" | "inaccessible"
+                                           #  | "lookup_failed")
+      }
+
+    Never raises for the operator-facing cases above. ``ok=True`` only when
+    the folder exists, is a folder (not a file), is not trashed, and the
+    current token can read it. ``blank=True`` is also a safe state — the
+    caller falls back to the app-created folder hierarchy.
+    """
+    folder_id = _normalize_root_folder_id(folder_id_or_url)
+    if not folder_id_or_url or not folder_id_or_url.strip():
+        return {
+            "ok": True, "blank": True, "folder_id": "", "folder_name": None,
+            "detail": "No root folder set. Ridian will create its own app folder for uploads.",
+            "reason": "blank",
+        }
+    if not folder_id:
+        # Input was non-empty but couldn't be parsed into a folder ID.
+        return {
+            "ok": False, "blank": False, "folder_id": "", "folder_name": None,
+            "detail": (
+                "That doesn't look like a Google Drive folder ID or URL. Paste either "
+                "the URL from your browser's address bar while viewing the folder "
+                "(starts with drive.google.com/drive/folders/) or the bare ID from the URL."
+            ),
+            "reason": "invalid_id",
+        }
+
+    creds = _load_credentials()
+    if not creds or not creds.valid:
+        return {
+            "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+            "detail": "Google Drive is not connected — open Settings → Connect Google Drive first.",
+            "reason": "not_connected",
+        }
+
+    try:
+        service = _build_service(creds)
+        meta = (
+            service.files()
+            .get(fileId=folder_id, fields="id, name, mimeType, trashed")
+            .execute()
+        )
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", "?")
+        log.info("google.root_validate_failed status=%s id=%s", status, folder_id)
+        # 401/403/404 from Drive with drive.file scope all mean the same thing
+        # to the operator: the app can't see this folder.
+        if str(status) in ("401", "403", "404"):
+            return {
+                "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+                "detail": ROOT_FOLDER_INACCESSIBLE_MSG,
+                "reason": "inaccessible",
+            }
+        return {
+            "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+            "detail": f"Drive validation failed (HTTP {status}).",
+            "reason": "lookup_failed",
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("google.root_validate_unexpected type=%s", type(exc).__name__)
+        return {
+            "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+            "detail": f"Drive validation failed ({type(exc).__name__}).",
+            "reason": "lookup_failed",
+        }
+
+    if meta.get("mimeType") != FOLDER_MIME:
+        return {
+            "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+            "detail": "That ID points to a file, not a folder. Paste a Drive folder URL or ID instead.",
+            "reason": "invalid_id",
+        }
+    if meta.get("trashed"):
+        return {
+            "ok": False, "blank": False, "folder_id": folder_id, "folder_name": None,
+            "detail": "That folder is in Trash. Restore it in Drive or pick a different folder.",
+            "reason": "inaccessible",
+        }
+    name = meta.get("name") or "(unnamed folder)"
+    return {
+        "ok": True, "blank": False, "folder_id": folder_id, "folder_name": name,
+        "detail": f"Connected to Drive folder '{name}'. Uploads will land inside it.",
+        "reason": "ok",
+    }
 
 
 def _lookup_root_folder_name(service, folder_id: str) -> Optional[str]:
@@ -559,12 +701,7 @@ def upload_artifact_folder(folder_str: str) -> dict:
                 service, path_under_root, root_parent_id=configured_root_id
             )
         except GoogleDriveError as exc:
-            raise GoogleDriveError(
-                "The configured Google Drive root folder could not be "
-                "accessed. Check the folder ID in Settings (Google Workspace "
-                "→ Google Drive root folder ID) or reconnect Google Drive.",
-                status=400,
-            ) from exc
+            raise GoogleDriveError(ROOT_FOLDER_INACCESSIBLE_MSG, status=400) from exc
         parent_names = [root_display] + child_names
     else:
         log.info("google.upload root_mode=default_root")
@@ -588,12 +725,7 @@ def upload_artifact_folder(folder_str: str) -> dict:
         status = getattr(getattr(exc, "resp", None), "status", "?")
         log.warning("google.folder_create_failed status=%s", status)
         if configured_root_id and status in (400, 403, 404):
-            raise GoogleDriveError(
-                "The configured Google Drive root folder could not be "
-                "accessed. Check the folder ID in Settings (Google Workspace "
-                "→ Google Drive root folder ID) or reconnect Google Drive.",
-                status=400,
-            ) from exc
+            raise GoogleDriveError(ROOT_FOLDER_INACCESSIBLE_MSG, status=400) from exc
         raise GoogleDriveError(
             f"Drive folder create failed (HTTP {status}).", status=502
         ) from exc

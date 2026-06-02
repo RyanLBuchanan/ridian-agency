@@ -107,6 +107,17 @@ class EmailSendResponse(BaseModel):
     to_email: str | None = None
 
 
+class RootFolderValidation(BaseModel):
+    """Structured Drive-folder validation result. Always safe to serialize:
+    never carries tokens, raw API responses, or the folder body itself."""
+    ok: bool
+    blank: bool = False
+    folder_id: str = ""
+    folder_name: str | None = None
+    detail: str = ""
+    reason: str = ""
+
+
 class SettingsView(BaseModel):
     """Safe public view of local settings — never contains secrets.
 
@@ -126,6 +137,11 @@ class SettingsView(BaseModel):
     google_drive_root_folder_id: str = ""
     appearance: str = ""
     outputs_path: str = ""
+    # Populated on /settings POST when a non-blank root folder ID is saved
+    # so the renderer can show a clear, actionable warning if the configured
+    # folder is inaccessible. None on GET — the renderer calls
+    # /google/validate-root-folder for an on-demand check.
+    root_folder_validation: RootFolderValidation | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -563,17 +579,77 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
     """Persist settings to apps/api/local_settings.json.
 
     Blank ``smtp_password`` means "keep the previous value" so the renderer
-    never has to round-trip the password back to the server."""
-    # exclude_unset=True so a client that omits a field leaves the saved value
-    # alone. Sending a present-but-empty string still clears the field (except
-    # for secrets — smtp_password and openai_api_key have a preserve-on-blank
-    # rule in the service).
+    never has to round-trip the password back to the server.
+
+    For ``google_drive_root_folder_id``: we normalize whatever the operator
+    pasted (full URL, raw ID, with/without scheme, trailing slash/query) into
+    a bare folder ID before persisting. After save, if a non-blank folder ID
+    landed, we probe Drive to check whether the current token can access it
+    and attach the result to the response so the renderer can show a clear
+    warning inline. We never block the save — the operator keeps their input
+    and gets an actionable message about whether uploads will work.
+    """
     updates = payload.model_dump(exclude_unset=True)
+
+    # Pre-save normalize: store the bare folder ID, not the URL the user pasted.
+    if "google_drive_root_folder_id" in updates:
+        raw = updates["google_drive_root_folder_id"] or ""
+        normalized = google_drive_service._normalize_root_folder_id(raw)
+        # If the user pasted SOMETHING but normalization yielded nothing
+        # (garbage / typo), we still persist empty so the app falls back to
+        # the safe app-folder mode rather than carrying an unusable value.
+        # The validation block below will surface a clear "that didn't look
+        # like a folder ID" message.
+        updates["google_drive_root_folder_id"] = normalized if normalized else (
+            "" if raw.strip() == "" else ""  # explicit: clear on garbage input
+        )
+        # Remember the original (stripped) input so the validation message can
+        # tell the difference between "blank" and "we couldn't parse what you
+        # pasted." We don't persist this; it's local to this request.
+        raw_present = bool(raw.strip())
+    else:
+        raw_present = False
+
     settings_service.save_settings(updates)
-    # Mirror updated OPENAI_* values into os.environ so the next workflow run
-    # (and the next /health probe) see them without a backend restart.
     settings_service.apply_to_environment()
-    return _settings_view_with_outputs()
+
+    view = _settings_view_with_outputs()
+
+    # Post-save validation — only when the operator actually touched the field.
+    if "google_drive_root_folder_id" in updates:
+        result = await asyncio.to_thread(
+            google_drive_service.validate_root_folder_access,
+            updates["google_drive_root_folder_id"],
+        )
+        # Edge: user pasted garbage that didn't normalize. Surface that
+        # explicitly even though we persisted "" so the warning isn't lost.
+        if raw_present and not updates["google_drive_root_folder_id"]:
+            result = {
+                "ok": False, "blank": False, "folder_id": "", "folder_name": None,
+                "detail": (
+                    "That didn't look like a Google Drive folder ID or URL — "
+                    "the field has been cleared. Paste a URL from your browser's "
+                    "address bar while viewing the folder, or leave blank to let "
+                    "Ridian create its own app folder."
+                ),
+                "reason": "invalid_id",
+            }
+        view.root_folder_validation = RootFolderValidation(**result)
+
+    return view
+
+
+@app.get("/google/validate-root-folder", response_model=RootFolderValidation)
+async def google_validate_root_folder(folder_id_or_url: str = "") -> RootFolderValidation:
+    """On-demand validation for the Settings 'Test folder access' button.
+
+    Does not write to settings. Useful before saving so the operator can paste
+    a URL and see whether Ridian can access it.
+    """
+    result = await asyncio.to_thread(
+        google_drive_service.validate_root_folder_access, folder_id_or_url,
+    )
+    return RootFolderValidation(**result)
 
 
 # ---------------------------------------------------------------------------

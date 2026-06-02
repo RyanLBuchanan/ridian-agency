@@ -1371,20 +1371,40 @@
             </span>
 
             <label class="field">
-              <span class="field-label">Google Drive root folder ID</span>
+              <span class="field-label">Google Drive root folder (optional)</span>
               <input
                 name="google_drive_root_folder_id"
+                id="settings-root-folder-input"
                 type="text"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="e.g. 1AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+                placeholder="Paste a Drive folder URL or leave blank"
               />
+              <div class="root-folder-actions">
+                <button
+                  type="button"
+                  id="settings-root-folder-test-btn"
+                  class="btn btn-ghost btn-compact"
+                >Test folder access</button>
+                <span
+                  id="settings-root-folder-status"
+                  class="field-hint"
+                  role="status"
+                  aria-live="polite"
+                ></span>
+              </div>
               <span class="field-hint">
-                Optional. Paste the folder ID from the Drive URL for your
-                existing Ridian Technologies folder. Example:
-                <code>drive.google.com/drive/folders/FOLDER_ID</code>.
-                Use this to prevent Ridian Agency from creating a duplicate
-                top-level folder.
+                <strong>Optional.</strong> Paste either a Drive folder URL
+                (<code>drive.google.com/drive/folders/&hellip;</code>) or the
+                bare folder ID. Only use this if Ridian has already created
+                or uploaded into that folder — the app uses a narrow
+                <code>drive.file</code> permission and can't reach folders
+                it hasn't touched.
+                <br /><br />
+                <strong>If uploads fail with this set:</strong> clear the
+                field and save. Ridian will create its own app folder
+                (<em>Ridian Technologies / Ridian Agency / &hellip;</em>) and
+                reuse it on every upload — no duplicates.
               </span>
             </label>
           </fieldset>
