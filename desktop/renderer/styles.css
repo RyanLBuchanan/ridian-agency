@@ -1020,7 +1020,12 @@ body {
    sidebar comes back automatically. */
 
 .app-shell.single-pane {
-  grid-template-columns: 0 1fr;
+  /* One column, not "0 1fr" — with display:none on the sidebar the
+     workspace becomes the only grid item and would otherwise land in the
+     0-wide first track, collapsing to 0 width and showing the body
+     background through. Single-column template gives the workspace the
+     full row. */
+  grid-template-columns: 1fr;
 }
 .app-shell.single-pane .sidebar {
   display: none;
@@ -1134,11 +1139,9 @@ body {
   flex-direction: column;
 }
 .history-panel:not(.hidden) { transform: translateX(0); }
-.history-panel.hidden {
-  /* keep DOM mounted so transitions feel right; just push offscreen and
-     remove from the AT tree via aria-hidden + JS */
-  display: flex;
-}
+/* When .hidden is set, the global utility (display: none !important) wins
+   and the panel is removed from layout. The transform property still
+   primes the next open so the slide-in animates from offscreen. */
 .history-panel-head {
   display: flex;
   align-items: center;

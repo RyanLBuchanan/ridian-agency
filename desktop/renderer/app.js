@@ -573,7 +573,11 @@ function setWorkspaceView(view) {
     show(els.viewWelcome);
     updateWorkspaceHeader('Ridian Operator', '');
     loadDashboard();
-    loadOperatorContextStrip();
+    // Defensive: never let a missing element / typo in the v1.5 context
+    // strip code throw out of setWorkspaceView. If this raised, the
+    // single-pane class toggle (further down) would not run, leaving the
+    // sidebar half-mounted + the workspace collapsed.
+    try { loadOperatorContextStrip(); } catch (_) {}
   } else if (view === 'input') {
     if (currentMode === 'social') {
       show(els.viewInputSocial);
