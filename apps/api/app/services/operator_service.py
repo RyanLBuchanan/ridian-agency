@@ -45,9 +45,11 @@ log = logging.getLogger("ridian.operator")
 
 EmitFn = Callable[[dict], Awaitable[None]]
 
-# Per-operation safety rail. The planner prompt caps itself at 6 tool calls
-# but the SDK also enforces max_turns, so a runaway agent can't loop forever.
-_MAX_PLANNER_TURNS = 12
+# Per-operation safety rail. The planner prompt caps itself at 8 tool calls
+# (10 drafts for contact sweeps) but the SDK also enforces max_turns, so a
+# runaway agent can't loop forever. Sweeps need headroom: one model turn per
+# draft plus research/receipt turns.
+_MAX_PLANNER_TURNS = 24
 
 
 def _slug_for_command(command: str) -> str:
@@ -101,14 +103,70 @@ def _memory_context_snippet() -> str:
     except Exception:
         parts.append("Memory snapshot unavailable.")
 
+    # v1.6: the Operator Profile is the difference between generic output
+    # and operator-specific moves. Inject it whole (it's small free text).
+    try:
+        profile = memory_service.get_profile()
+        filled = {k: v for k, v in profile.items() if (v or "").strip()}
+        if filled:
+            labels = {
+                "operator": "Who", "business": "Business", "offerings": "Sells",
+                "customers": "Customers", "goal": "Quarter goal",
+                "avoid": "Not interested in", "notes": "Notes",
+            }
+            lines = [f"  {labels.get(k, k)}: {v.strip()}" for k, v in filled.items()]
+            parts.append("Operator profile:\n" + "\n".join(lines))
+        else:
+            parts.append(
+                "Operator profile: EMPTY. Results will be generic — suggest "
+                "filling Memory → Profile in your receipt when relevant."
+            )
+    except Exception:
+        pass
+
     try:
         brand = memory_service.get_brand() or {}
-        defined = [k for k in ("ridian", "open_gulf", "buns")
-                   if (brand.get(k, {}).get("voice") or "").strip()]
-        if defined:
-            parts.append("Brand voices defined: " + ", ".join(defined) + ".")
+        voice_lines = []
+        for k, label in (("ridian", "Ridian"), ("open_gulf", "Open Gulf"), ("buns", "Buns")):
+            v = (brand.get(k, {}).get("voice") or "").strip()
+            if v:
+                voice_lines.append(f"  {label}: {v[:160]}")
+        if voice_lines:
+            parts.append("Brand voices:\n" + "\n".join(voice_lines))
         else:
             parts.append("Brand voices: none defined yet.")
+    except Exception:
+        pass
+
+    # v1.6: full contact + follow-up details (not just counts) so the
+    # contact-sweep recipe can actually personalize. Personal-scale data —
+    # cap at 20 contacts / 15 follow-ups to keep the prompt bounded.
+    try:
+        contacts = memory_service.list_contacts()[:20]
+        if contacts:
+            lines = []
+            for c in contacts:
+                bits = [c.get("name", "")]
+                if c.get("role"):    bits.append(c["role"])
+                if c.get("company"): bits.append(c["company"])
+                if c.get("email"):   bits.append(c["email"])
+                if c.get("last_contact_iso"): bits.append(f"last contact {c['last_contact_iso']}")
+                if c.get("notes"):   bits.append(f"notes: {c['notes'][:120]}")
+                lines.append("  - " + " | ".join(b for b in bits if b))
+            parts.append("Contacts on file:\n" + "\n".join(lines))
+    except Exception:
+        pass
+
+    try:
+        fups = memory_service.list_open_follow_ups()[:15]
+        if fups:
+            lines = []
+            for f in fups:
+                bits = [f.get("what", "")]
+                if f.get("who"):     bits.append(f"who: {f['who']}")
+                if f.get("due_iso"): bits.append(f"due: {f['due_iso']}")
+                lines.append("  - " + " | ".join(b for b in bits if b))
+            parts.append("Open follow-ups:\n" + "\n".join(lines))
     except Exception:
         pass
 

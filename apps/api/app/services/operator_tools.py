@@ -30,8 +30,10 @@ from pathlib import Path
 
 from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_tool, trace
 
+import re as _re
+
 from ..agents import default_model, load_prompt
-from . import gmail_service, google_drive_service, tts_service
+from . import gmail_service, google_drive_service, google_workspace_service, tts_service
 from .artifact_service import write_artifact
 from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
 
@@ -329,6 +331,47 @@ _PROPOSAL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "decision":  ("decision",),
 }
 
+# v1.6: facts must be FACTS. "Recent developments in AGI highlight
+# advancements in capabilities" is a platitude, not a fact, and it wastes
+# the operator's memory + attention. The bar: named entity or number,
+# a source, and none of the known filler phrases.
+_VAGUE_FACT_RE = _re.compile(
+    r"\b(highlights?|landscape|advancements? in capabilities|industry perspectives?"
+    r"|ethical considerations?|rapidly evolving|stay (?:tuned|informed)"
+    r"|in general|various stakeholders|continues? to evolve)\b",
+    _re.IGNORECASE,
+)
+
+
+def _fact_quality_error(payload: dict) -> str | None:
+    """Return a rejection reason for a low-quality fact, or None if it passes.
+
+    A storable fact needs:
+      1. >= 20 characters of actual claim,
+      2. a non-empty source (URL or publication name),
+      3. a named entity (capitalized word beyond position 0) or a number, and
+      4. no platitude filler phrases.
+    The error strings double as teaching signals — the planner reads them
+    and retries with a real fact or skips.
+    """
+    fact = str(payload.get("fact", "") or "").strip()
+    source = str(payload.get("source", "") or "").strip()
+    if len(fact) < 20:
+        return "fact rejected: too short — state a concrete claim (who/what/when)."
+    if not source:
+        return ("fact rejected: facts require a source (URL or publication name). "
+                "If you can't cite it, don't store it.")
+    words = fact.split()
+    has_digit = any(ch.isdigit() for ch in fact)
+    has_entity = any(w[:1].isupper() for w in words[1:])
+    if not (has_digit or has_entity):
+        return ("fact rejected: no named entity or number found. Name the company, "
+                "product, person, date, or figure.")
+    if _VAGUE_FACT_RE.search(fact):
+        return ("fact rejected: reads like a platitude ('highlights advancements', "
+                "'evolving landscape'...). State the specific thing that happened.")
+    return None
+
 
 # strict_mode=False because ``payload`` is intentionally a free-form dict
 # whose schema depends on ``kind`` (each kind validates differently inside
@@ -384,6 +427,14 @@ async def propose_memory_update(
         msg = f"propose_memory_update({kind}) missing required fields: {missing}"
         await operator.emit_error(msg)
         return {"error": msg}
+
+    # v1.6: facts get a quality gate. The rejection text is returned to the
+    # planner (not surfaced as a user-facing error) so it can retry with a
+    # real fact or — correctly — skip proposing anything.
+    if kind == "fact":
+        quality_err = _fact_quality_error(payload)
+        if quality_err:
+            return {"error": quality_err}
 
     proposal = await operator.emit_memory_proposal(
         kind=kind, payload=payload, reason=reason,
@@ -520,6 +571,130 @@ async def auto_upload_drive(
     }
 
 
+@function_tool
+async def create_spreadsheet(
+    ctx: RunContextWrapper[OperatorContext],
+    title: str,
+    headers: list[str],
+    rows: list[list[str]],
+) -> dict:
+    """Create a LIVE Google Sheet in the operator's Drive — a real deliverable.
+
+    Use this whenever the deliverable is comparative or structured data:
+    competitor comparisons, pricing trackers, prospect lists, expense
+    summaries, content calendars. A spreadsheet the operator can sort,
+    share, and present beats a Markdown table every time.
+
+    Cells use USER_ENTERED parsing, so:
+      - numbers ("1500", "12.5%") become real numbers,
+      - formulas ("=C2-B2", "=AVERAGE(D2:D9)") compute live.
+    Header row is bolded + frozen automatically. The file lands in
+    Ridian Operator / Spreadsheets in Drive.
+
+    Args:
+        title: Spreadsheet name, specific and dated when useful
+               (e.g. "Gulf Coast AI Consultants — Pricing Comparison, Jun 2026").
+        headers: Column names, first row.
+        rows: Data rows — each a list of cell strings aligned to headers.
+
+    Returns:
+        {"spreadsheet_id": str, "url": str} on success, {"error": str} on failure.
+    """
+    operator = ctx.context
+    operator.note_tool("create_spreadsheet")
+    await operator.emit_step(
+        name="spreadsheet", status="running",
+        detail=f"Building Google Sheet: {title} ({len(rows)} rows).",
+    )
+    try:
+        meta = await asyncio.to_thread(
+            google_workspace_service.create_spreadsheet, title, headers, rows,
+        )
+    except google_workspace_service.GoogleWorkspaceError as exc:
+        await operator.emit_step(name="spreadsheet", status="failed", detail=exc.detail)
+        await operator.emit_error(f"create_spreadsheet failed: {exc.detail}")
+        return {"error": exc.detail}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"create_spreadsheet failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="spreadsheet", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    await operator.emit_artifact(
+        name=title[:80], path=meta["url"], kind="spreadsheet",
+    )
+    await operator.emit_step(
+        name="spreadsheet", status="completed",
+        detail=f"Live Google Sheet ready: {len(headers)} columns × {len(rows)} rows.",
+    )
+    return meta
+
+
+# strict_mode stays ON: parallel lists (titles + bullets) keep the JSON
+# schema strict-compatible, unlike a list-of-dicts slides param.
+@function_tool
+async def create_slide_deck(
+    ctx: RunContextWrapper[OperatorContext],
+    title: str,
+    slide_titles: list[str],
+    slide_bullets: list[list[str]],
+) -> dict:
+    """Create a LIVE Google Slides deck in the operator's Drive.
+
+    Use this when the deliverable is a presentation: pitches, workshop
+    outlines, chamber talks, client proposals-as-decks. The operator opens
+    it in Slides, tweaks, and presents — no copy-paste from Markdown.
+
+    Slide 0 with an empty bullets list renders as a big centered title
+    slide. Every other slide is title + real disc bullets. Keep bullets
+    short (max ~12 words each, 3-5 per slide) — these are slides, not docs.
+
+    Args:
+        title: Deck file name.
+        slide_titles: One title per slide, in order.
+        slide_bullets: One list of bullet strings per slide, aligned with
+                       slide_titles ([] for the title slide).
+
+    Returns:
+        {"presentation_id": str, "url": str} on success, {"error": str} on failure.
+    """
+    operator = ctx.context
+    operator.note_tool("create_slide_deck")
+    if len(slide_titles) != len(slide_bullets):
+        msg = (f"create_slide_deck rejected: slide_titles ({len(slide_titles)}) and "
+               f"slide_bullets ({len(slide_bullets)}) must be the same length.")
+        await operator.emit_error(msg)
+        return {"error": msg}
+
+    await operator.emit_step(
+        name="deck", status="running",
+        detail=f"Building Google Slides deck: {title} ({len(slide_titles)} slides).",
+    )
+    try:
+        meta = await asyncio.to_thread(
+            google_workspace_service.create_presentation,
+            title, slide_titles, slide_bullets,
+        )
+    except google_workspace_service.GoogleWorkspaceError as exc:
+        await operator.emit_step(name="deck", status="failed", detail=exc.detail)
+        await operator.emit_error(f"create_slide_deck failed: {exc.detail}")
+        return {"error": exc.detail}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"create_slide_deck failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="deck", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    await operator.emit_artifact(
+        name=title[:80], path=meta["url"], kind="slides",
+    )
+    await operator.emit_step(
+        name="deck", status="completed",
+        detail=f"Live Slides deck ready: {len(slide_titles)} slides.",
+    )
+    return meta
+
+
 # Exposed registry — what the planner sees. Order matters only for the
 # system prompt's "available tools" list.
 #
@@ -535,6 +710,8 @@ PLANNER_TOOLS = [
     propose_memory_update,
     draft_gmail,
     auto_upload_drive,
+    create_spreadsheet,
+    create_slide_deck,
 ]
 
 

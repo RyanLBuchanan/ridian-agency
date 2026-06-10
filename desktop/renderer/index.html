@@ -235,8 +235,8 @@
                 <span class="operator-eyebrow">Operator v1</span>
                 <h2 id="operator-heading" class="operator-title">Tell Ridian what to do.</h2>
                 <p class="operator-sub">
-                  Ridian researches, drafts, files the result in Google Drive, and remembers what matters.
-                  External actions like sending email require your approval.
+                  Ridian drafts your emails, builds your spreadsheets and slide decks,
+                  and files everything in Drive. Sending anything still needs your approval.
                 </p>
               </header>
 
@@ -246,7 +246,7 @@
                   id="operator-command"
                   name="command"
                   rows="3"
-                  placeholder="Tell Ridian what to do…  (try: &quot;Brief me on the newest in AGI.&quot;)"
+                  placeholder="Tell Ridian what to do…  (try: &quot;Draft check-in emails to everyone I owe a reply.&quot;)"
                   spellcheck="false"
                 ></textarea>
                 <div class="operator-actions">
@@ -264,8 +264,9 @@
                 </div>
                 <div class="operator-examples">
                   <span class="operator-examples-label">Try:</span>
-                  <button type="button" class="operator-example" data-operator-example="Brief me on the newest in AGI.">Brief me on the newest in AGI.</button>
-                  <button type="button" class="operator-example" data-operator-example="Brief me on AI productivity tools for small business owners in 2026.">Brief me on AI productivity tools for small business owners.</button>
+                  <button type="button" class="operator-example" data-operator-example="Sweep my contacts and follow-ups, and draft a personalized check-in email to everyone I owe a reply.">Draft my follow-up emails</button>
+                  <button type="button" class="operator-example" data-operator-example="Research AI consulting competitors on the Gulf Coast and build me a comparison spreadsheet: services, pricing, target customers, and a gap column showing where Ridian wins.">Build a competitor spreadsheet</button>
+                  <button type="button" class="operator-example" data-operator-example="Build an 8-slide Google Slides deck pitching Ridian's AI services to the Coastal Alabama Chamber of Commerce, in my brand voice.">Create a pitch deck</button>
                 </div>
               </form>
 
@@ -1535,6 +1536,7 @@
 
         <div class="memory-tabs" role="tablist" aria-label="Memory tabs">
           <button type="button" class="memory-tab is-active" data-memory-tab="contacts">Contacts</button>
+          <button type="button" class="memory-tab" data-memory-tab="profile">Profile</button>
           <button type="button" class="memory-tab" data-memory-tab="brand">Brand</button>
           <button type="button" class="memory-tab" data-memory-tab="facts">Facts</button>
           <button type="button" class="memory-tab" data-memory-tab="follow-ups">Follow-ups</button>
@@ -1556,6 +1558,23 @@
             <ul id="memory-contacts-list" class="memory-list">
               <li class="memory-empty">No contacts yet.</li>
             </ul>
+          </div>
+
+          <!-- Operator Profile (v1.6) — the context that makes output specific -->
+          <div class="memory-panel hidden" data-memory-panel="profile">
+            <form id="memory-profile-form" class="memory-brand-form">
+              <fieldset class="memory-brand-section">
+                <legend>Operator Profile — fill this once, every operation gets sharper</legend>
+                <label class="field"><span class="field-label">Who you are (name &amp; role)</span><input data-profile="operator" type="text" placeholder="e.g. Ryan Buchanan, founder of Ridian Technologies" /></label>
+                <label class="field"><span class="field-label">What your business does</span><textarea data-profile="business" rows="2" placeholder="e.g. AI consulting and agentic systems for small businesses on the Gulf Coast"></textarea></label>
+                <label class="field"><span class="field-label">What you sell</span><textarea data-profile="offerings" rows="2" placeholder="e.g. AI workflow audits, custom agent builds, training workshops"></textarea></label>
+                <label class="field"><span class="field-label">Who buys it</span><textarea data-profile="customers" rows="2" placeholder="e.g. SMB owners in Gulf Shores / Orange Beach / Foley, chambers of commerce, educators"></textarea></label>
+                <label class="field"><span class="field-label">This quarter's #1 goal</span><input data-profile="goal" type="text" placeholder="e.g. land 3 paying consulting clients via chamber relationships" /></label>
+                <label class="field"><span class="field-label">Not interested in</span><input data-profile="avoid" type="text" placeholder="e.g. crypto, generic AI hype, enterprise sales cycles" /></label>
+                <label class="field"><span class="field-label">Anything else</span><textarea data-profile="notes" rows="2" placeholder="Optional"></textarea></label>
+              </fieldset>
+              <button type="submit" class="btn btn-primary btn-compact">Save profile</button>
+            </form>
           </div>
 
           <!-- Brand -->

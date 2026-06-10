@@ -3890,10 +3890,44 @@ function _switchMemoryTab(tab) {
     p.classList.toggle('hidden', p.getAttribute('data-memory-panel') !== tab);
   });
   if (tab === 'contacts') loadMemoryContacts();
+  else if (tab === 'profile') loadMemoryProfile();
   else if (tab === 'brand') loadMemoryBrand();
   else if (tab === 'facts') loadMemoryFacts();
   else if (tab === 'follow-ups') loadMemoryFollowUps();
   else if (tab === 'decisions') loadMemoryDecisions();
+}
+
+async function loadMemoryProfile() {
+  try {
+    const res = await fetch(`${BACKEND}/memory/profile`);
+    const profile = await res.json();
+    document.querySelectorAll('[data-profile]').forEach((el) => {
+      const field = el.getAttribute('data-profile');
+      el.value = profile[field] || '';
+    });
+  } catch (err) {
+    _setMemoryStatus('Could not load profile.', 'err');
+  }
+}
+
+async function saveProfileForm(e) {
+  if (e) e.preventDefault();
+  const payload = {};
+  document.querySelectorAll('[data-profile]').forEach((el) => {
+    payload[el.getAttribute('data-profile')] = (el.value || '').trim();
+  });
+  _setMemoryStatus('Saving profile…');
+  try {
+    const res = await fetch(`${BACKEND}/memory/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    _setMemoryStatus('Profile saved. Every operation now uses this context.', 'ok');
+  } catch (err) {
+    _setMemoryStatus(`Could not save profile: ${err.message || err}`, 'err');
+  }
 }
 
 function _setMemoryStatus(text, kind) {
@@ -4196,6 +4230,8 @@ function _wireMemoryForms() {
 
   const brandForm = document.getElementById('memory-brand-form');
   if (brandForm) brandForm.addEventListener('submit', saveBrandForm);
+  const profileForm = document.getElementById('memory-profile-form');
+  if (profileForm) profileForm.addEventListener('submit', saveProfileForm);
 }
 
 // Wire memory tabs + close button
@@ -4402,12 +4438,23 @@ function _opRenderStep(step) {
   }
 }
 
+// External artifact kinds: live things in Google's apps, not local files.
+// Each renders an anchor that opens in the default browser.
+const OPERATOR_EXTERNAL_KINDS = {
+  gmail_draft:  { label: 'Open in Gmail',  meta: 'Gmail draft (sits in Drafts until you send)' },
+  drive_folder: { label: 'Open in Drive',  meta: 'Google Drive folder (auto-filed by Ridian)' },
+  spreadsheet:  { label: 'Open in Sheets', meta: 'Live Google Sheet (in your Drive)' },
+  slides:       { label: 'Open in Slides', meta: 'Live Google Slides deck (in your Drive)' },
+};
+
 function _opIconForKind(kind) {
   if (kind === 'audio') return '♪';
   if (kind === 'markdown') return 'M';
   if (kind === 'json') return 'J';
   if (kind === 'gmail_draft') return '✉';
   if (kind === 'drive_folder') return '☁';
+  if (kind === 'spreadsheet') return '⊞';
+  if (kind === 'slides') return '▤';
   return '·';
 }
 
@@ -4422,9 +4469,8 @@ function _opRenderArtifact(art) {
   li.className = 'operator-artifact-item';
   li.setAttribute('data-artifact-name', art.name);
   // External-artifact meta lines (don't show the raw kind token).
-  let metaLine = art.kind;
-  if (art.kind === 'gmail_draft') metaLine = 'Gmail draft (sits in Drafts until you send)';
-  else if (art.kind === 'drive_folder') metaLine = 'Google Drive folder (auto-filed by Ridian)';
+  const extKind = OPERATOR_EXTERNAL_KINDS[art.kind];
+  const metaLine = extKind ? extKind.meta : art.kind;
   li.innerHTML = `
     <span class="operator-artifact-icon" aria-hidden="true">${escapeHtml(_opIconForKind(art.kind))}</span>
     <span>
@@ -4433,13 +4479,13 @@ function _opRenderArtifact(art) {
     </span>
   `;
 
-  if ((art.kind === 'gmail_draft' || art.kind === 'drive_folder') && art.path && art.path.startsWith('http')) {
-    // External artifacts (Gmail draft URL, Drive folder URL) open in the
-    // user's default browser. Electron renderer respects target=_blank for
-    // http(s) URLs via shell.openExternal in the main process.
+  if (extKind && art.path && art.path.startsWith('http')) {
+    // External artifacts (Gmail draft, Drive folder, Sheet, Slides deck)
+    // open in the user's default browser. Electron renderer respects
+    // target=_blank for http(s) URLs via shell.openExternal.
     const openA = document.createElement('a');
     openA.className = 'operator-artifact-open';
-    openA.textContent = art.kind === 'drive_folder' ? 'Open in Drive' : 'Open in Gmail';
+    openA.textContent = extKind.label;
     openA.href = art.path;
     openA.target = '_blank';
     openA.rel = 'noopener noreferrer';

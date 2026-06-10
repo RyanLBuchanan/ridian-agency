@@ -238,6 +238,51 @@ def save_brand(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Operator Profile (v1.6)
+# ---------------------------------------------------------------------------
+# Who the operator is and what the business is trying to do. This is the
+# context that turns generic research output into operator-specific moves.
+# Single dict, like brand. All fields are free text.
+
+PROFILE_FIELDS = (
+    "operator",    # who you are (name & role)
+    "business",    # what your business does
+    "offerings",   # what you sell
+    "customers",   # who buys it (ICP)
+    "goal",        # this quarter's #1 goal
+    "avoid",       # topics / work you're NOT interested in
+    "notes",       # anything else
+)
+
+
+def _default_profile() -> dict:
+    return {f: "" for f in PROFILE_FIELDS}
+
+
+def get_profile() -> dict:
+    data = state_store.load_dict("profile", default=_default_profile())
+    merged = _default_profile()
+    for f in PROFILE_FIELDS:
+        merged[f] = str(data.get(f, "") or "")
+    return merged
+
+
+def save_profile(updates: dict) -> dict:
+    current = get_profile()
+    for f in PROFILE_FIELDS:
+        if f in updates:
+            current[f] = str(updates.get(f, "") or "")
+    state_store.save("profile", current)
+    return current
+
+
+def profile_is_set() -> bool:
+    """True when at least the business or goal field has content."""
+    p = get_profile()
+    return bool((p.get("business") or "").strip() or (p.get("goal") or "").strip())
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

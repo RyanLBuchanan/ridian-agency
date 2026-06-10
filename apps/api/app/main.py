@@ -817,6 +817,28 @@ async def memory_brand_save(payload: BrandPayload) -> dict:
     return memory_service.save_brand(updates)
 
 
+class ProfilePayload(BaseModel):
+    """Operator Profile — the business context that grounds every operation."""
+    operator: str = ""
+    business: str = ""
+    offerings: str = ""
+    customers: str = ""
+    goal: str = ""
+    avoid: str = ""
+    notes: str = ""
+
+
+@app.get("/memory/profile")
+async def memory_profile_get() -> dict:
+    return memory_service.get_profile()
+
+
+@app.post("/memory/profile")
+async def memory_profile_save(payload: ProfilePayload) -> dict:
+    updates = payload.model_dump(exclude_unset=True)
+    return memory_service.save_profile(updates)
+
+
 @app.get("/dashboard")
 async def dashboard_get() -> dict:
     return dashboard_service.build_dashboard()
