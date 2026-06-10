@@ -571,8 +571,9 @@ function setWorkspaceView(view) {
   hide(els.errorRegion);
   if (view === 'welcome') {
     show(els.viewWelcome);
-    updateWorkspaceHeader('Dashboard', 'Ridian Command Center');
+    updateWorkspaceHeader('Ridian Operator', '');
     loadDashboard();
+    loadOperatorContextStrip();
   } else if (view === 'input') {
     if (currentMode === 'social') {
       show(els.viewInputSocial);
@@ -604,6 +605,12 @@ function setWorkspaceView(view) {
   }
   // Welcome tip is visible only on Welcome (and only if not dismissed).
   refreshWelcomeTip();
+
+  // v1.5 single-pane: the operator (welcome) view is sidebar-less; the
+  // legacy workflow views (input / run) keep the sidebar so the mode +
+  // outputs + recent-runs nav stay reachable inside that flow.
+  const shell = document.getElementById('app-shell');
+  if (shell) shell.classList.toggle('single-pane', view === 'welcome');
 }
 
 function updateWorkspaceHeader(title, subtitle) {
@@ -5123,3 +5130,261 @@ document.querySelectorAll('[data-operator-example]').forEach((btn) => {
     }
   });
 });
+
+
+/* ============================================================ */
+/*                   v1.5 — single-pane extras                  */
+/* ============================================================ */
+/* Three pieces of glue, all surgical:
+ *   1. Operator context strip below the command box (memory + last run)
+ *   2. History slide-in panel triggered by the top-bar icon
+ *   3. Command-history shell behavior (↑/↓) in the command box
+ *   plus: top-bar Settings + History buttons wiring, status-pill
+ *   auto-hide is purely CSS (.is-up). Backend status changes drop the
+ *   .is-up class when degraded so the pill reappears.
+ */
+
+/* ----- 1. Operator context strip ----- */
+
+const _ctxEls = {
+  strip:        document.getElementById('operator-context-strip'),
+  memoryBtn:    document.getElementById('operator-context-memory'),
+  memoryValue:  document.getElementById('operator-context-memory-value'),
+  lastBtn:      document.getElementById('operator-context-last'),
+  lastValue:    document.getElementById('operator-context-last-value'),
+};
+let _ctxLastOp = null;  // {artifact_folder, command, completed_at, ...}
+
+function _fmtRelativeShort(iso) {
+  if (!iso) return '';
+  let when;
+  try { when = new Date(iso); } catch (_) { return ''; }
+  const diffSec = (Date.now() - when.getTime()) / 1000;
+  if (!isFinite(diffSec) || diffSec < 0) return '';
+  if (diffSec < 60)     return `${Math.floor(diffSec)}s ago`;
+  if (diffSec < 3600)   return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400)  return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+async function loadOperatorContextStrip() {
+  if (!_ctxEls.strip) return;
+  let anyContent = false;
+
+  // Memory chip: one fetch hits the existing /memory/summary endpoint.
+  try {
+    const res = await fetch(`${BACKEND}/memory/summary`);
+    if (res.ok) {
+      const m = await res.json();
+      const parts = [];
+      if (m.contacts) parts.push(`${m.contacts} contacts`);
+      if (m.facts) parts.push(`${m.facts} facts`);
+      if (m.open_follow_ups) parts.push(`${m.open_follow_ups} follow-ups`);
+      const text = parts.length ? parts.join(' · ') : 'empty — click to add';
+      if (_ctxEls.memoryValue) _ctxEls.memoryValue.textContent = text;
+      anyContent = true;
+    }
+  } catch (_) { /* offline — leave chip blank */ }
+
+  // Last-run chip: read the operations log, show the most recent operator run.
+  try {
+    const res = await fetch(`${BACKEND}/operations/recent?limit=1`);
+    if (res.ok) {
+      const data = await res.json();
+      const ops = (data && data.operations) || [];
+      if (ops.length) {
+        const op = ops[0];
+        _ctxLastOp = op;
+        const cmd = (op.command || '').split(/\r?\n/)[0].slice(0, 60);
+        const rel = _fmtRelativeShort(op.completed_at);
+        if (_ctxEls.lastValue) _ctxEls.lastValue.textContent = `${cmd} · ${rel}`;
+        if (_ctxEls.lastBtn) _ctxEls.lastBtn.classList.remove('hidden');
+        anyContent = true;
+      } else {
+        if (_ctxEls.lastBtn) _ctxEls.lastBtn.classList.add('hidden');
+      }
+    }
+  } catch (_) { /* offline */ }
+
+  if (anyContent) _ctxEls.strip.classList.remove('hidden');
+  else _ctxEls.strip.classList.add('hidden');
+}
+
+if (_ctxEls.memoryBtn) {
+  _ctxEls.memoryBtn.addEventListener('click', () => openMemoryModal('contacts'));
+}
+if (_ctxEls.lastBtn) {
+  _ctxEls.lastBtn.addEventListener('click', () => {
+    if (_ctxLastOp && _ctxLastOp.artifact_folder) {
+      loadOperatorRun({ artifact_folder: _ctxLastOp.artifact_folder, name: _ctxLastOp.command || '' });
+    }
+  });
+}
+
+/* ----- 2. History slide-in panel ----- */
+
+const _historyEls = {
+  panel:      document.getElementById('history-panel'),
+  list:       document.getElementById('history-panel-list'),
+  closeBtn:   document.getElementById('history-close-btn'),
+  topbarBtn:  document.getElementById('topbar-history-btn'),
+};
+
+function _historyOpen() {
+  if (!_historyEls.panel) return;
+  _historyEls.panel.classList.remove('hidden');
+  _historyEls.panel.setAttribute('aria-hidden', 'false');
+  _historyFill();
+  document.addEventListener('keydown', _historyKeydown);
+}
+function _historyClose() {
+  if (!_historyEls.panel) return;
+  _historyEls.panel.classList.add('hidden');
+  _historyEls.panel.setAttribute('aria-hidden', 'true');
+  document.removeEventListener('keydown', _historyKeydown);
+}
+function _historyKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); _historyClose(); }
+}
+async function _historyFill() {
+  if (!_historyEls.list) return;
+  _historyEls.list.innerHTML = '<li class="history-panel-empty">Loading…</li>';
+  try {
+    const res = await fetch(`${BACKEND}/operations/recent?limit=30`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const ops = (data && data.operations) || [];
+    if (!ops.length) {
+      _historyEls.list.innerHTML =
+        '<li class="history-panel-empty">No operations yet. Run one from the command box.</li>';
+      return;
+    }
+    _historyEls.list.innerHTML = '';
+    ops.forEach((op) => {
+      const li = document.createElement('li');
+      li.className = 'history-panel-item';
+      const cmd = (op.command || '(no command)').split(/\r?\n/)[0];
+      const rel = _fmtRelativeShort(op.completed_at);
+      const status = (op.status || 'unknown').toLowerCase();
+      const sCls = status === 'completed' ? 'is-completed'
+                 : status === 'partial'   ? 'is-partial'
+                 : status === 'failed'    ? 'is-failed'
+                 : '';
+      li.innerHTML = `
+        <span class="history-panel-item-cmd"></span>
+        <span class="history-panel-item-meta">
+          <span class="history-panel-item-status ${sCls}"></span>
+          <span class="history-panel-item-when"></span>
+        </span>
+      `;
+      li.querySelector('.history-panel-item-cmd').textContent = cmd;
+      li.querySelector('.history-panel-item-status').textContent = status;
+      li.querySelector('.history-panel-item-when').textContent = rel;
+      li.addEventListener('click', () => {
+        _historyClose();
+        if (op.artifact_folder) {
+          loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd });
+        }
+      });
+      _historyEls.list.appendChild(li);
+    });
+  } catch (err) {
+    _historyEls.list.innerHTML = `<li class="history-panel-empty">Could not load history: ${escapeHtml(err.message || String(err))}</li>`;
+  }
+}
+if (_historyEls.topbarBtn) _historyEls.topbarBtn.addEventListener('click', _historyOpen);
+if (_historyEls.closeBtn) _historyEls.closeBtn.addEventListener('click', _historyClose);
+
+/* ----- 3. Command-history (↑/↓) in the command box ----- */
+
+const _CMD_HISTORY_KEY = 'ridian.cmdHistory';
+const _CMD_HISTORY_MAX = 30;
+let _cmdHistoryIdx = -1;  // -1 = at the live (empty) edit
+let _cmdHistoryDraft = '';
+
+function _loadCmdHistory() {
+  try {
+    const raw = window.localStorage.getItem(_CMD_HISTORY_KEY) || '[]';
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+function _pushCmdHistory(cmd) {
+  const c = (cmd || '').trim();
+  if (!c) return;
+  const hist = _loadCmdHistory().filter((x) => x !== c);
+  hist.unshift(c);
+  try { window.localStorage.setItem(_CMD_HISTORY_KEY, JSON.stringify(hist.slice(0, _CMD_HISTORY_MAX))); }
+  catch (_) {}
+}
+function _walkCmdHistory(dir) {
+  if (!OPERATOR.command) return;
+  const hist = _loadCmdHistory();
+  if (!hist.length) return;
+  if (_cmdHistoryIdx === -1) _cmdHistoryDraft = OPERATOR.command.value;
+  _cmdHistoryIdx = Math.max(-1, Math.min(hist.length - 1, _cmdHistoryIdx + dir));
+  OPERATOR.command.value = _cmdHistoryIdx === -1 ? _cmdHistoryDraft : hist[_cmdHistoryIdx];
+  // Move caret to end so the next ↑ keeps walking (rather than triggering line-up).
+  const len = OPERATOR.command.value.length;
+  try { OPERATOR.command.setSelectionRange(len, len); } catch (_) {}
+}
+
+if (OPERATOR.command) {
+  OPERATOR.command.addEventListener('keydown', (e) => {
+    // Only walk history when caret is on the first/last line and there's no
+    // selection — otherwise arrow keys do their normal text-navigation thing.
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      const ta = OPERATOR.command;
+      const beforeCaret = ta.value.slice(0, ta.selectionStart);
+      if (!beforeCaret.includes('\n')) {  // on the first line
+        e.preventDefault();
+        _walkCmdHistory(+1);
+      }
+    } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      const ta = OPERATOR.command;
+      const afterCaret = ta.value.slice(ta.selectionEnd);
+      if (!afterCaret.includes('\n')) {  // on the last line
+        e.preventDefault();
+        _walkCmdHistory(-1);
+      }
+    } else if (e.key === 'Escape') {
+      // Bail out of history walk; restore the in-flight draft.
+      if (_cmdHistoryIdx !== -1) {
+        _cmdHistoryIdx = -1;
+        OPERATOR.command.value = _cmdHistoryDraft;
+      }
+    }
+  });
+}
+
+// When a command is actually submitted, push it onto the history.
+if (OPERATOR.form) {
+  OPERATOR.form.addEventListener('submit', () => {
+    if (OPERATOR.command) _pushCmdHistory(OPERATOR.command.value);
+    _cmdHistoryIdx = -1;
+    _cmdHistoryDraft = '';
+  });
+}
+
+/* ----- Top-bar Settings + History wiring ----- */
+// Reuse the existing settings modal opener (sidebar Settings button calls it
+// too); the single-pane top-bar gear is a parallel trigger.
+const _topbarSettingsBtn = document.getElementById('topbar-settings-btn');
+if (_topbarSettingsBtn) _topbarSettingsBtn.addEventListener('click', openSettings);
+
+// Refresh the context strip after each operation completes so "Last run"
+// reflects the freshest data without requiring a full view-switch.
+(function _hookContextStripRefresh() {
+  // The SSE handler dispatches 'complete' events through _opHandleEvent.
+  // We don't want to wrap it (too invasive); instead poll the strip when
+  // operatorState.finalRecord transitions from null → something. Cheap.
+  let lastSeenFinalId = null;
+  setInterval(() => {
+    const fid = operatorState && operatorState.finalRecord && operatorState.finalRecord.id;
+    if (fid && fid !== lastSeenFinalId) {
+      lastSeenFinalId = fid;
+      // Wait a moment for the operation_log.json on disk + log append to settle.
+      setTimeout(() => loadOperatorContextStrip(), 500);
+    }
+  }, 1500);
+})();

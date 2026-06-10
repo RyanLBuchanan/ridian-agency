@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -123,6 +123,39 @@ def _memory_context_snippet() -> str:
                     f" {op.get('command', '')[:90]}"
                 )
             parts.append("Last few operations:\n" + "\n".join(lines))
+
+            # v1.5 conversational follow-up: when the most recent op completed
+            # within the last 5 minutes, include its artifact list + folder so
+            # the planner can answer follow-up commands like "now draft an
+            # email about it" without losing context. Outside the 5-minute
+            # window the user is starting a new train of thought, so we don't
+            # bias the planner.
+            latest = recent[0]
+            completed_iso = latest.get("completed_at", "")
+            if completed_iso:
+                try:
+                    completed = datetime.fromisoformat(completed_iso.replace("Z", ""))
+                    if datetime.now() - completed < timedelta(minutes=5):
+                        artifact_names = [
+                            a.get("name", "")
+                            for a in latest.get("artifacts", [])
+                            if a.get("name")
+                        ]
+                        parts.append(
+                            "Most recent operation (just completed; treat as the "
+                            "context for any follow-up):\n"
+                            f"  Command: {latest.get('command', '')}\n"
+                            f"  Folder:  {latest.get('artifact_folder', '')}\n"
+                            f"  Artifacts: {', '.join(artifact_names) or '(none)'}\n"
+                            "  If this run's command uses 'it', 'that', 'them', "
+                            "'the brief', 'the script', etc., assume the user is "
+                            "referring to the run above. Do not re-research the "
+                            "same topic — read the artifacts in the folder above "
+                            "with write_file (or skip straight to draft_gmail / "
+                            "auto_upload_drive as appropriate)."
+                        )
+                except (ValueError, TypeError):
+                    pass
     except Exception:
         pass
 

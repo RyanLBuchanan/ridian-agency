@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ridian Agency</title>
+    <title>Ridian Operator</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="app-shell">
       <!-- ============================================================ -->
       <!--                          SIDEBAR                              -->
       <!-- ============================================================ -->
@@ -15,8 +15,8 @@
         <header class="sidebar-brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <span class="brand-text">
-            <span class="brand-name">Ridian Agency</span>
-            <span class="brand-sub">Desktop Console</span>
+            <span class="brand-name">Ridian Operator</span>
+            <span class="brand-sub">Legacy workflows</span>
           </span>
         </header>
 
@@ -178,6 +178,23 @@
               <span class="status-dot" aria-hidden="true"></span>
               <span id="google-pill-label" class="status-label">Drive…</span>
             </div>
+            <!-- Single-pane icons: history + settings. Visible only on the
+                 operator (welcome) view via CSS — when the user enters a
+                 legacy workflow the sidebar comes back and these are hidden. -->
+            <button
+              id="topbar-history-btn"
+              type="button"
+              class="topbar-icon-btn"
+              aria-label="Recent operations"
+              title="Recent operations"
+            >&#x2630;</button>
+            <button
+              id="topbar-settings-btn"
+              type="button"
+              class="topbar-icon-btn"
+              aria-label="Settings"
+              title="Settings"
+            >&#x2699;</button>
           </div>
         </header>
 
@@ -252,6 +269,31 @@
                 </div>
               </form>
 
+              <!-- Single-pane context strip: persistent state visible without
+                   navigation. Chips show memory counts + the last operation;
+                   each is clickable to drill in. Hidden when there's nothing
+                   useful to say (fresh install). -->
+              <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
+                <button
+                  type="button"
+                  id="operator-context-memory"
+                  class="operator-context-chip"
+                  title="Edit memory"
+                >
+                  <span class="operator-context-chip-label">Memory</span>
+                  <span class="operator-context-chip-value" id="operator-context-memory-value">—</span>
+                </button>
+                <button
+                  type="button"
+                  id="operator-context-last"
+                  class="operator-context-chip hidden"
+                  title="Open the last operation"
+                >
+                  <span class="operator-context-chip-label">Last run</span>
+                  <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
+                </button>
+              </div>
+
               <!-- Live execution timeline -->
               <div id="operator-active" class="operator-active hidden">
                 <div class="operator-active-head">
@@ -300,9 +342,11 @@
               </div>
             </section>
 
-            <!-- Templates & context — demoted dashboard (still available, no longer the main focus) -->
+            <!-- Legacy workflows — kept available but no longer the main focus.
+                 Expanding this surfaces the old Business/Social/Agentic/NotebookLM
+                 forms via mode buttons + the demoted dashboard inside it. -->
             <details id="operator-templates" class="operator-templates">
-              <summary>Templates &amp; context</summary>
+              <summary>Legacy workflows</summary>
 
             <div class="dashboard">
 
@@ -1201,6 +1245,23 @@
         </div><!-- /.workspace-body -->
       </main><!-- /.workspace -->
     </div><!-- /.app-shell -->
+
+    <!-- ============================================================ -->
+    <!--                       HISTORY PANEL                            -->
+    <!--   Single-pane recent-operations drawer. Triggered by the top-   -->
+    <!--   right history icon. Shows operator runs from operations.json. -->
+    <!-- ============================================================ -->
+    <aside id="history-panel" class="history-panel hidden" aria-labelledby="history-title" aria-hidden="true">
+      <div class="history-panel-head">
+        <h2 id="history-title" class="history-panel-title">Recent operations</h2>
+        <button id="history-close-btn" type="button" class="modal-close" aria-label="Close history">&times;</button>
+      </div>
+      <div class="history-panel-body">
+        <ul id="history-panel-list" class="history-panel-list">
+          <li class="history-panel-empty">Loading…</li>
+        </ul>
+      </div>
+    </aside>
 
     <!-- ============================================================ -->
     <!--                         TIPS MODAL                            -->
