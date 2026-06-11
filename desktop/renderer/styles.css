@@ -1519,6 +1519,102 @@ body {
   white-space: nowrap;
 }
 
+/* v1.7: receipt — the planner's final word, on screen */
+
+.operator-receipt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background:
+    linear-gradient(135deg, var(--color-accent-soft), transparent 75%),
+    var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.operator-receipt-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+  margin-top: 2px;
+}
+
+.operator-receipt-text {
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* v1.7: missing-information card */
+
+.operator-needs-input {
+  background: var(--color-warn-bg);
+  border: 1px solid var(--color-warn-border);
+  border-left: 4px solid var(--color-warn-text);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.operator-needs-input-title {
+  font-weight: 700;
+  color: var(--color-warn-text);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.operator-needs-input-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.operator-needs-input-item {
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  line-height: 1.5;
+}
+
+.operator-needs-input-hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+}
+
+.operator-needs-input .btn { align-self: flex-start; }
+
+/* v1.7: mic + voice buttons */
+
+.operator-mic-btn.is-recording {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+  color: var(--color-error-text);
+  animation: operator-pulse 1.2s ease-in-out infinite;
+}
+
+.operator-mic-btn.is-transcribing {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.operator-voice-btn[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
 /* Artifacts panel */
 
 .operator-artifacts-card {

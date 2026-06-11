@@ -33,7 +33,13 @@ from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_too
 import re as _re
 
 from ..agents import default_model, load_prompt
-from . import gmail_service, google_drive_service, google_workspace_service, tts_service
+from . import (
+    gmail_service,
+    google_drive_service,
+    google_workspace_service,
+    memory_service,
+    tts_service,
+)
 from .artifact_service import write_artifact
 from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
 
@@ -468,6 +474,29 @@ async def draft_gmail(
     """
     operator = ctx.context
     operator.note_tool("draft_gmail")
+
+    # v1.7: missing recipient is a PLANNER mistake, not a user-facing failure.
+    # Return the correction quietly (no red error wall) so the planner can
+    # call request_missing_info instead — per the operator's explicit rule:
+    # "If no recipient email is available, do not call gmail_draft."
+    if not to or "@" not in to:
+        return {"error": (
+            "no valid recipient email. Do NOT retry draft_gmail and do NOT "
+            "invent an address — call request_missing_info to ask the user "
+            "which email to use."
+        )}
+
+    # v1.7 circuit breaker: once Gmail fails with a CONFIGURATION error
+    # (API not enabled / not connected / missing scope), every further
+    # draft in this operation will fail identically. Short-circuit instead
+    # of hammering the API six times and printing six red rows.
+    config_block = getattr(operator, "_gmail_config_error", None)
+    if config_block:
+        return {"error": (
+            f"Gmail is still unavailable in this run ({config_block}) — do NOT "
+            "retry. Summarize the drafts you could not create in your receipt."
+        )}
+
     await operator.emit_step(
         name="gmail_draft", status="running",
         detail=f"Creating Gmail draft to {to}…",
@@ -478,9 +507,17 @@ async def draft_gmail(
             gmail_service.create_draft, to, subject, body,
         )
     except gmail_service.GmailError as exc:
+        is_config = any(s in exc.detail for s in (
+            "isn't enabled", "not connected", "permission is missing",
+        ))
+        if is_config:
+            operator._gmail_config_error = exc.detail  # arm the breaker
         await operator.emit_step(name="gmail_draft", status="failed", detail=exc.detail)
         await operator.emit_error(f"draft_gmail failed: {exc.detail}")
-        return {"error": exc.detail}
+        return {"error": exc.detail + (
+            " This is a configuration issue — do NOT retry in this run."
+            if is_config else ""
+        )}
     except Exception as exc:  # noqa: BLE001
         msg = f"draft_gmail failed: {type(exc).__name__}: {exc}"
         await operator.emit_step(name="gmail_draft", status="failed", detail=msg)
@@ -703,12 +740,134 @@ async def create_slide_deck(
 # TTS billing made the audiobook path the most expensive per-run capability.
 # The tool functions stay defined in this file for backward compat and to
 # allow easy re-introduction; they're just not exposed to the planner.
+@function_tool
+async def request_missing_info(
+    ctx: RunContextWrapper[OperatorContext],
+    question: str,
+    context_hint: str = "",
+) -> dict:
+    """Ask the operator for information only they can supply, then stop that
+    thread of work gracefully.
+
+    Use when the command needs something memory doesn't have: a recipient
+    email address, a choice between candidates, a missing detail. NEVER
+    guess and NEVER invent. Consolidate everything you're missing into ONE
+    clear question (e.g. "I need email addresses for: Sarah Chen (Chamber)
+    and Ada's Kids — which should I use?").
+
+    The renderer shows the question prominently; the user answers in the
+    command box and the conversational follow-up context carries your prior
+    work forward — so finish whatever parts you CAN complete first.
+
+    Args:
+        question: One clear, specific question for the operator.
+        context_hint: Optional one-liner about which task is blocked.
+
+    Returns:
+        {"status": "awaiting_user", "id": str}
+    """
+    operator = ctx.context
+    operator.note_tool("request_missing_info")
+    entry = await operator.emit_needs_input(question=question, context_hint=context_hint)
+    await operator.emit_step(
+        name="needs_input", status="completed",
+        detail=f"Waiting on you: {question}",
+    )
+    return {"status": "awaiting_user", "id": entry["id"]}
+
+
+# strict_mode=False: like propose_memory_update, the payload shape depends
+# on kind, so the JSON schema can't be strict.
+@function_tool(strict_mode=False)
+async def save_memory(
+    ctx: RunContextWrapper[OperatorContext],
+    kind: str,
+    payload: dict,
+) -> dict:
+    """Save something to memory DIRECTLY — only when the user explicitly
+    commanded it ("add a contact…", "remember that…", "save a follow-up…").
+
+    The user's explicit command IS the approval, so no confirmation panel.
+    For anything YOU noticed on your own during a run, use
+    propose_memory_update instead — agent-initiated learning always needs
+    the user's sign-off.
+
+    Args:
+        kind: "contact" | "fact" | "follow_up" | "decision".
+        payload: Same shapes as propose_memory_update. For facts the user
+            states personally, source may be omitted (defaults to "operator").
+
+    Returns:
+        {"id": str, "kind": str, "status": "saved"} or {"error": str}.
+    """
+    operator = ctx.context
+    operator.note_tool("save_memory")
+
+    if kind not in ALLOWED_PROPOSAL_KINDS:
+        return {"error": f"save_memory rejected: kind {kind!r} not in {list(ALLOWED_PROPOSAL_KINDS)}"}
+    if not isinstance(payload, dict):
+        return {"error": "save_memory rejected: payload must be a dict"}
+    required = _PROPOSAL_REQUIRED_FIELDS[kind]
+    missing = [f for f in required if not str(payload.get(f, "")).strip()]
+    if missing:
+        return {"error": f"save_memory({kind}) missing required fields: {missing}"}
+
+    try:
+        if kind == "contact":
+            entry = memory_service.add_contact({
+                "name": str(payload.get("name", "") or ""),
+                "role": str(payload.get("role", "") or ""),
+                "company": str(payload.get("company", "") or ""),
+                "email": str(payload.get("email", "") or ""),
+                "phone": str(payload.get("phone", "") or ""),
+                "notes": str(payload.get("notes", "") or ""),
+                "last_contact_iso": str(payload.get("last_contact_iso", "") or ""),
+            })
+            summary = entry.get("name", "")
+        elif kind == "fact":
+            # User-stated facts don't need a citation — the user IS the source.
+            entry = memory_service.add_fact({
+                "topic": str(payload.get("topic", "") or ""),
+                "fact": str(payload.get("fact", "") or ""),
+                "source": str(payload.get("source", "") or "operator"),
+            })
+            summary = entry.get("fact", "")[:60]
+        elif kind == "follow_up":
+            entry = memory_service.add_follow_up({
+                "what": str(payload.get("what", "") or ""),
+                "who": str(payload.get("who", "") or ""),
+                "due_iso": str(payload.get("due_iso", "") or ""),
+                "status": "open",
+                "source_run": str(payload.get("source_run", "") or ""),
+            })
+            summary = entry.get("what", "")[:60]
+        else:  # decision
+            entry = memory_service.add_decision({
+                "decision": str(payload.get("decision", "") or ""),
+                "context": str(payload.get("context", "") or ""),
+                "date_iso": str(payload.get("date_iso", "") or ""),
+            })
+            summary = entry.get("decision", "")[:60]
+    except Exception as exc:  # noqa: BLE001
+        msg = f"save_memory failed: {type(exc).__name__}: {exc}"
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    await operator.emit_step(
+        name="memory", status="completed",
+        detail=f"Saved {kind.replace('_', '-')}: {summary}",
+    )
+    return {"id": entry.get("id", ""), "kind": kind, "status": "saved"}
+
+
 PLANNER_TOOLS = [
     web_research,
     write_sources_packet,
     write_file,
     propose_memory_update,
+    save_memory,
     draft_gmail,
+    request_missing_info,
     auto_upload_drive,
     create_spreadsheet,
     create_slide_deck,

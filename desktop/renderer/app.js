@@ -4330,6 +4330,7 @@ const operatorState = {
   elapsedStart: null,
   drive: null,         // { drive_path, drive_folder_url, uploaded_files }  set after a successful upload
   proposals: [],       // v1.2: planner-proposed memory updates awaiting user decision
+  receipt: '',         // v1.7: the planner's final receipt text (shown + spoken)
 };
 
 function _opSetStatus(text, kind) {
@@ -4388,11 +4389,23 @@ function _opResetUI() {
   if (OPERATOR.proposalsPanel) OPERATOR.proposalsPanel.classList.add('hidden');
   if (OPERATOR.proposalsList) OPERATOR.proposalsList.innerHTML = '';
   if (OPERATOR.proposalsStatus) { OPERATOR.proposalsStatus.textContent = ''; OPERATOR.proposalsStatus.className = 'operator-actions-status'; }
+  // v1.7: receipt + needs-input + spoken reply + rendered-error dedupe set
+  const receiptEl = document.getElementById('operator-receipt');
+  if (receiptEl) receiptEl.classList.add('hidden');
+  const receiptText = document.getElementById('operator-receipt-text');
+  if (receiptText) receiptText.textContent = '';
+  const needsEl = document.getElementById('operator-needs-input');
+  if (needsEl) needsEl.classList.add('hidden');
+  const needsList = document.getElementById('operator-needs-input-list');
+  if (needsList) needsList.innerHTML = '';
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  _opRenderedErrors.clear();
   _opSetStatus('');
   operatorState.artifacts = [];
   operatorState.finalRecord = null;
   operatorState.drive = null;
   operatorState.proposals = [];
+  operatorState.receipt = '';
 }
 
 const STEP_LABELS = {
@@ -4513,6 +4526,10 @@ function _opShowAudio(filename) {
   if (OPERATOR.audioPlayer) OPERATOR.audioPlayer.classList.remove('hidden');
 }
 
+// v1.7: identical repeated errors render once (with a ×N counter) instead of
+// six red rows — the wall-of-red from repeated Gmail 403s taught us that.
+const _opRenderedErrors = new Map();  // message → <li>
+
 function _opRenderError(message) {
   if (!OPERATOR.errors) return;
   OPERATOR.errors.classList.remove('hidden');
@@ -4521,11 +4538,148 @@ function _opRenderError(message) {
       <div class="operator-errors-title">Issues during this operation</div>
       <ul class="operator-errors-list"></ul>
     `;
+    _opRenderedErrors.clear();
+  }
+  const existing = _opRenderedErrors.get(message);
+  if (existing) {
+    const n = (parseInt(existing.dataset.count || '1', 10) || 1) + 1;
+    existing.dataset.count = String(n);
+    existing.textContent = `${message}  (×${n})`;
+    return;
   }
   const ul = OPERATOR.errors.querySelector('.operator-errors-list');
   const li = document.createElement('li');
   li.textContent = message;
+  li.dataset.count = '1';
   ul.appendChild(li);
+  _opRenderedErrors.set(message, li);
+}
+
+/* ----- v1.7: receipt + needs-input + voice ----- */
+
+function _opRenderReceipt(text) {
+  const card = document.getElementById('operator-receipt');
+  const body = document.getElementById('operator-receipt-text');
+  if (!card || !body) return;
+  body.textContent = text;
+  card.classList.remove('hidden');
+}
+
+function _opRenderNeedsInput(need) {
+  const card = document.getElementById('operator-needs-input');
+  const list = document.getElementById('operator-needs-input-list');
+  if (!card || !list) return;
+  // Dedupe by id on rehydrate + live double-fires.
+  if (need.id && list.querySelector(`[data-need-id="${need.id}"]`)) return;
+  const li = document.createElement('li');
+  li.className = 'operator-needs-input-item';
+  if (need.id) li.setAttribute('data-need-id', need.id);
+  li.textContent = need.question || '';
+  if (need.context_hint) {
+    const hint = document.createElement('span');
+    hint.className = 'operator-needs-input-hint';
+    hint.textContent = need.context_hint;
+    li.appendChild(hint);
+  }
+  list.appendChild(li);
+  card.classList.remove('hidden');
+}
+
+const VOICE_REPLIES_KEY = 'ridian.voiceReplies';
+
+function _opVoiceEnabled() {
+  try { return window.localStorage.getItem(VOICE_REPLIES_KEY) !== 'false'; }
+  catch (_) { return true; }
+}
+
+function _opSetVoiceEnabled(on) {
+  try { window.localStorage.setItem(VOICE_REPLIES_KEY, on ? 'true' : 'false'); } catch (_) {}
+  const btn = document.getElementById('operator-voice-btn');
+  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if (!on) { try { window.speechSynthesis.cancel(); } catch (_) {} }
+}
+
+function _opSpeak(text) {
+  if (!_opVoiceEnabled() || !text) return;
+  try {
+    // Strip markdown-ish noise so the OS voice doesn't read asterisks.
+    const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    if (!clean) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
+    utter.rate = 1.05;
+    window.speechSynthesis.speak(utter);
+  } catch (_) { /* speechSynthesis unavailable — silently skip */ }
+}
+
+/* ----- v1.7: voice input (MediaRecorder → Whisper) ----- */
+
+const _micState = { recorder: null, chunks: [], timer: null };
+
+async function _opMicToggle() {
+  const btn = document.getElementById('operator-mic-btn');
+  if (!btn) return;
+  if (_micState.recorder && _micState.recorder.state === 'recording') {
+    _micState.recorder.stop();
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    _opSetStatus('Microphone unavailable — check Windows mic permissions for Ridian.', 'err');
+    return;
+  }
+  _micState.chunks = [];
+  const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+  _micState.recorder = recorder;
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) _micState.chunks.push(e.data); };
+  recorder.onstop = async () => {
+    clearTimeout(_micState.timer);
+    btn.classList.remove('is-recording');
+    btn.classList.add('is-transcribing');
+    _opSetStatus('Transcribing…');
+    stream.getTracks().forEach((t) => t.stop());
+    try {
+      const blob = new Blob(_micState.chunks, { type: 'audio/webm' });
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] || '');
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+      const res = await fetch(`${BACKEND}/operations/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio_base64: b64, mime: 'audio/webm' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+      const text = (data.text || '').trim();
+      if (text && OPERATOR.command) {
+        OPERATOR.command.value = OPERATOR.command.value
+          ? OPERATOR.command.value.trimEnd() + ' ' + text
+          : text;
+        OPERATOR.command.focus();
+        _opSetStatus('Heard you. Review and press Run.', 'ok');
+      } else {
+        _opSetStatus("Didn't catch that — try again closer to the mic.", 'err');
+      }
+    } catch (err) {
+      _opSetStatus(`Voice input failed: ${err && err.message ? err.message : err}`, 'err');
+    } finally {
+      btn.classList.remove('is-transcribing');
+      _micState.recorder = null;
+      _micState.chunks = [];
+    }
+  };
+  recorder.start();
+  btn.classList.add('is-recording');
+  _opSetStatus('Recording… click the mic again to stop.');
+  // Hard cap: auto-stop at 60 seconds.
+  _micState.timer = setTimeout(() => {
+    if (recorder.state === 'recording') recorder.stop();
+  }, 60000);
 }
 
 function _opProposalSummary(prop) {
@@ -4703,15 +4857,29 @@ function _opHandleEvent(evt) {
       }
       break;
     }
-    case 'message':
-      // No-op for v1; could surface as a toast later.
+    case 'needs_input': {
+      const need = evt.data || {};
+      if (need && need.question) _opRenderNeedsInput(need);
       break;
+    }
+    case 'message': {
+      const text = (evt.data && evt.data.text) || '';
+      // "Planner → calling tool: X" markers are debug noise; the planner's
+      // actual receipt (final message) is the thing worth showing + speaking.
+      if (text && !text.startsWith('Planner →')) {
+        operatorState.receipt = text;
+        _opRenderReceipt(text);
+      }
+      break;
+    }
     case 'error':
       _opRenderError((evt.data && evt.data.message) || 'Unknown error');
       break;
     case 'complete':
       operatorState.finalRecord = evt.data || null;
       _opSetStatusDot(((evt.data && evt.data.status) || 'completed'));
+      // v1.7: speak the receipt aloud if voice replies are on.
+      if (operatorState.receipt) _opSpeak(operatorState.receipt);
       break;
     case 'end':
       _opStopElapsed();
@@ -5057,6 +5225,14 @@ async function loadOperatorRun(run) {
     _opRenderMemoryProposal(p);
   });
 
+  // v1.7: replay the receipt + any open questions (no speaking on reload —
+  // voice is for live completions only).
+  if (log.receipt) {
+    operatorState.receipt = log.receipt;
+    _opRenderReceipt(log.receipt);
+  }
+  (Array.isArray(log.needs_input) ? log.needs_input : []).forEach((n) => _opRenderNeedsInput(n));
+
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
     has_audio: data.has_audio, missing: data.missing,
@@ -5170,6 +5346,24 @@ if (OPERATOR.proposalsDismissAll) {
   });
 }
 
+// v1.7: mic + voice toggle + needs-input answer button
+const _micBtn = document.getElementById('operator-mic-btn');
+if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
+const _voiceBtn = document.getElementById('operator-voice-btn');
+if (_voiceBtn) {
+  _voiceBtn.setAttribute('aria-pressed', _opVoiceEnabled() ? 'true' : 'false');
+  _voiceBtn.addEventListener('click', () => _opSetVoiceEnabled(!_opVoiceEnabled()));
+}
+const _needsAnswerBtn = document.getElementById('operator-needs-input-answer');
+if (_needsAnswerBtn) {
+  _needsAnswerBtn.addEventListener('click', () => {
+    if (OPERATOR.command) {
+      OPERATOR.command.focus();
+      OPERATOR.command.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+}
+
 // Example chips populate the textarea.
 document.querySelectorAll('[data-operator-example]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -5196,13 +5390,20 @@ document.querySelectorAll('[data-operator-example]').forEach((btn) => {
 
 /* ----- 1. Operator context strip ----- */
 
-const _ctxEls = {
-  strip:        document.getElementById('operator-context-strip'),
-  memoryBtn:    document.getElementById('operator-context-memory'),
-  memoryValue:  document.getElementById('operator-context-memory-value'),
-  lastBtn:      document.getElementById('operator-context-last'),
-  lastValue:    document.getElementById('operator-context-last-value'),
-};
+// v1.7 fix: look elements up at call time instead of at module-eval time.
+// setWorkspaceView('welcome') runs during INITIAL LOAD — *before* this part
+// of the file has evaluated — so a module-level const here was in its
+// temporal dead zone on the first call, threw, got swallowed by the
+// try/catch, and the strip never appeared until after the first run.
+function _ctxGetEls() {
+  return {
+    strip:        document.getElementById('operator-context-strip'),
+    memoryBtn:    document.getElementById('operator-context-memory'),
+    memoryValue:  document.getElementById('operator-context-memory-value'),
+    lastBtn:      document.getElementById('operator-context-last'),
+    lastValue:    document.getElementById('operator-context-last-value'),
+  };
+}
 let _ctxLastOp = null;  // {artifact_folder, command, completed_at, ...}
 
 function _fmtRelativeShort(iso) {
@@ -5218,7 +5419,8 @@ function _fmtRelativeShort(iso) {
 }
 
 async function loadOperatorContextStrip() {
-  if (!_ctxEls.strip) return;
+  const els2 = _ctxGetEls();
+  if (!els2.strip) return;
   let anyContent = false;
 
   // Memory chip: one fetch hits the existing /memory/summary endpoint.
@@ -5231,7 +5433,7 @@ async function loadOperatorContextStrip() {
       if (m.facts) parts.push(`${m.facts} facts`);
       if (m.open_follow_ups) parts.push(`${m.open_follow_ups} follow-ups`);
       const text = parts.length ? parts.join(' · ') : 'empty — click to add';
-      if (_ctxEls.memoryValue) _ctxEls.memoryValue.textContent = text;
+      if (els2.memoryValue) els2.memoryValue.textContent = text;
       anyContent = true;
     }
   } catch (_) { /* offline — leave chip blank */ }
@@ -5247,29 +5449,39 @@ async function loadOperatorContextStrip() {
         _ctxLastOp = op;
         const cmd = (op.command || '').split(/\r?\n/)[0].slice(0, 60);
         const rel = _fmtRelativeShort(op.completed_at);
-        if (_ctxEls.lastValue) _ctxEls.lastValue.textContent = `${cmd} · ${rel}`;
-        if (_ctxEls.lastBtn) _ctxEls.lastBtn.classList.remove('hidden');
+        if (els2.lastValue) els2.lastValue.textContent = `${cmd} · ${rel}`;
+        if (els2.lastBtn) els2.lastBtn.classList.remove('hidden');
         anyContent = true;
       } else {
-        if (_ctxEls.lastBtn) _ctxEls.lastBtn.classList.add('hidden');
+        if (els2.lastBtn) els2.lastBtn.classList.add('hidden');
       }
     }
   } catch (_) { /* offline */ }
 
-  if (anyContent) _ctxEls.strip.classList.remove('hidden');
-  else _ctxEls.strip.classList.add('hidden');
+  if (anyContent) els2.strip.classList.remove('hidden');
+  else els2.strip.classList.add('hidden');
 }
 
-if (_ctxEls.memoryBtn) {
-  _ctxEls.memoryBtn.addEventListener('click', () => openMemoryModal('contacts'));
+{
+  const els2 = _ctxGetEls();
+  if (els2.memoryBtn) {
+    els2.memoryBtn.addEventListener('click', () => openMemoryModal('contacts'));
+  }
+  if (els2.lastBtn) {
+    els2.lastBtn.addEventListener('click', () => {
+      if (_ctxLastOp && _ctxLastOp.artifact_folder) {
+        loadOperatorRun({ artifact_folder: _ctxLastOp.artifact_folder, name: _ctxLastOp.command || '' });
+      }
+    });
+  }
 }
-if (_ctxEls.lastBtn) {
-  _ctxEls.lastBtn.addEventListener('click', () => {
-    if (_ctxLastOp && _ctxLastOp.artifact_folder) {
-      loadOperatorRun({ artifact_folder: _ctxLastOp.artifact_folder, name: _ctxLastOp.command || '' });
-    }
-  });
-}
+
+// v1.7: the strip is the only doorway into Memory in single-pane mode, so it
+// must be present from the first paint — not only after the first run. The
+// initial setWorkspaceView('welcome') call ran before this section evaluated
+// (and was no-op'd by its try/catch), so kick it once now that everything is
+// defined.
+loadOperatorContextStrip();
 
 /* ----- 2. History slide-in panel ----- */
 

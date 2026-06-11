@@ -174,6 +174,19 @@ def create_draft(
     except HttpError as exc:
         status = getattr(getattr(exc, "resp", None), "status", "?")
         log.warning("gmail.draft_create_failed status=%s", status)
+        # 403 accessNotConfigured = the Gmail API itself isn't enabled in the
+        # user's Cloud project (separate from the OAuth scope consent). Same
+        # two-click fix as Sheets/Slides — surface the exact link.
+        if status == 403 and b"accessNotConfigured" in (exc.content or b""):
+            raise GmailError(
+                "The Gmail API isn't enabled for your Google Cloud project "
+                "yet. Enable it here (two clicks): "
+                "https://console.cloud.google.com/apis/library/gmail.googleapis.com "
+                "— then run the command again. This is a one-time setup, "
+                "and a configuration issue — retrying without enabling it "
+                "will not help.",
+                status=400,
+            ) from exc
         raise GmailError(
             f"Gmail draft create failed (HTTP {status}).",
             status=502 if str(status).startswith("5") else 400,

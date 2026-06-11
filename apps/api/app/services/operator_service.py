@@ -79,6 +79,9 @@ def _finalized_view(record: dict) -> dict:
         # status ("proposed" | "committed" | "dismissed") so reloaded runs
         # don't re-prompt for items the operator already decided on.
         "proposed_memory_updates": record.get("proposed_memory_updates", []),
+        # v1.7: missing-info questions + the planner's final receipt text.
+        "needs_input": record.get("needs_input", []),
+        "receipt": record.get("receipt", ""),
     }
 
 
@@ -250,13 +253,16 @@ async def _drain_planner_events(streamed, operator: OperatorContext) -> None:
             pass
         elif isinstance(item, MessageOutputItem):
             # The planner's final summary message. Render as a 'message' event
-            # so the renderer can show a one-line operator receipt at the end.
+            # AND capture it on the record so the receipt survives reloads and
+            # so receipt-only runs (questions answered from memory) count as
+            # completed rather than failed.
             try:
                 from agents.items import ItemHelpers
                 text = ItemHelpers.text_message_output(item).strip()
             except Exception:
                 text = ""
             if text:
+                operator.record["receipt"] = text
                 await operator.emit({"event": "message", "data": {"text": text}})
 
 
@@ -273,16 +279,19 @@ async def _emit_start(emit: EmitFn, record: dict, command: str, folder: Path) ->
 async def _persist_and_complete(emit: EmitFn, record: dict, folder: Path) -> dict:
     """Decide final status, snapshot to disk, append to operations log, emit."""
     # Decide status from what the tools actually produced.
-    has_audio = record["audio_generated"]
-    has_sources = record["sources_count"] > 0
     has_any_artifact = bool(record["artifacts"])
     has_errors = bool(record["errors"])
+    has_needs = bool(record.get("needs_input"))
+    has_receipt = bool((record.get("receipt") or "").strip())
 
     if has_errors and not has_any_artifact:
         record["status"] = "failed"
-    elif has_errors:
+    elif has_errors or has_needs:
+        # Waiting-on-the-user is incomplete by definition, not a failure.
         record["status"] = "partial"
-    elif has_any_artifact:
+    elif has_any_artifact or has_receipt:
+        # Receipt-only runs are legitimate: questions answered from memory
+        # produce no artifacts but ARE completed work.
         record["status"] = "completed"
     else:
         record["status"] = "failed"

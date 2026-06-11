@@ -42,6 +42,7 @@ from .services import memory_service  # noqa: E402
 from .services import operation_log_service  # noqa: E402
 from .services import operator_service  # noqa: E402
 from .services import project_service  # noqa: E402
+from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
     ALLOWED_OUTPUT_DEPTHS as AGENTIC_DEPTHS,
     ALLOWED_TIME_WINDOWS as AGENTIC_WINDOWS,
@@ -899,6 +900,24 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
 @app.get("/operations/recent")
 async def operations_recent(limit: int = 20) -> dict:
     return {"operations": operation_log_service.list_recent(limit=limit)}
+
+
+class TranscribeRequest(BaseModel):
+    """Mic recording from the renderer. Base64 keeps us off multipart parsing."""
+    audio_base64: str = Field(..., min_length=1)
+    mime: str = "audio/webm"
+
+
+@app.post("/operations/transcribe")
+async def operations_transcribe(payload: TranscribeRequest) -> dict:
+    """Voice input → text via OpenAI Whisper. Fills the command box client-side."""
+    try:
+        text = await asyncio.to_thread(
+            transcription_service.transcribe_base64, payload.audio_base64, payload.mime,
+        )
+    except transcription_service.TranscriptionError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return {"text": text}
 
 
 # IMPORTANT: register fixed-path routes (/operations/load, /operations/audio,

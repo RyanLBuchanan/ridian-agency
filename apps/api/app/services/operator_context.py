@@ -90,6 +90,26 @@ class OperatorContext:
         if name and name not in self.record["tools_used"]:
             self.record["tools_used"].append(name)
 
+    async def emit_needs_input(self, *, question: str, context_hint: str = "") -> dict:
+        """Record a missing-information request + broadcast it to the renderer.
+
+        v1.7: when the planner is missing something only the user can supply
+        (a recipient email, a choice between options), it asks instead of
+        guessing or failing. The renderer shows an amber "Ridian needs one
+        answer" card; the user replies in the command box and the 5-minute
+        conversational-follow-up window carries the context forward.
+        """
+        entry = {
+            "id": "need_" + uuid.uuid4().hex[:10],
+            "question": (question or "").strip(),
+            "context_hint": (context_hint or "").strip(),
+        }
+        if "needs_input" not in self.record:
+            self.record["needs_input"] = []
+        self.record["needs_input"].append(entry)
+        await self.emit({"event": "needs_input", "data": dict(entry)})
+        return entry
+
     async def emit_memory_proposal(self, *, kind: str, payload: dict, reason: str = "") -> dict:
         """Record a proposed memory write + broadcast it to the renderer.
 

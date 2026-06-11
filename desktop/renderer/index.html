@@ -260,6 +260,21 @@
                     type="button"
                     class="btn btn-ghost hidden"
                   >Stop</button>
+                  <button
+                    id="operator-mic-btn"
+                    type="button"
+                    class="btn btn-ghost operator-mic-btn"
+                    title="Speak your command (click to start, click to stop)"
+                    aria-label="Voice input"
+                  >&#127908;</button>
+                  <button
+                    id="operator-voice-btn"
+                    type="button"
+                    class="btn btn-ghost operator-voice-btn"
+                    title="Read Ridian's replies aloud"
+                    aria-label="Toggle spoken replies"
+                    aria-pressed="true"
+                  >&#128266;</button>
                   <span id="operator-elapsed" class="operator-elapsed" aria-live="polite"></span>
                 </div>
                 <div class="operator-examples">
@@ -305,6 +320,25 @@
                   <span id="operator-active-folder" class="operator-active-folder"></span>
                 </div>
                 <ol id="operator-timeline" class="operator-timeline"></ol>
+                <!-- v1.7: the planner's final receipt — shown on screen and
+                     (optionally) read aloud. Also where answers to questions
+                     like "who do I have at the Chamber?" appear. -->
+                <div id="operator-receipt" class="operator-receipt hidden" role="status" aria-live="polite">
+                  <div class="operator-receipt-label">Ridian</div>
+                  <div id="operator-receipt-text" class="operator-receipt-text"></div>
+                </div>
+              </div>
+
+              <!-- v1.7: missing-information card. Amber, prominent, one click
+                   to answer in the command box. -->
+              <div id="operator-needs-input" class="operator-needs-input hidden" role="alert">
+                <div class="operator-needs-input-title">Ridian needs one answer from you</div>
+                <ul id="operator-needs-input-list" class="operator-needs-input-list"></ul>
+                <button
+                  id="operator-needs-input-answer"
+                  type="button"
+                  class="btn btn-primary btn-compact"
+                >Answer in the command box</button>
               </div>
 
               <!-- Artifacts panel (live as artifacts land) -->

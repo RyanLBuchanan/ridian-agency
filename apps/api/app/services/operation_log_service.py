@@ -87,6 +87,10 @@ def build_record(*, command: str, intent: str, artifact_folder: str) -> dict:
         # v1.2: memory proposals from the planner — each carries its own
         # {id, kind, payload, reason, status} so reloaded runs don't re-prompt.
         "proposed_memory_updates": [],
+        # v1.7: missing-information requests ({id, question, context_hint})
+        # and the planner's final receipt text (displayed + spoken + reloadable).
+        "needs_input": [],
+        "receipt": "",
         "tools_used": [],
         "sources_count": 0,
         "audio_generated": False,
