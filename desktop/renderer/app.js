@@ -4398,7 +4398,7 @@ function _opResetUI() {
   if (needsEl) needsEl.classList.add('hidden');
   const needsList = document.getElementById('operator-needs-input-list');
   if (needsList) needsList.innerHTML = '';
-  try { window.speechSynthesis.cancel(); } catch (_) {}
+  _opStopSpeaking();
   _opRenderedErrors.clear();
   _opSetStatus('');
   operatorState.artifacts = [];
@@ -4594,13 +4594,27 @@ function _opVoiceEnabled() {
 
 function _opSetVoiceEnabled(on) {
   try { window.localStorage.setItem(VOICE_REPLIES_KEY, on ? 'true' : 'false'); } catch (_) {}
-  const btn = document.getElementById('operator-voice-btn');
-  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  if (!on) { try { window.speechSynthesis.cancel(); } catch (_) {} }
+  const chk = document.getElementById('settings-voice-replies');
+  if (chk) chk.checked = !!on;
+  if (!on) _opStopSpeaking();
 }
 
-function _opSpeak(text) {
-  if (!_opVoiceEnabled() || !text) return;
+function _opSetSpeakPressed(on) {
+  const btn = document.getElementById('operator-receipt-speak');
+  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function _opStopSpeaking() {
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  _opSetSpeakPressed(false);
+}
+
+// force=true: the user clicked the speaker on the receipt — play regardless
+// of the auto-read preference (on-demand always works, like ChatGPT's
+// per-message "Read aloud").
+function _opSpeak(text, force) {
+  if (!text) return;
+  if (!force && !_opVoiceEnabled()) return;
   try {
     // Strip markdown-ish noise so the OS voice doesn't read asterisks.
     const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -4608,6 +4622,9 @@ function _opSpeak(text) {
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
     utter.rate = 1.05;
+    utter.onend = () => _opSetSpeakPressed(false);
+    utter.onerror = () => _opSetSpeakPressed(false);
+    _opSetSpeakPressed(true);
     window.speechSynthesis.speak(utter);
   } catch (_) { /* speechSynthesis unavailable — silently skip */ }
 }
@@ -5346,13 +5363,28 @@ if (OPERATOR.proposalsDismissAll) {
   });
 }
 
-// v1.7: mic + voice toggle + needs-input answer button
+// v1.7.1: mic (inset in composer), per-reply Read-aloud, settings auto-read
 const _micBtn = document.getElementById('operator-mic-btn');
 if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
-const _voiceBtn = document.getElementById('operator-voice-btn');
-if (_voiceBtn) {
-  _voiceBtn.setAttribute('aria-pressed', _opVoiceEnabled() ? 'true' : 'false');
-  _voiceBtn.addEventListener('click', () => _opSetVoiceEnabled(!_opVoiceEnabled()));
+
+// Receipt speaker: play/stop THIS reply on demand (works even when the
+// auto-read preference is off — the click is the intent).
+const _receiptSpeakBtn = document.getElementById('operator-receipt-speak');
+if (_receiptSpeakBtn) {
+  _receiptSpeakBtn.addEventListener('click', () => {
+    let speaking = false;
+    try { speaking = window.speechSynthesis.speaking; } catch (_) {}
+    if (speaking) _opStopSpeaking();
+    else if (operatorState.receipt) _opSpeak(operatorState.receipt, true);
+  });
+}
+
+// Settings → "Read replies aloud automatically" (renderer-local preference;
+// not part of the backend settings payload).
+const _voiceChk = document.getElementById('settings-voice-replies');
+if (_voiceChk) {
+  _voiceChk.checked = _opVoiceEnabled();
+  _voiceChk.addEventListener('change', () => _opSetVoiceEnabled(_voiceChk.checked));
 }
 const _needsAnswerBtn = document.getElementById('operator-needs-input-answer');
 if (_needsAnswerBtn) {

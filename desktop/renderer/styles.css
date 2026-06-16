@@ -1522,10 +1522,9 @@ body {
 /* v1.7: receipt — the planner's final word, on screen */
 
 .operator-receipt {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
-  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 10px;
   padding: 12px 14px;
   background:
@@ -1542,7 +1541,6 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-accent);
-  margin-top: 2px;
 }
 
 .operator-receipt-text {
@@ -1597,22 +1595,112 @@ body {
 
 .operator-needs-input .btn { align-self: flex-start; }
 
-/* v1.7: mic + voice buttons */
+/* v1.7.1: composer with inset mic (industry-standard placement) */
 
-.operator-mic-btn.is-recording {
-  background: var(--color-error-bg);
-  border-color: var(--color-error-border);
-  color: var(--color-error-text);
+.operator-command-wrap {
+  position: relative;
+}
+
+.operator-command-wrap #operator-command {
+  /* keep typed text clear of the inset mic */
+  padding-right: 56px;
+}
+
+.operator-mic {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease,
+              border-color 120ms ease, transform 120ms ease;
+}
+
+.operator-mic:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent);
+}
+
+.operator-mic:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.operator-mic:active { transform: scale(0.94); }
+
+/* idle ↔ recording icon swap */
+.operator-mic .mic-stop { display: none; }
+.operator-mic.is-recording .mic-idle { display: none; }
+.operator-mic.is-recording .mic-stop { display: block; }
+
+.operator-mic.is-recording {
+  background: var(--color-error-text);
+  border-color: var(--color-error-text);
+  color: #fff;
   animation: operator-pulse 1.2s ease-in-out infinite;
 }
 
-.operator-mic-btn.is-transcribing {
-  opacity: 0.7;
+.operator-mic.is-transcribing {
+  opacity: 0.6;
   pointer-events: none;
+  animation: operator-pulse 0.9s ease-in-out infinite;
 }
 
-.operator-voice-btn[aria-pressed="false"] {
-  opacity: 0.45;
+[data-theme="dark"] .operator-mic {
+  background: var(--color-bg-soft);
+}
+
+/* v1.7.1: per-reply Read-aloud on the receipt card */
+
+.operator-receipt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.operator-receipt-speak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--color-muted-soft);
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.operator-receipt-speak:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent);
+}
+
+.operator-receipt-speak:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.operator-receipt-speak[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  animation: operator-pulse 1.4s ease-in-out infinite;
 }
 
 /* Artifacts panel */
