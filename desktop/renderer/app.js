@@ -5341,7 +5341,10 @@ if (OPERATOR.form) {
 }
 if (OPERATOR.command) {
   OPERATOR.command.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); _opSubmit(); }
+    // Enter submits (same as clicking Run); Shift+Enter inserts a newline.
+    // Ctrl/Cmd+Enter still submits too — plain Enter without Shift covers it.
+    // !e.isComposing avoids submitting mid-IME-composition.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); _opSubmit(); }
   });
 }
 if (OPERATOR.cancelBtn) {

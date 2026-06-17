@@ -305,9 +305,11 @@ els.runBtn.addEventListener("click", runWorkflow);
 els.clearBtn.addEventListener("click", clearAll);
 els.exampleBtn.addEventListener("click", fillExample);
 
-// Ctrl/Cmd+Enter in the textarea runs the workflow.
+// Enter runs the workflow (same as clicking Run); Shift+Enter inserts a
+// newline. Ctrl/Cmd+Enter still runs too — plain Enter without Shift covers
+// it. !e.isComposing avoids submitting mid-IME-composition.
 els.taskInput.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     runWorkflow();
   }

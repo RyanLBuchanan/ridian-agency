@@ -19,6 +19,13 @@ apps/api/state/
 apps/api/google_credentials.json
 apps/api/google_token.json
 
+# NotebookLM Enterprise OAuth spike (never commit either file)
+apps/api/notebooklm_credentials.json
+apps/api/notebooklm_token.json
+spike_overview.mp3
+# Throwaway investigation scripts (e.g. the deleted NotebookLM audio spike)
+spike_*.py
+
 # Outputs (generated artifacts)
 outputs/*/
 !outputs/.gitkeep

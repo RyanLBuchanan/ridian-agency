@@ -83,6 +83,18 @@ def _script_subagent() -> Agent:
     )
 
 
+def _packet_subagent() -> Agent:
+    """The NotebookLM research-packet writer. Owns WebSearchTool and emits the
+    paste-clean packet body (focus line + `## Source` sections). Planner doesn't
+    see WebSearchTool directly."""
+    return Agent(
+        name="Ridian Research Packet Builder",
+        instructions=load_prompt("operator_research_packet_prompt.txt"),
+        model=default_model(),
+        tools=[WebSearchTool(search_context_size="high")],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -171,6 +183,97 @@ async def write_sources_packet(
     operator.sources_packet_text = content
     await operator.emit_artifact(name="sources_packet.md", path=str(path), kind="markdown")
     return {"path": str(path), "bytes": size}
+
+
+@function_tool
+async def build_research_packet(
+    ctx: RunContextWrapper[OperatorContext],
+    topic: str,
+    time_window: str = "last 30 days",
+) -> dict:
+    """Build a paste-ready NotebookLM research packet and write it to disk.
+
+    This is the deliverable for "build a research packet" / "give me sources I
+    can drop into NotebookLM" commands. It runs live web research through an
+    internal sub-agent and writes ONE clean Markdown file,
+    ``research_packet.md``, formatted to paste into NotebookLM as a single
+    source: a title + date, an "Audio Overview focus" framing line, then each
+    source as ``## Source Title`` + plain URL + a tight 3-5 sentence summary in
+    Ridian's own words (no long quotes — paste-clean).
+
+    Ryan pastes the file into a NotebookLM notebook and generates the Audio
+    Overview himself. There is NO NotebookLM API call and NO browser
+    automation here — the file is the deliverable. (To open the NotebookLM
+    site afterward, the planner uses the separate ``open_browser`` tool, and
+    only when the command explicitly asks for it.)
+
+    Args:
+        topic: The subject to research (e.g. "newest in agentic AI frameworks").
+        time_window: How recent to skew (default "last 30 days"; pass e.g.
+            "this week" / "last 7 days" when the command says so).
+
+    Returns:
+        {"path": str, "bytes": int, "sources_count": int} on success,
+        {"path": "", "bytes": 0, "sources_count": 0, "error": str} on failure.
+    """
+    operator = ctx.context
+    operator.note_tool("build_research_packet")
+    if not topic or not topic.strip():
+        await operator.emit_error("build_research_packet called without a topic; skipping.")
+        return {"path": "", "bytes": 0, "sources_count": 0, "error": "no topic"}
+
+    await operator.emit_step(
+        name="research_packet", status="running",
+        detail=f"Researching for a NotebookLM packet — topic: {topic} ({time_window}).",
+    )
+
+    agent = _packet_subagent()
+    agent.model = default_model()
+    prompt = (
+        f"Topic: {topic}\n"
+        f"Time window: {time_window}\n\n"
+        "Produce the research packet body now (focus line + sources)."
+    )
+    try:
+        with trace("ridian.operator.tool.build_research_packet"):
+            result = await Runner.run(agent, input=prompt)
+        body = (result.final_output or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        await operator.emit_step(name="research_packet", status="failed",
+                                 detail=f"Research failed: {type(exc).__name__}: {exc}")
+        await operator.emit_error(f"build_research_packet failed: {exc}")
+        return {"path": "", "bytes": 0, "sources_count": 0, "error": str(exc)}
+
+    if not body:
+        await operator.emit_step(name="research_packet", status="failed",
+                                 detail="Research returned no sources; nothing to write.")
+        await operator.emit_error("build_research_packet produced an empty packet; not writing.")
+        return {"path": "", "bytes": 0, "sources_count": 0, "error": "empty packet"}
+
+    # Count "## " headings — one per source per the packet prompt spec.
+    import re
+    from datetime import datetime
+    count = len(re.findall(r"^##\s+\S", body, flags=re.MULTILINE))
+
+    # Stamp the title + date deterministically (never trust the LLM for "today").
+    title = topic.strip().rstrip(".")
+    if len(title) > 80:
+        title = title[:77].rstrip() + "…"
+    dateline = datetime.now().strftime("%B %d, %Y")
+    packet = f"# Research Packet — {title}\n\n**Prepared by Ridian · {dateline}**\n\n{body}\n"
+
+    path = operator.folder / "research_packet.md"
+    write_artifact(operator.folder, "research_packet.md", packet)
+    size = path.stat().st_size
+    operator.sources_packet_text = packet
+    operator.record["sources_count"] = count
+    await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
+    await operator.emit_step(
+        name="research_packet", status="completed",
+        detail=f"Packet ready — {count} sources. Paste research_packet.md into "
+               f"NotebookLM as one source, then generate the Audio Overview.",
+    )
+    return {"path": str(path), "bytes": size, "sources_count": count}
 
 
 @function_tool
@@ -918,6 +1021,7 @@ async def open_browser(
 PLANNER_TOOLS = [
     web_research,
     write_sources_packet,
+    build_research_packet,
     write_file,
     propose_memory_update,
     save_memory,
