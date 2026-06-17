@@ -34,6 +34,7 @@ import re as _re
 
 from ..agents import default_model, load_prompt
 from . import (
+    browser_service,
     gmail_service,
     google_drive_service,
     google_workspace_service,
@@ -860,6 +861,60 @@ async def save_memory(
     return {"id": entry.get("id", ""), "kind": kind, "status": "saved"}
 
 
+@function_tool
+async def open_browser(
+    ctx: RunContextWrapper[OperatorContext],
+    target: str,
+    browser: str = "chrome",
+) -> dict:
+    """Open a website in the operator's browser — a real action on their machine.
+
+    Use when the command says open / pull up / take me to / launch a site,
+    or when it's the natural finish to a task ("research X and open
+    NotebookLM so I can drop the sources in"; "open the deck you just made").
+
+    Args:
+        target: A known site by name — "NotebookLM", "Drive", "Gmail",
+            "Calendar", "Sheets", "Slides", "ChatGPT", "Claude",
+            "Perplexity", "Gemini", "GitHub", "LinkedIn" — OR a full
+            http(s) URL (e.g. a Google Sheet/Slides/Drive URL from an
+            earlier step in this run). Only http/https opens.
+        browser: "chrome" (default) to prefer Google Chrome; anything
+            else opens the operator's default browser.
+
+    Returns:
+        {"url": str, "browser_used": str, "opened": bool} or {"error": str}.
+    """
+    operator = ctx.context
+    operator.note_tool("open_browser")
+    await operator.emit_step(
+        name="browser", status="running",
+        detail=f"Opening {target} in {browser}…",
+    )
+    try:
+        result = await asyncio.to_thread(browser_service.open_url, target, browser)
+    except browser_service.BrowserError as exc:
+        await operator.emit_step(name="browser", status="failed", detail=exc.detail)
+        await operator.emit_error(f"open_browser failed: {exc.detail}")
+        return {"error": exc.detail}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"open_browser failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="browser", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    # Surface as an external artifact so there's a clickable fallback even if
+    # the OS launch somehow didn't focus a window.
+    await operator.emit_artifact(
+        name=result["url"], path=result["url"], kind="browser",
+    )
+    await operator.emit_step(
+        name="browser", status="completed",
+        detail=f"Opened {result['url']} in {result['browser_used']} browser.",
+    )
+    return result
+
+
 PLANNER_TOOLS = [
     web_research,
     write_sources_packet,
@@ -871,6 +926,7 @@ PLANNER_TOOLS = [
     auto_upload_drive,
     create_spreadsheet,
     create_slide_deck,
+    open_browser,
 ]
 
 

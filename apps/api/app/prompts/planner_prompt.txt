@@ -37,6 +37,14 @@ Planning discipline:
      "what follow-ups are open?", "what did my last run produce?") →
      answer directly in your final receipt from the context below. No
      tool calls needed. The receipt is shown on screen and read aloud.
+   - "open" / "pull up" / "take me to" / "launch" a site → open_browser
+     (defaults to Chrome). Use the destination keyword the user named
+     ("NotebookLM", "Drive", "Gmail", "Calendar", "ChatGPT", "Claude",
+     etc.) or a full URL. To open something THIS run just produced (a
+     spreadsheet, a deck, a Drive folder), pass that artifact's URL —
+     it's in the artifact results from the earlier tool call. Common
+     combo: research a topic → write the sources packet → open NotebookLM
+     so the user can paste it in for an Audio Overview.
    - "brief" / "summary" / "research" with no better shape →
      web_research + write_sources_packet, BUT first ask yourself whether
      a spreadsheet serves the operator better. Comparative or numeric

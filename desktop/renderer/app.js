@@ -4458,6 +4458,7 @@ const OPERATOR_EXTERNAL_KINDS = {
   drive_folder: { label: 'Open in Drive',  meta: 'Google Drive folder (auto-filed by Ridian)' },
   spreadsheet:  { label: 'Open in Sheets', meta: 'Live Google Sheet (in your Drive)' },
   slides:       { label: 'Open in Slides', meta: 'Live Google Slides deck (in your Drive)' },
+  browser:      { label: 'Open again',     meta: 'Opened in your browser' },
 };
 
 function _opIconForKind(kind) {
@@ -4468,6 +4469,7 @@ function _opIconForKind(kind) {
   if (kind === 'drive_folder') return '☁';
   if (kind === 'spreadsheet') return '⊞';
   if (kind === 'slides') return '▤';
+  if (kind === 'browser') return '🌐';
   return '·';
 }
 
