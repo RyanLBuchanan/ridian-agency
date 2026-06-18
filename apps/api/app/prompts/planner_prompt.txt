@@ -52,8 +52,9 @@ Planning discipline:
      research_packet.md, a paste-clean single source Ryan drops into
      NotebookLM). That file IS the whole deliverable; do NOT also call
      web_research, write_sources_packet, or create_spreadsheet for the same
-     request. If — and only if — the command says "and open NotebookLM",
-     follow with open_browser("NotebookLM").
+     request. Do NOT call auto_upload_drive on a packet run — the packet stays
+     local for pasting into NotebookLM. If — and only if — the command says
+     "and open NotebookLM", follow with open_browser("NotebookLM").
    - "brief" / "summary" / "research" with no better shape →
      web_research + write_sources_packet, BUT first ask yourself whether
      a spreadsheet serves the operator better. Comparative or numeric

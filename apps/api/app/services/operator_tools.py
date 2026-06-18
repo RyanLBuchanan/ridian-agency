@@ -267,6 +267,11 @@ async def build_research_packet(
     size = path.stat().st_size
     operator.sources_packet_text = packet
     operator.record["sources_count"] = count
+    # This packet is a LOCAL file for pasting into NotebookLM — uploading it to
+    # Drive adds no value and a Drive failure would be pure noise. Flag the run
+    # so auto_upload_drive skips cleanly. Only this tool sets the flag, so
+    # email/sheet/deck runs still auto-file to Drive normally.
+    operator.record["skip_drive_upload"] = True
     await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
     await operator.emit_step(
         name="research_packet", status="completed",
@@ -663,6 +668,15 @@ async def auto_upload_drive(
     """
     operator = ctx.context
     operator.note_tool("auto_upload_drive")
+
+    # Some runs produce LOCAL-only deliverables (e.g. build_research_packet's
+    # NotebookLM packet) that set this flag. Skip Drive cleanly — a skip, not a
+    # failure — so the timeline doesn't show "auto_upload_drive failed" noise.
+    if operator.record.get("skip_drive_upload"):
+        msg = "Skipped Drive upload — this run's deliverable is a local file (NotebookLM packet)."
+        await operator.emit_step(name="drive_upload", status="skipped", detail=msg)
+        return {"skipped": True, "reason": "local_only_deliverable"}
+
     await operator.emit_step(
         name="drive_upload", status="running",
         detail="Uploading the run to Google Drive (operator's own Drive, drive.file scope).",

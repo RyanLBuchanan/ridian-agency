@@ -62,6 +62,8 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "script.md",
         "audiobook.mp3",
         "operation_log.json",
+        # NotebookLM research packet (build_research_packet)
+        "research_packet.md",
     }
 )
 
