@@ -61,8 +61,18 @@ def _require_creds():
 
 
 def _api_not_enabled(exc: HttpError) -> bool:
+    """True when a 403 means the API itself isn't enabled for the project.
+
+    Google returns two different bodies for a disabled API: the legacy
+    ``reason: accessNotConfigured`` and the current ``status: SERVICE_DISABLED``
+    (newer Cloud error format). Match either so the caller surfaces the
+    one-click enable link instead of a bare "HTTP 403".
+    """
     try:
-        return exc.resp.status == 403 and b"accessNotConfigured" in (exc.content or b"")
+        if getattr(exc.resp, "status", None) != 403:
+            return False
+        body = exc.content or b""
+        return b"accessNotConfigured" in body or b"SERVICE_DISABLED" in body
     except Exception:  # noqa: BLE001
         return False
 

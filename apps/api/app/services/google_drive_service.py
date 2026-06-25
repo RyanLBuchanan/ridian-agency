@@ -39,13 +39,23 @@ log = logging.getLogger("ridian.google")
 #                     in the user's Drafts folder until they decide to send,
 #                     matching the memo's approval philosophy: drafts are
 #                     not external action, sends are.
+#   spreadsheets    — create + edit Google Sheets via the Sheets API
+#                     (create_spreadsheet). drive.file already covers files the
+#                     app creates, but requesting the Sheets scope explicitly is
+#                     the conventional, robust grant and avoids relying on
+#                     drive.file's implicit coverage by the Sheets API.
+#   presentations   — same rationale, for Google Slides via the Slides API
+#                     (create_slide_deck).
 #
-# Adding gmail.compose requires every previously-connected user to reconnect
-# Google Drive once so the new scope is consented. The renderer surfaces
-# this as "insufficient scope — Reconnect Google" rather than failing silently.
+# Adding a scope requires every previously-connected user to reconnect Google
+# once so the new scope is consented (delete google_token.json + re-consent).
+# The renderer surfaces this as "insufficient scope — Reconnect Google" rather
+# than failing silently.
 SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/presentations",
 ]
 
 # apps/api/app/services/google_drive_service.py -> apps/api/<file>

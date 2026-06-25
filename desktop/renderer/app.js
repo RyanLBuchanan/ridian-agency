@@ -2576,6 +2576,58 @@ function _resetAllAudioStatuses() {
   });
 }
 
+/* ----- Web Speech voice selection (Option A) ----------------------------
+ * speechSynthesis delegates to the OS voices. The legacy Windows SAPI
+ * voices ("Microsoft David/Zira Desktop") sound robotic; newer
+ * "Natural"/"Neural"/"Online" voices sound far better. We cache the voice
+ * list (getVoices() populates asynchronously, hence the 'voiceschanged'
+ * refresh) and explicitly pick the best-installed English voice instead of
+ * letting the system default play. Returns null when nothing is installed,
+ * in which case we leave utter.voice unset (OS default).
+ * --------------------------------------------------------------------- */
+let _voiceCache = [];
+function _refreshVoiceCache() {
+  try { _voiceCache = window.speechSynthesis.getVoices() || []; }
+  catch (_) { _voiceCache = []; }
+}
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  _refreshVoiceCache();
+  try { window.speechSynthesis.addEventListener('voiceschanged', _refreshVoiceCache); }
+  catch (_) {}
+}
+function _pickBestVoice() {
+  if (!_voiceCache.length) _refreshVoiceCache();
+  if (!_voiceCache.length) return null;
+  const enVoices = _voiceCache.filter((v) => /^en[-_]?/i.test(v.lang || ''));
+  const pool = enVoices.length ? enVoices : _voiceCache;
+  const scoreOf = (v) => {
+    const name = (v.name || '').toLowerCase();
+    const lang = (v.lang || '').toLowerCase();
+    let s = 0;
+    if (name.includes('natural')) s += 100;
+    if (name.includes('neural')) s += 90;
+    if (name.includes('online')) s += 60;       // Edge/Azure-backed, very natural
+    if (/\b(aria|jenny|guy|andrew|ava|emma|brian|michelle)\b/.test(name)) s += 40;
+    if (name.includes('zira') || name.includes('mark')) s += 10; // legacy SAPI
+    if (name.includes('david')) s += 5;
+    if (lang === 'en-us') s += 8;
+    if (v.localService === false) s += 3;        // network neural voices
+    if (v.default) s += 2;
+    return s;
+  };
+  let best = null, bestScore = -1;
+  for (const v of pool) {
+    const s = scoreOf(v);
+    if (s > bestScore) { best = v; bestScore = s; }
+  }
+  return best;
+}
+function _applyBestVoice(utter) {
+  const v = _pickBestVoice();
+  if (v) { utter.voice = v; utter.lang = v.lang || 'en-US'; }
+  return utter;
+}
+
 function audioListen(panelId) {
   if (typeof window.speechSynthesis === 'undefined') {
     _setAudioStatus(panelId, 'Audio not supported.', 'empty');
@@ -2585,6 +2637,7 @@ function audioListen(panelId) {
   const text = _getReadablePanelText(panelId);
   if (!text) { _setAudioStatus(panelId, 'Nothing to read yet.', 'empty'); return; }
   const utt = new SpeechSynthesisUtterance(text);
+  _applyBestVoice(utt);
   utt.rate = 1.0; utt.pitch = 1.0;
   utt.onend = () => {
     if (audioState.panelId !== panelId) return;
@@ -4623,6 +4676,7 @@ function _opSpeak(text, force) {
     if (!clean) return;
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
+    _applyBestVoice(utter);
     utter.rate = 1.05;
     utter.onend = () => _opSetSpeakPressed(false);
     utter.onerror = () => _opSetSpeakPressed(false);
