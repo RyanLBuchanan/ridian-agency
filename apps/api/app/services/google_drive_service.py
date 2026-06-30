@@ -670,6 +670,41 @@ def _lookup_root_folder_name(service, folder_id: str) -> Optional[str]:
     return meta.get("name")
 
 
+def _http_error_reason(exc: HttpError) -> tuple[str, str]:
+    """Pull Google's machine-readable error reason + raw body from an HttpError.
+
+    Drive 403s carry a specific reason in the JSON body — the legacy shape is
+    ``error.errors[].reason`` (storageQuotaExceeded, insufficientPermissions,
+    appNotAuthorizedToFile, fieldNotWritable, ...); the newer shape is
+    ``error.status`` / ``error.details[].reason``. Returns
+    ``(reason, raw_json_text)`` so callers can surface the reason AND log the
+    body verbatim. Never raises.
+    """
+    import json
+    raw = ""
+    try:
+        raw = (exc.content or b"").decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        raw = repr(getattr(exc, "content", b""))
+    reason = ""
+    try:
+        err = (json.loads(raw) or {}).get("error", {}) if raw else {}
+        for e in (err.get("errors") or []):
+            if isinstance(e, dict) and e.get("reason"):
+                reason = e["reason"]
+                break
+        if not reason:
+            for d in (err.get("details") or []):
+                if isinstance(d, dict) and d.get("reason"):
+                    reason = d["reason"]
+                    break
+        if not reason:
+            reason = err.get("status", "") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return (reason or "unknown", raw)
+
+
 def upload_artifact_folder(folder_str: str) -> dict:
     """Create a Drive folder + upload allowlisted files. Never auto-fires.
 
@@ -787,8 +822,12 @@ def upload_artifact_folder(folder_str: str) -> dict:
             uploaded.append(path.name)
         except HttpError as exc:
             status = getattr(getattr(exc, "resp", None), "status", "?")
-            log.warning("google.file_upload_failed name=%s status=%s", path.name, status)
-            upload_errors.append(f"{path.name} (HTTP {status})")
+            reason, raw_body = _http_error_reason(exc)
+            log.warning(
+                "google.file_upload_failed name=%s status=%s reason=%s body=%s",
+                path.name, status, reason, raw_body,
+            )
+            upload_errors.append(f"{path.name} (HTTP {status}: {reason})")
         except OSError as exc:
             log.warning("google.file_read_failed name=%s type=%s", path.name, type(exc).__name__)
             upload_errors.append(f"{path.name} (read failed)")
