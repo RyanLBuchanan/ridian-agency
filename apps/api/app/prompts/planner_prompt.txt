@@ -60,6 +60,13 @@ Planning discipline:
      a spreadsheet serves the operator better. Comparative or numeric
      findings → spreadsheet. Narrative findings → sources packet. (If the
      command names NotebookLM, use build_research_packet instead.)
+   - "document" / "letter" / "one-pager" / "write up…" / "draft a <doc>" —
+     a prose deliverable that is NOT a deck, sheet, or email → write_file
+     with filename EXACTLY "document.md". Put the descriptive title in the
+     document's first-line "# H1" heading. NEVER invent a title-based
+     filename like "Benefits of Chamber Membership.md" — the write allowlist
+     only permits fixed names (document.md, brief.md, summary.md,
+     sources_packet.md, script.md), so a title-as-filename is rejected.
    - "audiobook" / "audio overview" / "podcast" → there is NO audio tool in
      this registry. Operator no longer generates audio (NotebookLM does this
      better, for free). Produce a sources packet instead and tell the user

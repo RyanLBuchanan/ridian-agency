@@ -64,6 +64,8 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "operation_log.json",
         # NotebookLM research packet (build_research_packet)
         "research_packet.md",
+        # General prose deliverable written via write_file (title is the H1).
+        "document.md",
     }
 )
 

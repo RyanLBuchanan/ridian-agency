@@ -57,6 +57,10 @@ _WRITE_FILE_ALLOWLIST: frozenset[str] = frozenset({
     # Per-command-shape extras the planner may legitimately produce.
     "brief.md",
     "summary.md",
+    # General prose deliverable (letters, one-pagers, benefits docs, drafts).
+    # The descriptive TITLE goes in the doc's H1 — the filename stays stable so
+    # the allowlist can stay a fixed, auditable set rather than open-ended.
+    "document.md",
 })
 
 
@@ -408,9 +412,12 @@ async def write_file(
     """Write an allowlisted file into the run folder.
 
     Use this when the planner wants to save an artifact that doesn't have a
-    dedicated tool (e.g., ``brief.md`` for a research-only command).
-    ``filename`` must be in the allowlist; the planner cannot write arbitrary
-    paths or escape the run folder.
+    dedicated tool (e.g., ``brief.md`` for a research-only command, or
+    ``document.md`` for a general prose deliverable like a letter, one-pager,
+    or benefits doc). ``filename`` MUST be one of the allowlisted names — the
+    planner cannot write arbitrary paths or escape the run folder. Do NOT put
+    the document's title in the filename; use the stable allowlisted name and
+    put the title in the document's first-line ``# H1`` heading instead.
 
     Returns:
         {"path": str, "bytes": int}
