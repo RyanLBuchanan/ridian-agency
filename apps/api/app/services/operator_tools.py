@@ -702,6 +702,14 @@ async def auto_upload_drive(
         await operator.emit_error(msg)
         return {"error": str(exc), "reason": "unexpected"}
 
+    if result.get("status") == "skipped":
+        # No local allowlisted file to file (e.g. an email-draft-only or
+        # Google-Sheet-only run whose deliverables already live in Gmail/Drive).
+        # Clean grey skip — no empty Drive folder was created, no red error.
+        msg = "Skipped Drive upload — this run produced no local file to file in Drive."
+        await operator.emit_step(name="drive_upload", status="skipped", detail=msg)
+        return {"skipped": True, "reason": result.get("reason", "no_files")}
+
     drive_path = result.get("drive_path") or result.get("drive_folder_name") or "Drive"
     drive_url = result.get("drive_folder_url") or ""
     uploaded = result.get("uploaded_files") or []

@@ -717,6 +717,33 @@ def upload_artifact_folder(folder_str: str) -> dict:
     files and the ``Channel:`` line in ``task.txt``.
     """
     folder = _resolve_artifact_folder(folder_str)
+
+    # Build the upload candidate list FIRST — allowlisted files in the run
+    # folder plus the sibling ZIP at outputs/<basename>.zip if it exists. If a
+    # run produced no local allowlisted file (e.g. an email-draft-only or
+    # Google-Sheet-only run, whose deliverables already live in Gmail/Drive),
+    # there is nothing to file. Skip cleanly WITHOUT touching Drive — no empty
+    # per-run folder, no error. (operation_log.json is written at finalize,
+    # AFTER this runs, so its absence here is expected, not a failure.)
+    candidates: list[Path] = []
+    for name in UPLOAD_ALLOWED_FILENAMES:
+        p = folder / name
+        if p.is_file():
+            candidates.append(p)
+
+    sibling_zip = folder.parent / f"{folder.name}.zip"
+    if sibling_zip.is_file():
+        # Defense in depth: verify the sibling zip is also inside outputs/
+        try:
+            sibling_zip.resolve().relative_to(outputs_dir().resolve())
+            candidates.append(sibling_zip)
+        except ValueError:
+            log.warning("google.sibling_zip_outside_outputs path=%s", sibling_zip)
+
+    if not candidates:
+        log.info("google.upload_skipped reason=no_files folder=%s", folder.name)
+        return {"status": "skipped", "reason": "no_files", "uploaded_files": []}
+
     creds = _load_credentials()
     if not creds or not creds.valid:
         raise GoogleDriveError(
@@ -791,23 +818,6 @@ def upload_artifact_folder(folder_str: str) -> dict:
     folder_id = drive_folder["id"]
     folder_url = drive_folder.get("webViewLink", "")
     folder_name = drive_folder["name"]
-
-    # Build the upload candidate list: allowlisted files in the run folder
-    # plus the sibling ZIP at outputs/<basename>.zip if it exists.
-    candidates: list[Path] = []
-    for name in UPLOAD_ALLOWED_FILENAMES:
-        p = folder / name
-        if p.is_file():
-            candidates.append(p)
-
-    sibling_zip = folder.parent / f"{folder.name}.zip"
-    if sibling_zip.is_file():
-        # Defense in depth: verify the sibling zip is also inside outputs/
-        try:
-            sibling_zip.resolve().relative_to(outputs_dir().resolve())
-            candidates.append(sibling_zip)
-        except ValueError:
-            log.warning("google.sibling_zip_outside_outputs path=%s", sibling_zip)
 
     uploaded: list[str] = []
     upload_errors: list[str] = []
