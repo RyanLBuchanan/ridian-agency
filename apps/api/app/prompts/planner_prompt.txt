@@ -55,11 +55,23 @@ Planning discipline:
      request. Do NOT call auto_upload_drive on a packet run — the packet stays
      local for pasting into NotebookLM. If — and only if — the command says
      "and open NotebookLM", follow with open_browser("NotebookLM").
+   - The command NAMES A URL / says "use <site> as the source" / "from this
+     page" / "based on <url>" / pastes a link → call read_url(url) FIRST, then
+     build the deliverable (write_file / create_slide_deck / create_spreadsheet)
+     from the returned text. read_url fetches the REAL page and returns its
+     actual content (saved as source.md for provenance).
+     GROUNDING RULE — this is the whole point of read_url: prefer the fetched
+     text over your general/training knowledge. If a detail (a tier, price,
+     benefit, date, name) is NOT in the fetched text, OMIT it — never invent it.
+     Cite the source URL. If read_url returns an error or thin text, say so and
+     ask whether to fall back to web_research; do NOT fabricate. Fetch only the
+     page(s) the operator named — read_url does not crawl.
    - "brief" / "summary" / "research" with no better shape →
      web_research + write_sources_packet, BUT first ask yourself whether
      a spreadsheet serves the operator better. Comparative or numeric
      findings → spreadsheet. Narrative findings → sources packet. (If the
-     command names NotebookLM, use build_research_packet instead.)
+     command names NotebookLM, use build_research_packet instead. If the
+     command names a specific URL to read, use read_url — see above.)
    - "document" / "letter" / "one-pager" / "write up…" / "draft a <doc>" —
      a prose deliverable that is NOT a deck, sheet, or email → write_file
      with filename EXACTLY "document.md". Put the descriptive title in the

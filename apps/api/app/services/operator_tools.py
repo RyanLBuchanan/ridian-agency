@@ -40,6 +40,7 @@ from . import (
     google_workspace_service,
     memory_service,
     tts_service,
+    url_fetch_service,
 )
 from .artifact_service import write_artifact
 from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
@@ -283,6 +284,87 @@ async def build_research_packet(
                f"NotebookLM as one source, then generate the Audio Overview.",
     )
     return {"path": str(path), "bytes": size, "sources_count": count}
+
+
+@function_tool
+async def read_url(
+    ctx: RunContextWrapper[OperatorContext],
+    url: str,
+) -> dict:
+    """Fetch a SPECIFIC web page the operator named and return its real text.
+
+    Use this to GROUND a deliverable in an actual page (e.g. a chamber's
+    membership / benefits pages) instead of general-knowledge guesses. It
+    fetches the page server-side behind an SSRF guard (http/https only, no
+    internal/loopback addresses, size + timeout caps), extracts the main
+    readable text, and saves it to ``source.md`` in the run folder for
+    provenance.
+
+    Call this FIRST when the command names a URL or says "use <site> as the
+    source" / "from this page" / "based on <url>", THEN build the doc / deck /
+    sheet from the returned ``text``. Ground STRICTLY in that text: if a detail
+    (a tier, price, benefit, date, name) isn't in it, omit it — never invent.
+    Fetches only the page you pass (no crawling).
+
+    Args:
+        url: A full http(s) URL to a specific public web page.
+
+    Returns:
+        {"url", "title", "text", "chars", "truncated", "source_file"} on
+        success, {"error": str} on a blocked/failed fetch (do NOT fabricate
+        content — report the failure instead).
+    """
+    operator = ctx.context
+    operator.note_tool("read_url")
+    if not url or not url.strip():
+        await operator.emit_error("read_url called without a URL; skipping.")
+        return {"error": "no url"}
+
+    await operator.emit_step(name="read_url", status="running",
+                             detail=f"Fetching {url.strip()} …")
+    try:
+        result = await asyncio.to_thread(url_fetch_service.fetch_and_extract, url)
+    except url_fetch_service.ReadUrlError as exc:
+        await operator.emit_step(name="read_url", status="failed", detail=exc.detail)
+        await operator.emit_error(f"read_url failed: {exc.detail}")
+        return {"error": exc.detail}
+    except Exception as exc:  # noqa: BLE001
+        msg = f"read_url failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="read_url", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": str(exc)}
+
+    text = (result.get("text") or "").strip()
+    if not text:
+        detail = "Fetched the page but couldn't extract readable text from it."
+        await operator.emit_step(name="read_url", status="failed", detail=detail)
+        return {"error": detail, "url": result.get("url", "")}
+
+    # Provenance: accumulate every fetched source into source.md so the operator
+    # can see exactly what Ridian grounded on. Append on repeat reads; emit the
+    # artifact row only the first time.
+    src_path = operator.folder / "source.md"
+    first = not src_path.exists()
+    block = (f"## {result.get('title') or result.get('url')}\n\n"
+             f"{result.get('url')}\n\n{text}\n\n---\n\n")
+    prior = src_path.read_text(encoding="utf-8") if src_path.exists() else "# Fetched sources\n\n"
+    write_artifact(operator.folder, "source.md", prior + block)
+    if first:
+        await operator.emit_artifact(name="source.md", path=str(src_path), kind="markdown")
+
+    await operator.emit_step(
+        name="read_url", status="completed",
+        detail=f"Read {result.get('url')} — {result.get('chars')} chars"
+               + (" (truncated)" if result.get("truncated") else "") + ".",
+    )
+    return {
+        "url": result.get("url"),
+        "title": result.get("title"),
+        "text": text,
+        "chars": result.get("chars"),
+        "truncated": result.get("truncated"),
+        "source_file": "source.md",
+    }
 
 
 @function_tool
@@ -1049,6 +1131,7 @@ async def open_browser(
 
 PLANNER_TOOLS = [
     web_research,
+    read_url,
     write_sources_packet,
     build_research_packet,
     write_file,

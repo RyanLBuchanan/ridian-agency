@@ -66,6 +66,8 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "research_packet.md",
         # General prose deliverable written via write_file (title is the H1).
         "document.md",
+        # Fetched-source provenance written by read_url.
+        "source.md",
     }
 )
 

@@ -8,3 +8,9 @@ python-pptx>=1.0.0
 google-api-python-client>=2.150.0
 google-auth>=2.36.0
 google-auth-oauthlib>=1.2.1
+
+# read_url (URL-fetch-and-extract): httpx is already pulled in by openai-agents
+# but pinned here explicitly since url_fetch_service depends on it directly.
+httpx>=0.27.0
+trafilatura>=2.0.0      # primary main-content extractor
+beautifulsoup4>=4.12.0  # fallback extractor (uses lxml when available)

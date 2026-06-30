@@ -91,6 +91,8 @@ UPLOAD_ALLOWED_FILENAMES: tuple[str, ...] = (
     "operation_log.json",
     # General prose deliverable written via write_file (title is the H1).
     "document.md",
+    # Fetched-source provenance written by read_url.
+    "source.md",
     # Uploaded thumbnail/image input
     "input_thumbnail.png",
     "input_thumbnail.jpg",
