@@ -5082,6 +5082,23 @@ async function _opUploadDrive() {
   }
 }
 
+// Kind -> human label for the email's artifact list. Unknown kinds fall back
+// to the raw kind so we never silently mislabel a new artifact type.
+const _ARTIFACT_KIND_LABEL = {
+  markdown: 'document',
+  text: 'document',
+  json: 'data file',
+  spreadsheet: 'Google Sheet',
+  slides: 'Google Slides deck',
+  gmail_draft: 'Gmail draft',
+  audio: 'audiobook (MP3)',
+  drive_folder: 'Drive folder',
+  browser: 'opened in browser',
+};
+
+// Build the package-summary email from THIS run's real record — NEVER a fixed
+// template. Subject + body describe the actual artifacts (names + links), the
+// command, and the operation log for this run. Returns { subject, body }.
 function _opBuildEmailSummary() {
   const rec = operatorState.finalRecord || {};
   const active = operatorState.active || {};
@@ -5091,83 +5108,82 @@ function _opBuildEmailSummary() {
   const folder = active.artifact_folder || '(unknown local folder)';
   const status = rec.status || 'unknown';
   const sourcesCount = rec.sources_count || 0;
-  const audioOK = !!rec.audio_generated;
-  const durationSec = rec.audio_duration_seconds || 0;
+  const artifacts = Array.isArray(rec.artifacts) ? rec.artifacts : [];
+  const tools = Array.isArray(rec.tools_used) ? rec.tools_used : [];
+  const errors = Array.isArray(rec.errors) ? rec.errors : [];
 
-  // Pretty-print artifact names (paths shown separately under "Where the files live").
-  const artifactList = (rec.artifacts || []).map((a) => `  - ${a.name}`).join('\n')
-    || '  (no artifacts recorded)';
+  const labelFor = (a) => _ARTIFACT_KIND_LABEL[a.kind] || a.kind || 'artifact';
+  const isLink = (p) => /^https?:\/\//i.test(p || '');
 
-  // Drive line — only present after a successful upload happened in this UI session.
+  // Deliverables = what the run actually produced. The Drive folder and any
+  // opened browser tab are locations/actions, not deliverables, so they're
+  // excluded from the headline summary (still listed under "Artifacts").
+  const deliverables = artifacts.filter((a) => a.kind !== 'drive_folder' && a.kind !== 'browser');
+
+  // Count by label for the one-line summary + subject, e.g.
+  // "1 document, 1 Google Slides deck, 1 Google Sheet, 3 Gmail drafts".
+  const counts = {};
+  for (const a of deliverables) {
+    const label = labelFor(a);
+    counts[label] = (counts[label] || 0) + 1;
+  }
+  const summaryPhrase = Object.entries(counts)
+    .map(([label, n]) => (n > 1 ? `${n} ${label}s` : `1 ${label}`))
+    .join(', ');
+
+  // Subject: accurate to this run — never the old audiobook string.
+  const shortCmd = command.length > 60 ? command.slice(0, 57).trim() + '…' : command;
+  const subject = deliverables.length
+    ? `Ridian Operator — ${shortCmd} (${summaryPhrase})`
+    : `Ridian Operator — ${shortCmd} (no file artifacts produced)`;
+
+  // Drive line — only present after a successful upload happened this session.
   let driveLine;
   if (drive && drive.drive_path) {
     driveLine = `Drive:  ${drive.drive_path}` +
-      (drive.drive_folder_url ? `\n        ${drive.drive_folder_url}` : '');
+      (drive.drive_folder_url ? `\n          ${drive.drive_folder_url}` : '');
   } else if (drive && drive.drive_folder_name) {
     driveLine = `Drive:  ${drive.drive_folder_name}` +
-      (drive.drive_folder_url ? `\n        ${drive.drive_folder_url}` : '');
+      (drive.drive_folder_url ? `\n          ${drive.drive_folder_url}` : '');
   } else {
-    driveLine = 'Drive:  (not yet uploaded in this session — use "Upload to Google Drive")';
+    driveLine = 'Drive:  (not uploaded in this session — use "Upload to Google Drive")';
   }
 
-  const runtimeStr = durationSec > 0
-    ? `${Math.floor(durationSec / 60)} min ${durationSec % 60} sec spoken`
-    : 'audio runtime not recorded';
+  // Artifact list with names + links (external artifacts carry an http URL).
+  const artifactLines = artifacts.length
+    ? artifacts.map((a) => {
+        const head = `  - ${a.name || '(unnamed)'} [${labelFor(a)}]`;
+        return isLink(a.path) ? `${head}\n        ${a.path}` : head;
+      }).join('\n')
+    : '  (no artifacts were recorded for this run)';
 
-  const audioLine = audioOK
-    ? `The audiobook MP3 was generated locally with OpenAI TTS (two voices) and is playable directly in the app — ${runtimeStr}.`
-    : `The audiobook MP3 was NOT generated for this run. Operator did not fabricate audio; see operation_log.json for the failure reason.`;
-
-  return [
-    'Operator v1 just produced a real audiobook from a single natural-language command.',
+  const lines = [
+    'Here is the package from your latest Ridian Operator run.',
     '',
     'What I asked Ridian to do',
     `  "${command}"`,
     '',
-    'What Ridian did, end to end',
-    `  - Live web research across ${sourcesCount} cited sources`,
-    '  - Wrote a polished two-host conversational script (NotebookLM-style)',
-    audioOK
-      ? '  - Synthesized the full audiobook as MP3 using OpenAI TTS (two voices)'
-      : '  - Audio synthesis was skipped or failed (see operation_log.json)',
-    '  - Saved every artifact to a local per-run output folder',
-    drive && drive.drive_path
-      ? '  - Uploaded the package to Google Drive (approval-based button click)'
-      : '  - Drive upload not yet run for this operation',
-    '',
-    'Artifacts',
-    artifactList,
+    `What Ridian produced${summaryPhrase ? ` — ${summaryPhrase}` : ''}`,
+    artifactLines,
     '',
     'Where the files live',
-    `Local:  ${folder}`,
-    driveLine,
-    '',
-    'Audiobook',
-    audioLine,
-    '',
-    'Why this matters',
-    'This is the moment Ridian stopped being a prompt wrapper and started behaving like',
-    'a business operator. The old shape of the app would have produced a NotebookLM prompt',
-    'for me to paste into another tool. This run produced a finished audiobook I can press',
-    'play on — the deliverable itself, not a recipe for the deliverable.',
-    '',
-    'Suggested next checks',
-    '  1. Listen to audiobook.mp3 end to end.',
-    '  2. Skim sources_packet.md for citation quality and confidence flags.',
-    '  3. Skim script.md for tone, pacing, and factual accuracy.',
-    '  4. Confirm the Google Drive folder shows the four files.',
-    '  5. Decide whether to merge feature/operator-v1 into main.',
+    `  Local:  ${folder}`,
+    `  ${driveLine}`,
     '',
     'Run details',
-    `  Status:           ${status}`,
-    `  Sources gathered: ${sourcesCount}`,
-    `  Audio generated:  ${audioOK ? 'yes' : 'no'}`,
-    rec.started_at   ? `  Started:          ${rec.started_at}` : null,
-    rec.completed_at ? `  Completed:        ${rec.completed_at}` : null,
-    '',
-    '— Sent from Ridian Command Center, Operator v1.',
-    '',
-  ].filter((line) => line !== null).join('\n');
+    `  Status:     ${status}`,
+    sourcesCount > 0 ? `  Sources gathered: ${sourcesCount}` : null,
+    tools.length ? `  Tools used: ${tools.join(', ')}` : null,
+    rec.started_at ? `  Started:    ${rec.started_at}` : null,
+    rec.completed_at ? `  Completed:  ${rec.completed_at}` : null,
+  ];
+  if (errors.length) {
+    lines.push('', 'Issues this run', ...errors.map((e) => `  - ${e}`));
+  }
+  lines.push('', '— Sent from Ridian Command Center.', '');
+
+  const body = lines.filter((line) => line !== null).join('\n');
+  return { subject, body };
 }
 
 async function _opEmailMe() {
@@ -5175,12 +5191,21 @@ async function _opEmailMe() {
     _opSetStatus('Wait for the operation to finish first.', 'err');
     return;
   }
-  const body = _opBuildEmailSummary();
-  const subject = 'Ridian Operator v1 Test Complete — AGI Audiobook Package Created';
+  const { subject, body } = _opBuildEmailSummary();
 
-  const ok = window.confirm(
-    'Send the Operator v1 package summary email to your configured recipient?'
-  );
+  // Name the real recipient in the confirm (not "your configured recipient").
+  // Prefer the cached settings value; fall back to a fresh /settings fetch so
+  // we never show a stale or blank address.
+  let recipient = ((cachedSettings && cachedSettings.default_to_email) || '').trim();
+  if (!recipient) {
+    try {
+      const s = await fetch(`${BACKEND}/settings`).then((r) => (r.ok ? r.json() : null));
+      if (s) { cachedSettings = s; recipient = String(s.default_to_email || '').trim(); }
+    } catch (_) { /* fall through to generic wording */ }
+  }
+  const who = recipient || 'your configured recipient (set a default in Settings)';
+
+  const ok = window.confirm(`Send this run's package summary email to ${who}?`);
   if (!ok) return;
   _opSetStatus('Sending email…');
   try {
