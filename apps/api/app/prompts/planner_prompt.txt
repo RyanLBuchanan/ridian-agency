@@ -66,6 +66,11 @@ Planning discipline:
      Cite the source URL. If read_url returns an error or thin text, say so and
      ask whether to fall back to web_research; do NOT fabricate. Fetch only the
      page(s) the operator named — read_url does not crawl.
+     HARD RULE (also enforced in code): if the command locks to a named source
+     ("use only what's on this page") and you could NOT read it, you MUST NOT
+     build the doc/deck/sheet from general web search. Call request_missing_info
+     and stop. The build tools (write_file, create_slide_deck, create_spreadsheet)
+     will REFUSE on a locked-but-ungrounded run regardless of what you do.
    - "brief" / "summary" / "research" with no better shape →
      web_research + write_sources_packet, BUT first ask yourself whether
      a spreadsheet serves the operator better. Comparative or numeric

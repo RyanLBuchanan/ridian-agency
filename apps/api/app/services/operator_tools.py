@@ -101,6 +101,90 @@ def _packet_subagent() -> Agent:
 
 
 # ---------------------------------------------------------------------------
+# Source-lock grounding gate (deterministic — not model-dependent)
+# ---------------------------------------------------------------------------
+#
+# When a command names a specific URL AND asks Ridian to use ONLY that source,
+# the run is "locked" to it. If a read_url never succeeds (it failed, or the
+# model skipped it), the build tools REFUSE to produce a deck/sheet/doc from
+# other sources and raise the amber needs-input card instead. This mirrors
+# draft_gmail's no-recipient guard: the model cannot build its way around a
+# returned error, so the grounding guarantee is enforced in code, not prose.
+
+_SOURCE_URL_RE = _re.compile(r"\bhttps?://[^\s<>\"']+", _re.IGNORECASE)
+_SOURCE_DOMAIN_RE = _re.compile(
+    r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>\"']*)?", _re.IGNORECASE
+)
+_SOURCE_GROUNDING_RE = _re.compile(
+    r"\b(use only|only what'?s? on|only from|only this|based (?:only )?on|"
+    r"from (?:this|these|that) (?:page|pages|site|url)|as the source|"
+    r"grounded in|read (?:the )?(?:page|site|url))\b",
+    _re.IGNORECASE,
+)
+
+
+def detect_source_lock(command: str) -> str:
+    """Return the URL a command is locked to, or "" if it isn't source-locked.
+
+    A run is source-locked only when the command BOTH names a URL/domain AND
+    expresses grounding/exclusivity intent ("use only what's on this page",
+    "based on <url>", "use <site> as the source", ...). Requiring both keeps a
+    command that merely mentions a domain (e.g. an email address) from locking.
+    """
+    if not command:
+        return ""
+    m = _SOURCE_URL_RE.search(command) or _SOURCE_DOMAIN_RE.search(command)
+    if not m or not _SOURCE_GROUNDING_RE.search(command):
+        return ""
+    url = m.group(0)
+    return url if url.lower().startswith("http") else "https://" + url
+
+
+async def _grounding_gate(operator: OperatorContext) -> dict | None:
+    """Deterministic source-lock gate for the build tools.
+
+    Returns None when building is allowed (the run isn't locked, or a read_url
+    already succeeded and wrote source.md). Otherwise REFUSES: it surfaces the
+    amber needs-input card ONCE and returns an error dict the planner must obey —
+    it cannot build a deck/sheet/doc from other sources on a locked-but-
+    ungrounded run.
+    """
+    rec = operator.record
+    locked = rec.get("source_locked_url")
+    if not locked or rec.get("grounding_ok"):
+        return None
+    if not rec.get("grounding_needs_input_emitted"):
+        rec["grounding_needs_input_emitted"] = True
+        await operator.emit_needs_input(
+            question=(
+                f"I couldn't ground this in the source you named ({locked}) — no "
+                "readable text was obtained from it (the page may be empty, "
+                "blocked, or JavaScript-rendered). I won't build from other "
+                "sources without your say-so. How should I proceed?\n"
+                "  (a) Do general web research instead (results will NOT be from "
+                "that page).\n"
+                "  (b) Paste the page's text here and I'll build from that.\n"
+                "  (c) [coming later] Render the page with a headless browser."
+            ),
+            context_hint=f"grounding failed for {locked}",
+        )
+        await operator.emit_step(
+            name="grounding_gate", status="skipped",
+            detail=f"Refused to build — this run is not grounded in {locked}. "
+                   "Awaiting your choice.",
+        )
+    return {
+        "error": (
+            f"BLOCKED: this run is locked to {locked} as the source, but grounding "
+            "failed (read_url did not produce source.md). Do NOT build from other "
+            "sources and do NOT retry this tool — a needs-input question has been "
+            "raised for the operator. Stop after this."
+        ),
+        "reason": "grounding_required",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -325,10 +409,12 @@ async def read_url(
     try:
         result = await asyncio.to_thread(url_fetch_service.fetch_and_extract, url)
     except url_fetch_service.ReadUrlError as exc:
+        operator.record["grounding_failed"] = True
         await operator.emit_step(name="read_url", status="failed", detail=exc.detail)
         await operator.emit_error(f"read_url failed: {exc.detail}")
         return {"error": exc.detail}
     except Exception as exc:  # noqa: BLE001
+        operator.record["grounding_failed"] = True
         msg = f"read_url failed: {type(exc).__name__}: {exc}"
         await operator.emit_step(name="read_url", status="failed", detail=msg)
         await operator.emit_error(msg)
@@ -336,6 +422,7 @@ async def read_url(
 
     text = (result.get("text") or "").strip()
     if not text:
+        operator.record["grounding_failed"] = True
         detail = "Fetched the page but couldn't extract readable text from it."
         await operator.emit_step(name="read_url", status="failed", detail=detail)
         return {"error": detail, "url": result.get("url", "")}
@@ -349,6 +436,8 @@ async def read_url(
              f"{result.get('url')}\n\n{text}\n\n---\n\n")
     prior = src_path.read_text(encoding="utf-8") if src_path.exists() else "# Fetched sources\n\n"
     write_artifact(operator.folder, "source.md", prior + block)
+    # A real page was read: the source-lock grounding gate is now satisfied.
+    operator.record["grounding_ok"] = True
     if first:
         await operator.emit_artifact(name="source.md", path=str(src_path), kind="markdown")
 
@@ -506,6 +595,9 @@ async def write_file(
     """
     operator = ctx.context
     operator.note_tool("write_file")
+    gate = await _grounding_gate(operator)
+    if gate:
+        return gate
     if filename not in _WRITE_FILE_ALLOWLIST:
         await operator.emit_error(
             f"write_file rejected: {filename!r} not in allowlist "
@@ -854,6 +946,9 @@ async def create_spreadsheet(
     """
     operator = ctx.context
     operator.note_tool("create_spreadsheet")
+    gate = await _grounding_gate(operator)
+    if gate:
+        return gate
     await operator.emit_step(
         name="spreadsheet", status="running",
         detail=f"Building Google Sheet: {title} ({len(rows)} rows).",
@@ -912,6 +1007,9 @@ async def create_slide_deck(
     """
     operator = ctx.context
     operator.note_tool("create_slide_deck")
+    gate = await _grounding_gate(operator)
+    if gate:
+        return gate
     if len(slide_titles) != len(slide_bullets):
         msg = (f"create_slide_deck rejected: slide_titles ({len(slide_titles)}) and "
                f"slide_bullets ({len(slide_bullets)}) must be the same length.")

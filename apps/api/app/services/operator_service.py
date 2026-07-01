@@ -39,6 +39,7 @@ from ..agents.planner_agent import build_planner_agent
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext
+from .operator_tools import detect_source_lock
 from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
 
 log = logging.getLogger("ridian.operator")
@@ -346,6 +347,10 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
         intent="planner",  # v1.1: no keyword intent — the planner decides
         artifact_folder=str(folder),
     )
+    # v1.9: if the command locks to a named source ("use only what's on <url>"),
+    # record it. The build tools refuse to produce deliverables until a read_url
+    # of that source succeeds (see operator_tools._grounding_gate).
+    record["source_locked_url"] = detect_source_lock(command)
     await _emit_start(emit, record, command, folder)
 
     operator = OperatorContext(folder=folder, record=record, emit=emit)
