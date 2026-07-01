@@ -1448,6 +1448,49 @@ body {
   word-break: break-word;
 }
 
+/* ---- Phase 1: conversational thread + sticky bottom composer ---- */
+.operator-scroll,
+.operator-thread,
+.operator-live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* A frozen past turn — a static snapshot of a completed run, stacked above
+   the live current turn so a new run appends instead of wiping. */
+.operator-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px dashed var(--color-border);
+}
+.operator-turn .operator-active,
+.operator-turn .operator-artifacts-card,
+.operator-turn .operator-needs-input { opacity: 0.94; }
+.operator-turn button.is-frozen,
+.operator-turn .is-frozen button {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* The user's message bubble (reuses the existing command-echo element). */
+.operator-command-echo {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+/* Sticky bottom composer — always visible, always empty and ready. `order`
+   places it after the scroll region even though it's earlier in the DOM. */
+.operator-form {
+  order: 10;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
 .operator-step {
   display: grid;
   grid-template-columns: auto 1fr auto;

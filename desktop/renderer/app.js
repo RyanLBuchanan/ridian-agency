@@ -4348,6 +4348,10 @@ fetch(`${BACKEND}/settings`).then(r => r.ok ? r.json() : null).then(data => {
 const OPERATOR = {
   form:           document.getElementById('operator-form'),
   command:        document.getElementById('operator-command'),
+  // Conversational thread (Phase 1): frozen past turns + the live current turn.
+  scroll:         document.getElementById('operator-scroll'),
+  thread:         document.getElementById('operator-thread'),
+  live:           document.getElementById('operator-live'),
   runBtn:         document.getElementById('operator-run-btn'),
   cancelBtn:      document.getElementById('operator-cancel-btn'),
   elapsed:        document.getElementById('operator-elapsed'),
@@ -4431,7 +4435,12 @@ function _opStopElapsed() {
   operatorState.elapsedTimer = null;
 }
 
-function _opResetUI() {
+function _opClearLive() {
+  // Remove the current turn's command echo so the next run starts clean.
+  if (OPERATOR.active) {
+    const echo = OPERATOR.active.querySelector('.operator-command-echo');
+    if (echo) echo.remove();
+  }
   if (OPERATOR.timeline) OPERATOR.timeline.innerHTML = '';
   if (OPERATOR.artifactsList) OPERATOR.artifactsList.innerHTML = '';
   if (OPERATOR.errors) { OPERATOR.errors.innerHTML = ''; OPERATOR.errors.classList.add('hidden'); }
@@ -4459,6 +4468,53 @@ function _opResetUI() {
   operatorState.drive = null;
   operatorState.proposals = [];
   operatorState.receipt = '';
+}
+
+// Full reset: clear the whole conversation thread (past turns) AND the live
+// area. Used when loading a different run from history or starting fresh.
+function _opResetUI() {
+  if (OPERATOR.thread) OPERATOR.thread.innerHTML = '';
+  _opClearLive();
+}
+
+// Freeze the finished/aborted current turn into a static block in the thread so
+// a new run appends below it instead of wiping it. Cloned nodes lose their
+// listeners and ids, so past-turn action buttons are disabled — act on a prior
+// run by reopening it from the sidebar history (which reloads it live).
+function _opArchiveCurrentTurn() {
+  if (!OPERATOR.thread || !OPERATOR.live) return;
+  const hasRun = (operatorState.active && operatorState.active.command)
+    || operatorState.finalRecord
+    || (OPERATOR.timeline && OPERATOR.timeline.children.length);
+  if (!hasRun) return;
+  const blocks = [
+    OPERATOR.active,
+    document.getElementById('operator-needs-input'),
+    OPERATOR.artifactsCard,
+  ];
+  const turn = document.createElement('div');
+  turn.className = 'operator-turn';
+  let any = false;
+  for (const el of blocks) {
+    if (!el || el.classList.contains('hidden')) continue;
+    const clone = el.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.classList.add('is-frozen');
+    clone.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+    clone.querySelectorAll('button, input, textarea, audio').forEach((b) => {
+      try { b.disabled = true; } catch (_) {}
+      b.classList.add('is-frozen');
+    });
+    turn.appendChild(clone);
+    any = true;
+  }
+  if (any) OPERATOR.thread.appendChild(turn);
+}
+
+// Keep newest content in view as events stream (chat behavior).
+function _opScrollToBottom() {
+  const s = OPERATOR.scroll;
+  if (s) s.scrollTop = s.scrollHeight;
 }
 
 const STEP_LABELS = {
@@ -4961,20 +5017,31 @@ function _opHandleEvent(evt) {
       if (!operatorState.finalRecord) _opSetStatusDot('failed');
       break;
   }
+  _opScrollToBottom();
 }
 
 async function _opSubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
+  // Ignore a submit while a run is in flight (e.g. Enter mid-run) so we don't
+  // orphan the running turn. (Phase 2 will route answers to /continue.)
+  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
   const command = (OPERATOR.command && OPERATOR.command.value || '').trim();
   if (command.length < 4) {
     _opSetStatus('Type a command first.', 'err');
     return;
   }
-  _opResetUI();
+  // Conversation flow: archive the finished turn into the thread instead of
+  // wiping it, then start a fresh live turn. Clear the composer so it's always
+  // empty and ready at the bottom.
+  _opArchiveCurrentTurn();
+  _opClearLive();
+  if (OPERATOR.command) OPERATOR.command.value = '';
   _opSetRunning(true);
   if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+  _opRenderCommandEcho(command);   // the user's message, at the top of this turn
   _opSetStatusDot('running');
   _opStartElapsed();
+  _opScrollToBottom();
 
   operatorState.abortController = new AbortController();
 
@@ -5355,7 +5422,7 @@ function _opRenderCommandEcho(text) {
   echo.innerHTML = '';
   const label = document.createElement('span');
   label.className = 'operator-command-echo-label';
-  label.textContent = 'Command';
+  label.textContent = 'You';
   const body = document.createElement('span');
   body.className = 'operator-command-echo-body';
   body.textContent = text;
@@ -5473,10 +5540,9 @@ if (_voiceChk) {
 const _needsAnswerBtn = document.getElementById('operator-needs-input-answer');
 if (_needsAnswerBtn) {
   _needsAnswerBtn.addEventListener('click', () => {
-    if (OPERATOR.command) {
-      OPERATOR.command.focus();
-      OPERATOR.command.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    // The answer goes in the always-present composer at the bottom of the thread.
+    _opScrollToBottom();
+    if (OPERATOR.command) OPERATOR.command.focus();
   });
 }
 

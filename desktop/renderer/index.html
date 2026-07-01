@@ -314,6 +314,12 @@
                 </button>
               </div>
 
+              <!-- Conversational thread: frozen past turns stack in
+                   #operator-thread; the current run renders live in
+                   #operator-live (always the last block before the composer). -->
+              <div id="operator-scroll" class="operator-scroll">
+                <div id="operator-thread" class="operator-thread"></div>
+                <div id="operator-live" class="operator-live">
               <!-- Live execution timeline -->
               <div id="operator-active" class="operator-active hidden">
                 <div class="operator-active-head">
@@ -356,7 +362,7 @@
                   id="operator-needs-input-answer"
                   type="button"
                   class="btn btn-primary btn-compact"
-                >Answer in the command box</button>
+                >Answer below ↓</button>
               </div>
 
               <!-- Artifacts panel (live as artifacts land) -->
@@ -393,6 +399,8 @@
                 <div id="operator-errors" class="operator-errors hidden"></div>
                 <span id="operator-actions-status" class="operator-actions-status" role="status" aria-live="polite"></span>
               </div>
+                </div><!-- /operator-live -->
+              </div><!-- /operator-scroll -->
             </section>
 
             <!-- Legacy workflows — kept available but no longer the main focus.
