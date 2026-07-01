@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -51,6 +52,37 @@ EmitFn = Callable[[dict], Awaitable[None]]
 # runaway agent can't loop forever. Sweeps need headroom: one model turn per
 # draft plus research/receipt turns.
 _MAX_PLANNER_TURNS = 24
+
+
+# v2: resumable operations. A run that pauses on a needs_input keeps its
+# OperatorContext (folder, mutable record, source-lock + grounding flags) AND
+# the SDK conversation history in a session, so POST /operations/{id}/continue
+# resumes the SAME operation with the user's answer as context — not a new
+# isolated run. In-memory is fine: the desktop backend is single-user / process.
+@dataclass
+class _OperationSession:
+    operator: OperatorContext
+    folder: Path
+    agent: object
+    input_list: list
+    upload_state_line: str
+
+
+_SESSIONS: dict[str, _OperationSession] = {}
+_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _session_lock(operation_id: str) -> asyncio.Lock:
+    lock = _SESSION_LOCKS.get(operation_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _SESSION_LOCKS[operation_id] = lock
+    return lock
+
+
+def _drop_session(operation_id: str) -> None:
+    _SESSIONS.pop(operation_id, None)
+    _SESSION_LOCKS.pop(operation_id, None)
 
 
 def _slug_for_command(command: str) -> str:
@@ -83,6 +115,9 @@ def _finalized_view(record: dict) -> dict:
         # v1.7: missing-info questions + the planner's final receipt text.
         "needs_input": record.get("needs_input", []),
         "receipt": record.get("receipt", ""),
+        # v2: paused-awaiting-user? The renderer routes the next answer to
+        # POST /operations/{id}/continue (resume) instead of starting a new run.
+        "awaiting_input": bool(record.get("awaiting_input")),
     }
 
 
@@ -282,7 +317,11 @@ async def _persist_and_complete(emit: EmitFn, record: dict, folder: Path) -> dic
     # Decide status from what the tools actually produced.
     has_any_artifact = bool(record["artifacts"])
     has_errors = bool(record["errors"])
-    has_needs = bool(record.get("needs_input"))
+    # v2: "partial" means still waiting on the user RIGHT NOW (awaiting_input),
+    # not merely that the run ever asked a question — answered questions stay in
+    # record["needs_input"] for history but must not force a completed resume to
+    # read as partial.
+    has_needs = bool(record.get("awaiting_input"))
     has_receipt = bool((record.get("receipt") or "").strip())
 
     if has_errors and not has_any_artifact:
@@ -320,13 +359,119 @@ async def _persist_and_complete(emit: EmitFn, record: dict, folder: Path) -> dic
     except OSError:
         pass
 
-    operation_log_service.append_operation(snapshot)
+    operation_log_service.upsert_operation(snapshot)
     await emit({"event": "complete", "data": snapshot})
     return snapshot
 
 
+def _compute_upload_state() -> str:
+    """The auto-upload line the planner reads verbatim (Drive on/off + connected)."""
+    auto_upload_on = get_bool_setting("operator_auto_upload_drive", default=True)
+    try:
+        drive_connected = bool(google_drive_service.get_status().get("connected"))
+    except Exception:  # noqa: BLE001
+        drive_connected = False
+    if auto_upload_on and drive_connected:
+        return "Drive auto-upload: on (Google Drive connected). Call auto_upload_drive after artifacts."
+    if auto_upload_on and not drive_connected:
+        return "Drive auto-upload: on, BUT Google Drive is not connected. Skip auto_upload_drive and mention in your summary."
+    return "Drive auto-upload: off (user disabled). Skip auto_upload_drive."
+
+
+def _build_planner_input(command: str, upload_state_line: str) -> str:
+    return (
+        f"Operator command:\n{command}\n\n"
+        f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
+        f"Auto-upload state: {upload_state_line}\n\n"
+        "Plan the minimum-viable sequence of tool calls from your registry, "
+        "execute them, verify each result, and then give a short final "
+        "receipt of what landed on disk. Do not invent tools.\n\n"
+        "After the artifact tools finish (and only if the operation produced "
+        "real artifacts), you MAY call propose_memory_update for up to three "
+        "items the user would want Ridian to remember from this run — facts, "
+        "contacts, follow-ups, or decisions that surfaced organically. Do not "
+        "propose anything that was already in memory above. Do not invent."
+    )
+
+
+async def _run_turn(session: _OperationSession, input_items) -> None:
+    """Run ONE planner turn against the session's context, streaming events, and
+    save the resulting SDK conversation history so a /continue can resume it."""
+    streamed = Runner.run_streamed(
+        session.agent,
+        input=input_items,
+        context=session.operator,
+        max_turns=_MAX_PLANNER_TURNS,
+    )
+    await _drain_planner_events(streamed, session.operator)
+    try:
+        session.input_list = streamed.to_input_list()
+    except Exception:  # noqa: BLE001 — keep the prior list if the SDK can't
+        pass
+
+
+async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
+    """If the turn ended paused-awaiting-the-user, snapshot as 'awaiting_input'
+    and KEEP the session for a /continue. Otherwise finalize and drop it."""
+    if record.get("awaiting_input"):
+        record["status"] = "awaiting_input"
+        snapshot = _finalized_view(record)
+        try:
+            (folder / "operation_log.json").write_text(
+                json.dumps(snapshot, indent=2) + "\n", encoding="utf-8",
+            )
+        except OSError:
+            pass
+        operation_log_service.upsert_operation(snapshot)
+        await emit({"event": "complete", "data": snapshot})
+        return snapshot
+    snapshot = await _persist_and_complete(emit, record, folder)
+    _drop_session(record["id"])
+    return snapshot
+
+
+# Resume interpretation for a source-locked run whose grounding failed: a short
+# "do general research" answer lifts the lock; a long paste is treated as the
+# source text itself.
+_GENERAL_RESEARCH_RE = re.compile(
+    r"\b(general|web ?search|web research|go ahead|proceed|without (the )?source|"
+    r"option a|anyway|just search)\b", re.IGNORECASE,
+)
+
+
+def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
+    """Relax the source-lock gate based on the operator's resume answer.
+
+    Returns a note to prepend to the planner input, or "" if nothing to do.
+    """
+    rec = operator.record
+    if (not rec.get("source_locked_url")
+            or rec.get("grounding_ok") or rec.get("grounding_override")):
+        return ""
+    a = (answer or "").strip()
+    # (b) The operator pasted the page text — treat it as the source itself.
+    if len(a) >= 120:
+        try:
+            src = operator.folder / "source.md"
+            prior = src.read_text(encoding="utf-8") if src.exists() else "# Fetched sources\n\n"
+            src.write_text(prior + f"## Operator-pasted source\n\n{a}\n\n---\n\n", encoding="utf-8")
+            rec["grounding_ok"] = True
+            return ("The operator pasted the source text; it is saved to source.md. "
+                    "Build the deliverables STRICTLY from that text.")
+        except OSError:
+            return ""
+    # (a) The operator authorized general web research — lift the lock.
+    if _GENERAL_RESEARCH_RE.search(a):
+        rec["grounding_override"] = True
+        return ("The operator authorized GENERAL web research; the source lock is "
+                "lifted for this run. Proceed with web_research and build the "
+                "deliverables, and note in your receipt that they are NOT grounded "
+                "in the originally requested source.")
+    return ""  # e.g. the operator supplied a different URL — the planner handles it
+
+
 async def run_operation(*, command: str, emit: EmitFn) -> dict:
-    """Run an operator command end to end via the planner agent."""
+    """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
     if not get_effective_value("OPENAI_API_KEY"):
         await emit({"event": "error", "data": {
@@ -344,64 +489,77 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     folder = create_run_folder(_slug_for_command(command))
     record = operation_log_service.build_record(
         command=command,
-        intent="planner",  # v1.1: no keyword intent — the planner decides
+        intent="planner",
         artifact_folder=str(folder),
     )
-    # v1.9: if the command locks to a named source ("use only what's on <url>"),
-    # record it. The build tools refuse to produce deliverables until a read_url
-    # of that source succeeds (see operator_tools._grounding_gate).
+    # v1.9: source-lock detection (see operator_tools._grounding_gate).
     record["source_locked_url"] = detect_source_lock(command)
+    record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
     operator = OperatorContext(folder=folder, record=record, emit=emit)
-
-    # v1.4: auto-upload state. The planner reads this verbatim and decides
-    # whether to call auto_upload_drive at the end of the run. Two gates:
-    # the user's setting (default ON) and whether Google Drive is actually
-    # connected. If either is false, the line below tells the planner to skip.
-    auto_upload_on = get_bool_setting("operator_auto_upload_drive", default=True)
-    try:
-        drive_connected = bool(google_drive_service.get_status().get("connected"))
-    except Exception:
-        drive_connected = False
-    if auto_upload_on and drive_connected:
-        upload_state_line = "Drive auto-upload: on (Google Drive connected). Call auto_upload_drive after artifacts."
-    elif auto_upload_on and not drive_connected:
-        upload_state_line = "Drive auto-upload: on, BUT Google Drive is not connected. Skip auto_upload_drive and mention in your summary."
-    else:
-        upload_state_line = "Drive auto-upload: off (user disabled). Skip auto_upload_drive."
-
-    # Capability discovery: the planner needs the command + a reminder that
-    # the registry list in its system prompt is the entire toolset, plus a
-    # snapshot of what Ridian already remembers so it doesn't re-propose
-    # facts already on file (or repeat yesterday's brief).
-    planner_input = (
-        f"Operator command:\n{command}\n\n"
-        f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
-        f"Auto-upload state: {upload_state_line}\n\n"
-        "Plan the minimum-viable sequence of tool calls from your registry, "
-        "execute them, verify each result, and then give a short final "
-        "receipt of what landed on disk. Do not invent tools.\n\n"
-        "After the artifact tools finish (and only if the operation produced "
-        "real artifacts), you MAY call propose_memory_update for up to three "
-        "items the user would want Ridian to remember from this run — facts, "
-        "contacts, follow-ups, or decisions that surfaced organically. Do not "
-        "propose anything that was already in memory above. Do not invent."
+    upload_state_line = _compute_upload_state()
+    session = _OperationSession(
+        operator=operator, folder=folder, agent=build_planner_agent(),
+        input_list=[], upload_state_line=upload_state_line,
     )
+    _SESSIONS[record["id"]] = session
 
     try:
-        agent = build_planner_agent()
-        streamed = Runner.run_streamed(
-            agent,
-            input=planner_input,
-            context=operator,
-            max_turns=_MAX_PLANNER_TURNS,
-        )
-        await _drain_planner_events(streamed, operator)
+        await _run_turn(session, _build_planner_input(command, upload_state_line))
     except Exception as exc:  # noqa: BLE001 — top-level safety net
         log.exception("operator.run_failed id=%s", record.get("id"))
         msg = f"Planner failed: {type(exc).__name__}: {exc}"
         record["errors"].append(msg)
         await emit({"event": "error", "data": {"message": msg}})
 
-    return await _persist_and_complete(emit, record, folder)
+    return await _persist_or_pause(emit, record, folder)
+
+
+async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) -> dict:
+    """Resume a paused operation with the operator's answer as context.
+
+    Reuses the SAME OperatorContext (folder, record, source-lock + grounding
+    flags) and the SDK conversation history, so the run CONTINUES rather than
+    starting fresh — the behavioral heart of v2.
+    """
+    apply_to_environment()
+    session = _SESSIONS.get(operation_id)
+    if session is None:
+        await emit({"event": "error", "data": {"message":
+            "That operation is no longer active — start a new command instead."}})
+        return {}
+
+    answer = (answer or "").strip()
+    if not answer:
+        await emit({"event": "error", "data": {"message": "Type an answer first."}})
+        return {}
+
+    async with _session_lock(operation_id):
+        operator = session.operator
+        operator.emit = emit                 # rebind to THIS request's SSE stream
+        record = operator.record
+        record["awaiting_input"] = False     # cleared; set again only if it re-asks
+
+        await emit({"event": "start", "data": {
+            "id": record["id"], "command": answer, "resumed": True,
+            "artifact_folder": str(session.folder), "started_at": record["started_at"],
+        }})
+
+        # Source-lock resume relaxation (a: general research → unlock; b: paste).
+        note = _apply_grounding_answer(operator, answer)
+        user_content = (
+            (note + "\n\n" if note else "")
+            + f"The operator's answer to your question: {answer}"
+        )
+        items = (session.input_list or []) + [{"role": "user", "content": user_content}]
+
+        try:
+            await _run_turn(session, items)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("operator.continue_failed id=%s", operation_id)
+            msg = f"Planner failed: {type(exc).__name__}: {exc}"
+            record["errors"].append(msg)
+            await emit({"event": "error", "data": {"message": msg}})
+
+        return await _persist_or_pause(emit, record, session.folder)

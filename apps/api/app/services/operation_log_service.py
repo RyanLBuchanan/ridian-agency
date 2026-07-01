@@ -59,6 +59,27 @@ def append_operation(record: dict) -> dict:
     return record
 
 
+def upsert_operation(record: dict) -> dict:
+    """Insert a finished/awaiting operation, or replace the existing entry with
+    the same id in place. Used for resumable (pause→resume) operations so a run
+    that asks a question and later completes appears exactly once in history,
+    updated — never duplicated."""
+    items = state_store.load_list(_OPS_NAME)
+    oid = record.get("id")
+    for i, item in enumerate(items):
+        if item.get("id") == oid:
+            items[i] = record
+            state_store.save(_OPS_NAME, items)
+            log.info("operation.upserted id=%s status=%s", oid, record.get("status"))
+            return record
+    items.insert(0, record)
+    if len(items) > 500:
+        items = items[:500]
+    state_store.save(_OPS_NAME, items)
+    log.info("operation.logged id=%s status=%s", oid, record.get("status"))
+    return record
+
+
 def list_recent(limit: int = 20) -> list[dict]:
     items = state_store.load_list(_OPS_NAME)
     return items[: max(1, int(limit))]

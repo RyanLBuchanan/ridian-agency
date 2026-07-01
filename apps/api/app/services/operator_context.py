@@ -107,6 +107,11 @@ class OperatorContext:
         if "needs_input" not in self.record:
             self.record["needs_input"] = []
         self.record["needs_input"].append(entry)
+        # v2: mark the run as paused-awaiting-the-user. operator_service uses
+        # this to keep the operation session alive for a /continue instead of
+        # finalizing, and to compute "awaiting_input" (not "partial") status.
+        # Cleared at the start of each turn (run/continue).
+        self.record["awaiting_input"] = True
         await self.emit({"event": "needs_input", "data": dict(entry)})
         return entry
 

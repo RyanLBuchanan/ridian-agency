@@ -897,6 +897,54 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
 
 
+class OperationContinueRequest(BaseModel):
+    answer: str = Field(..., min_length=1, description="The operator's answer to a paused operation's question.")
+
+
+@app.post("/operations/{operation_id}/continue")
+async def operations_continue(operation_id: str, payload: OperationContinueRequest) -> StreamingResponse:
+    """Resume a paused operation with the operator's answer.
+
+    Streams the continued run as SSE into the same conversation thread. The
+    operation reuses its original context/folder/flags, so this is a true
+    resume — not a new run.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def emit(event: dict) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        try:
+            await operator_service.continue_operation(
+                operation_id=operation_id, answer=payload.answer, emit=emit,
+            )
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(runner())
+
+    async def event_stream():
+        yield ": connected\n\n"
+        while True:
+            evt = await queue.get()
+            if evt is None:
+                yield "event: end\ndata: {}\n\n"
+                break
+            try:
+                payload_json = json.dumps(evt.get("data", {}), default=str)
+            except (TypeError, ValueError):
+                payload_json = json.dumps({"raw": str(evt)})
+            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+
 @app.get("/operations/recent")
 async def operations_recent(limit: int = 20) -> dict:
     return {"operations": operation_log_service.list_recent(limit=limit)}

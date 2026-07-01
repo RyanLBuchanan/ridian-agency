@@ -71,6 +71,12 @@ def test_gate_allows_when_grounded(tmp_path):
     assert asyncio.run(_grounding_gate(op)) is None
 
 
+def test_gate_allows_when_override(tmp_path):
+    # Resume path: operator authorized general research → lock lifted for this run.
+    op = _ctx(tmp_path, {"source_locked_url": "https://x/y", "grounding_override": True})
+    assert asyncio.run(_grounding_gate(op)) is None
+
+
 def test_gate_allows_when_not_locked(tmp_path):
     op = _ctx(tmp_path, {"source_locked_url": ""})
     assert asyncio.run(_grounding_gate(op)) is None

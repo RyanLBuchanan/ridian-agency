@@ -151,7 +151,10 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
     """
     rec = operator.record
     locked = rec.get("source_locked_url")
-    if not locked or rec.get("grounding_ok"):
+    # grounding_ok: a read_url (or an operator-pasted source) grounded the run.
+    # grounding_override: on resume, the operator explicitly authorized general
+    # web research, lifting the lock for this run (see continue_operation).
+    if not locked or rec.get("grounding_ok") or rec.get("grounding_override"):
         return None
     if not rec.get("grounding_needs_input_emitted"):
         rec["grounding_needs_input_emitted"] = True

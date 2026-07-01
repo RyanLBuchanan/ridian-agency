@@ -4407,13 +4407,14 @@ function _opSetRunning(running) {
 
 function _opSetStatusDot(kind) {
   if (!OPERATOR.statusDot) return;
-  OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed', 'is-partial');
+  OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed', 'is-partial', 'is-awaiting_input');
   OPERATOR.statusDot.classList.add('is-' + kind);
   if (OPERATOR.statusLabel) {
     OPERATOR.statusLabel.textContent =
       kind === 'running'   ? 'Running…' :
       kind === 'completed' ? 'Completed' :
       kind === 'partial'   ? 'Completed with issues' :
+      kind === 'awaiting_input' ? 'Waiting for your answer' :
       kind === 'failed'    ? 'Failed' :
       'Idle';
   }
@@ -5030,6 +5031,12 @@ async function _opSubmit(e) {
     _opSetStatus('Type a command first.', 'err');
     return;
   }
+  // Answer mode (v2): if the current turn is paused awaiting an answer, resume
+  // the SAME operation instead of starting a new run.
+  if (operatorState.finalRecord && operatorState.finalRecord.awaiting_input
+      && operatorState.active && operatorState.active.id) {
+    return _opContinue(operatorState.active.id, command);
+  }
   // Conversation flow: archive the finished turn into the thread instead of
   // wiping it, then start a fresh live turn. Clear the composer so it's always
   // empty and ready at the bottom.
@@ -5050,6 +5057,69 @@ async function _opSubmit(e) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
       body: JSON.stringify({ command }),
+      signal: operatorState.abortController.signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    await _opParseSSE(res);
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      _opSetStatus('Operation cancelled.', 'err');
+    } else {
+      const msg = err && err.message ? err.message : String(err);
+      _opRenderError(/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? 'Backend is not reachable.' : msg);
+    }
+    _opSetStatusDot('failed');
+  } finally {
+    _opStopElapsed();
+    _opSetRunning(false);
+    operatorState.abortController = null;
+  }
+}
+
+// Append the operator's answer inline in the SAME live turn (not a new turn).
+function _opAppendUserMessage(text) {
+  const host = OPERATOR.live || OPERATOR.active;
+  if (!host) return;
+  const echo = document.createElement('div');
+  echo.className = 'operator-command-echo';
+  const label = document.createElement('span');
+  label.className = 'operator-command-echo-label';
+  label.textContent = 'You';
+  const body = document.createElement('span');
+  body.className = 'operator-command-echo-body';
+  body.textContent = text;
+  echo.appendChild(label);
+  echo.appendChild(body);
+  host.appendChild(echo);
+}
+
+// v2: resume a paused operation. Streams the continued run into the SAME turn
+// via POST /operations/{id}/continue — the operation keeps its context/folder.
+async function _opContinue(opId, answer) {
+  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
+  if (OPERATOR.command) OPERATOR.command.value = '';
+  _opAppendUserMessage(answer);
+  // The question has been answered — hide its card.
+  const needsEl = document.getElementById('operator-needs-input');
+  if (needsEl) needsEl.classList.add('hidden');
+  const needsList = document.getElementById('operator-needs-input-list');
+  if (needsList) needsList.innerHTML = '';
+  operatorState.finalRecord = null;   // no longer awaiting; reset on next complete
+  _opSetRunning(true);
+  _opSetStatusDot('running');
+  _opStartElapsed();
+  _opScrollToBottom();
+
+  operatorState.abortController = new AbortController();
+  try {
+    const res = await fetch(`${BACKEND}/operations/${encodeURIComponent(opId)}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ answer }),
       signal: operatorState.abortController.signal,
     });
     if (!res.ok) {
