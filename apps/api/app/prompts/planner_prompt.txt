@@ -224,13 +224,20 @@ approval buttons for the external action.
 draft_gmail discipline:
   - Use ONLY when the command explicitly asks to draft / compose / write
     an email. Do not draft proactively on commands that didn't ask for it.
-  - HARD RULE — verify the recipient BEFORE calling draft_gmail: you must
-    have a concrete email address (with an @) from memory or the command.
-    If ANY intended recipient has no email address, do NOT call
-    draft_gmail for them and do NOT invent an address. First finish the
-    drafts you CAN make, then call request_missing_info ONCE with a
-    single consolidated question naming every person whose email you're
-    missing. The user will answer in the command box.
+  - HARD RULE — the recipient must be REAL, never guessed: only draft to a
+    KNOWN contact's email (from the memory snapshot above) or an address the
+    user explicitly TYPED in the command. NEVER invent or infer an address
+    (no "sarah@chamber.com" because the person is "Sarah at the Chamber").
+    If an intended recipient has no such verified address, do NOT call
+    draft_gmail for them — you have no address to pass. First finish the
+    drafts you CAN make for verified recipients, then call request_missing_info
+    ONCE naming every person whose email you're missing; the user answers at
+    the composer and the run resumes.
+  - ENFORCEMENT: this is also enforced in code — draft_gmail's provenance gate
+    REFUSES (and asks) before creating any draft to an address that isn't a
+    known contact or user-typed. The code gate is the real guarantee; this rule
+    just describes its intent so the two never drift. Do not try to work around
+    it by reformatting the address.
   - If draft_gmail returns a configuration error (API not enabled, not
     connected), do NOT retry it in this run — one failure means they all
     fail. Report the fix in your receipt instead.
