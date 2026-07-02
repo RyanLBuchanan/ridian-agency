@@ -1636,6 +1636,25 @@ body {
   color: var(--color-muted);
 }
 
+/* v2.2: tappable choice buttons for structured questions. */
+.operator-needs-input-q { margin-bottom: 2px; }
+
+.operator-needs-input-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.operator-choice-btn { align-self: flex-start; }
+
+.operator-choice-btn.is-disabled,
+.operator-choice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .operator-needs-input .btn { align-self: flex-start; }
 
 /* v1.7.1: composer with inset mic (industry-standard placement) */

@@ -163,13 +163,16 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
                 f"I couldn't ground this in the source you named ({locked}) — no "
                 "readable text was obtained from it (the page may be empty, "
                 "blocked, or JavaScript-rendered). I won't build from other "
-                "sources without your say-so. How should I proceed?\n"
-                "  (a) Do general web research instead (results will NOT be from "
-                "that page).\n"
-                "  (b) Paste the page's text here and I'll build from that.\n"
-                "  (c) [coming later] Render the page with a headless browser."
+                "sources without your say-so. How should I proceed?"
             ),
             context_hint=f"grounding failed for {locked}",
+            options=[
+                {"label": "Do general web research",
+                 "value": "Do general web research instead", "action": "submit"},
+                {"label": "I'll paste the page text",
+                 "action": "compose", "placeholder": "Paste the page's text here…"},
+                {"label": "Headless render (coming soon)", "action": "disabled"},
+            ],
         )
         await operator.emit_step(
             name="grounding_gate", status="skipped",

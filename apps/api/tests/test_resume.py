@@ -60,6 +60,34 @@ def test_emit_needs_input_sets_awaiting(tmp_path):
     assert op.record.get("awaiting_input") is True
 
 
+def test_emit_needs_input_carries_options(tmp_path):
+    op = _ctx(tmp_path, {"steps": []})
+    asyncio.run(op.emit_needs_input(
+        question="Pick one",
+        options=[{"label": "A", "value": "a", "action": "submit"}],
+    ))
+    assert op.record["needs_input"][0]["options"][0]["label"] == "A"
+
+
+def test_emit_needs_input_free_text_has_empty_options(tmp_path):
+    op = _ctx(tmp_path, {"steps": []})
+    asyncio.run(op.emit_needs_input(question="What's the email?"))   # no options
+    assert op.record["needs_input"][0]["options"] == []
+
+
+def test_gate_submit_value_is_recognized_by_resume(tmp_path):
+    """The grounding gate's 'submit' option value must be interpreted by the
+    resume path as 'do general research' — so prompt and code can't drift."""
+    from app.services.operator_tools import _grounding_gate
+    op = _ctx(tmp_path, {"source_locked_url": "https://x/y"})
+    asyncio.run(_grounding_gate(op))
+    submit = next(o for o in op.record["needs_input"][0]["options"]
+                  if o["action"] == "submit")
+    op2 = _ctx(tmp_path, {"source_locked_url": "https://x/y"})
+    osvc._apply_grounding_answer(op2, submit["value"])
+    assert op2.record.get("grounding_override") is True
+
+
 # --------------------------------------------------------------------------
 # finalize-once: a pause upsert then a completion upsert = ONE history entry
 # --------------------------------------------------------------------------

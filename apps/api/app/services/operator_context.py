@@ -90,7 +90,10 @@ class OperatorContext:
         if name and name not in self.record["tools_used"]:
             self.record["tools_used"].append(name)
 
-    async def emit_needs_input(self, *, question: str, context_hint: str = "") -> dict:
+    async def emit_needs_input(
+        self, *, question: str, context_hint: str = "",
+        options: "list[dict] | None" = None,
+    ) -> dict:
         """Record a missing-information request + broadcast it to the renderer.
 
         v1.7: when the planner is missing something only the user can supply
@@ -103,6 +106,12 @@ class OperatorContext:
             "id": "need_" + uuid.uuid4().hex[:10],
             "question": (question or "").strip(),
             "context_hint": (context_hint or "").strip(),
+            # v2.2: structured choices. Each option is
+            #   {"label": str, "action": "submit"|"compose"|"disabled",
+            #    "value": str (for submit)}. Empty ⇒ open-ended (free-text).
+            # The tool that raises the question declares these; the UI renders
+            # buttons for options or the composer for free-text.
+            "options": [dict(o) for o in options] if options else [],
         }
         if "needs_input" not in self.record:
             self.record["needs_input"] = []

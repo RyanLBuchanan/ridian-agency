@@ -4677,7 +4677,9 @@ function _opRenderReceipt(text) {
   card.classList.remove('hidden');
 }
 
-function _opRenderNeedsInput(need) {
+// interactive=false when replaying from history (session is gone, so option
+// buttons are inert — clicking would hit "operation no longer active").
+function _opRenderNeedsInput(need, interactive = true) {
   const card = document.getElementById('operator-needs-input');
   const list = document.getElementById('operator-needs-input-list');
   if (!card || !list) return;
@@ -4686,13 +4688,61 @@ function _opRenderNeedsInput(need) {
   const li = document.createElement('li');
   li.className = 'operator-needs-input-item';
   if (need.id) li.setAttribute('data-need-id', need.id);
-  li.textContent = need.question || '';
+
+  const q = document.createElement('div');
+  q.className = 'operator-needs-input-q';
+  q.textContent = need.question || '';
+  li.appendChild(q);
   if (need.context_hint) {
     const hint = document.createElement('span');
     hint.className = 'operator-needs-input-hint';
     hint.textContent = need.context_hint;
     li.appendChild(hint);
   }
+
+  const options = Array.isArray(need.options) ? need.options : [];
+  const answerBtn = document.getElementById('operator-needs-input-answer');
+
+  if (options.length) {
+    // Structured question → tappable choice buttons (the tool declared them).
+    const row = document.createElement('div');
+    row.className = 'operator-needs-input-options';
+    options.forEach((opt) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-compact operator-choice-btn';
+      b.textContent = opt.label || opt.value || 'Option';
+      const action = opt.action || 'submit';
+      if (action === 'disabled' || !interactive) {
+        b.disabled = true;
+        b.classList.add('is-disabled');
+      } else if (action === 'compose') {
+        b.classList.add('btn-ghost');
+        b.addEventListener('click', () => {
+          _opScrollToBottom();
+          if (OPERATOR.command) {
+            if (opt.placeholder) OPERATOR.command.setAttribute('placeholder', opt.placeholder);
+            OPERATOR.command.focus();
+          }
+        });
+      } else { // submit → resume the SAME operation with this choice
+        b.classList.add('btn-primary');
+        b.addEventListener('click', () => {
+          if (operatorState.active && operatorState.active.id) {
+            _opContinue(operatorState.active.id, opt.value || opt.label || '');
+          }
+        });
+      }
+      row.appendChild(b);
+    });
+    li.appendChild(row);
+    if (answerBtn) answerBtn.classList.add('hidden');   // buttons are the answer path
+  } else if (answerBtn) {
+    // Open-ended question → keep the free-text composer path.
+    answerBtn.classList.remove('hidden');
+    answerBtn.textContent = "Answer Ridian's question";
+  }
+
   list.appendChild(li);
   card.classList.remove('hidden');
 }
@@ -5466,7 +5516,7 @@ async function loadOperatorRun(run) {
     operatorState.receipt = log.receipt;
     _opRenderReceipt(log.receipt);
   }
-  (Array.isArray(log.needs_input) ? log.needs_input : []).forEach((n) => _opRenderNeedsInput(n));
+  (Array.isArray(log.needs_input) ? log.needs_input : []).forEach((n) => _opRenderNeedsInput(n, false));
 
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
