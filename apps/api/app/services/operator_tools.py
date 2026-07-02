@@ -188,6 +188,94 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Recipient provenance gate (deterministic — draft_gmail never guesses an email)
+# ---------------------------------------------------------------------------
+#
+# draft_gmail must never create a real Gmail draft to an address the model
+# invented. A recipient is allowed ONLY if it matches a known contact in memory
+# OR an address the operator explicitly typed (captured verbatim from the
+# command, and from a resume answer via continue_operation). Otherwise the tool
+# refuses BEFORE drafting and raises the needs-input question itself — the same
+# refuse-and-ask contract as _grounding_gate, never guess-then-ask.
+
+_EMAIL_RE = _re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def extract_emails(text: str) -> list[str]:
+    """Lowercased email addresses in free text, order-preserving and deduped.
+    Used to capture operator-typed recipients from the command / resume answer."""
+    seen: list[str] = []
+    for m in _EMAIL_RE.findall(text or ""):
+        e = m.lower()
+        if e not in seen:
+            seen.append(e)
+    return seen
+
+
+def _address_only(to: str) -> str:
+    """Extract the bare address from ``to``, handling 'Name <addr>' forms."""
+    m = _EMAIL_RE.search(str(to or ""))
+    return m.group(0).lower() if m else ""
+
+
+def _known_emails(operator: OperatorContext) -> set[str]:
+    """Every email Ridian can verify: known contacts + operator-typed addresses."""
+    emails: set[str] = set()
+    try:
+        for c in memory_service.list_contacts():
+            e = (c.get("email") or "").strip().lower()
+            if e:
+                emails.add(e)
+    except Exception:  # noqa: BLE001
+        pass
+    for e in (operator.record.get("user_provided_emails") or []):
+        e = str(e).strip().lower()
+        if e:
+            emails.add(e)
+    return emails
+
+
+def _recipient_is_known(operator: OperatorContext, to: str) -> bool:
+    addr = _address_only(to)
+    return bool(addr) and addr in _known_emails(operator)
+
+
+async def _require_known_recipient(operator: OperatorContext, to: str) -> dict | None:
+    """Refuse a recipient the model may have invented. Returns None if the
+    address is verifiable (known contact or operator-typed); otherwise emits the
+    needs-input question ONCE and returns a refusal the planner must obey."""
+    if _recipient_is_known(operator, to):
+        return None
+    rec = operator.record
+    addr = _address_only(to) or (to or "").strip()
+    asked = rec.setdefault("recipient_asked", [])
+    if addr not in asked:
+        asked.append(addr)
+        await operator.emit_needs_input(
+            question=(
+                f'I don\'t have a verified email for "{addr}". I won\'t draft to an '
+                "address I might have guessed. What's the correct email address "
+                "(or which contact on file should I use)?"
+            ),
+            context_hint="unverified email recipient",
+        )
+        await operator.emit_step(
+            name="gmail_draft", status="skipped",
+            detail=f"Refused to draft to an unverified address ({addr}). "
+                   "Awaiting the real address.",
+        )
+    return {
+        "error": (
+            f"BLOCKED: '{addr}' is not a known contact and was not provided by the "
+            "operator — it may be invented. Do NOT create this draft and do NOT "
+            "retry with a guessed address. A needs-input question has been raised; "
+            "wait for the operator to supply the real address."
+        ),
+        "reason": "recipient_unverified",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -756,16 +844,26 @@ async def draft_gmail(
     are internal artifacts; sends require explicit user approval through
     the renderer's email button (which is a separate path).
 
+    RECIPIENT RULE: ``to`` must be a KNOWN contact's email or an address the
+    operator explicitly typed. Ridian never invents an address — if the
+    recipient can't be verified, this tool refuses and asks first (it does NOT
+    draft to a guessed address).
+
     Args:
-        to: Recipient email address (must contain "@").
+        to: Recipient email — a known contact or an address the operator typed.
         subject: Draft subject line.
         body: Plain-text email body. Markdown is fine; Gmail renders it as text.
 
     Returns:
         {"draft_id": str, "compose_url": str, "to": str} on success.
-        {"error": str} if Gmail isn't connected or the API call failed.
+        {"error": str} if the recipient is unverified, Gmail isn't connected, or
+        the API call failed.
     """
-    operator = ctx.context
+    return await _draft_gmail(ctx.context, to, subject, body)
+
+
+async def _draft_gmail(operator: OperatorContext, to: str, subject: str, body: str) -> dict:
+    """Testable core of draft_gmail (no SDK ctx wrapper)."""
     operator.note_tool("draft_gmail")
 
     # v1.7: missing recipient is a PLANNER mistake, not a user-facing failure.
@@ -778,6 +876,13 @@ async def draft_gmail(
             "invent an address — call request_missing_info to ask the user "
             "which email to use."
         )}
+
+    # Provenance gate: refuse a recipient the model may have invented — allow
+    # ONLY a known contact or an operator-typed address. Refuse-and-ask BEFORE
+    # drafting, never guess-then-ask. (Mirrors _grounding_gate.)
+    recipient_block = await _require_known_recipient(operator, to)
+    if recipient_block:
+        return recipient_block
 
     # v1.7 circuit breaker: once Gmail fails with a CONFIGURATION error
     # (API not enabled / not connected / missing scope), every further

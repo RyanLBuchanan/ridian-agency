@@ -40,7 +40,7 @@ from ..agents.planner_agent import build_planner_agent
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext
-from .operator_tools import detect_source_lock
+from .operator_tools import detect_source_lock, extract_emails
 from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
 
 log = logging.getLogger("ridian.operator")
@@ -494,6 +494,9 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     )
     # v1.9: source-lock detection (see operator_tools._grounding_gate).
     record["source_locked_url"] = detect_source_lock(command)
+    # v2.1: addresses the operator explicitly typed in the command are verified
+    # recipients for draft_gmail's provenance gate (it never invents one).
+    record["user_provided_emails"] = extract_emails(command)
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
@@ -540,6 +543,12 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         operator.emit = emit                 # rebind to THIS request's SSE stream
         record = operator.record
         record["awaiting_input"] = False     # cleared; set again only if it re-asks
+        # v2.1: an address the operator types in a resume answer becomes a
+        # verified recipient for draft_gmail's provenance gate.
+        typed = record.setdefault("user_provided_emails", [])
+        for e in extract_emails(answer):
+            if e not in typed:
+                typed.append(e)
 
         await emit({"event": "start", "data": {
             "id": record["id"], "command": answer, "resumed": True,
