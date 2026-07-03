@@ -171,6 +171,7 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
                  "value": "Do general web research instead", "action": "submit"},
                 {"label": "I'll paste the page text",
                  "action": "compose", "placeholder": "Paste the page's text here…"},
+                {"label": "Upload a PDF", "action": "upload"},
                 {"label": "Headless render (coming soon)", "action": "disabled"},
             ],
         )

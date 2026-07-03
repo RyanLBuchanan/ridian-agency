@@ -430,6 +430,80 @@ async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
     return snapshot
 
 
+# ---------------------------------------------------------------------------
+# Source grounding from pasted text / uploaded PDFs (same provenance as read_url)
+# ---------------------------------------------------------------------------
+
+def _ground_with_text(operator: OperatorContext, text: str, label: str) -> None:
+    """Write source text into the run's source.md and mark the run grounded —
+    the same verified provenance a successful read_url provides."""
+    src = operator.folder / "source.md"
+    prior = src.read_text(encoding="utf-8") if src.exists() else "# Fetched sources\n\n"
+    src.write_text(prior + f"## {label}\n\n{(text or '').strip()}\n\n---\n\n", encoding="utf-8")
+    operator.record["grounding_ok"] = True
+
+
+# Staged source (Flow B): the operator attaches a PDF / pastes text BEFORE
+# giving a command, and the next operation is grounded strictly in it. A single
+# global slot — the desktop backend is single-user / single-process.
+_STAGED_SOURCE: "dict | None" = None
+
+
+def stage_source(text: str, label: str) -> dict:
+    """Stage grounding source text for the NEXT operation. Raises ValueError if
+    the text is too thin to be a real source."""
+    global _STAGED_SOURCE
+    t = (text or "").strip()
+    if len(t) < 40:
+        raise ValueError("That source text is too short to ground a run.")
+    _STAGED_SOURCE = {"text": t, "label": label or "Attached source", "chars": len(t)}
+    log.info("source.staged label=%s chars=%d", _STAGED_SOURCE["label"], len(t))
+    return {"label": _STAGED_SOURCE["label"], "chars": _STAGED_SOURCE["chars"]}
+
+
+def staged_source() -> "dict | None":
+    return ({"label": _STAGED_SOURCE["label"], "chars": _STAGED_SOURCE["chars"]}
+            if _STAGED_SOURCE else None)
+
+
+def clear_staged_source() -> None:
+    global _STAGED_SOURCE
+    _STAGED_SOURCE = None
+
+
+def save_source_pdf(operation_id: str, data: bytes, filename: str = "source.pdf") -> None:
+    """Persist an uploaded PDF into the operation's run folder (git-ignored via
+    outputs/*/) so the raw source rides along with source.md."""
+    session = _SESSIONS.get(operation_id)
+    if not session:
+        return
+    try:
+        (session.folder / "source.pdf").write_bytes(data or b"")
+    except OSError:
+        pass
+
+
+def _consume_staged_source(operator: OperatorContext) -> str:
+    """If a source is staged, ground the run in it and return a planner note+text
+    to prepend to the command. Clears the staged source. "" when none."""
+    global _STAGED_SOURCE
+    if not _STAGED_SOURCE:
+        return ""
+    staged = _STAGED_SOURCE
+    _STAGED_SOURCE = None
+    _ground_with_text(operator, staged["text"], staged["label"])
+    # Lock the run to the attached source so the build tools require this
+    # grounding (already satisfied) and never silently fall back.
+    operator.record["source_locked_url"] = (
+        operator.record.get("source_locked_url") or f"attached:{staged['label']}"
+    )
+    return (
+        "GROUNDING SOURCE — the operator attached this. Build the deliverables "
+        "STRICTLY from the text below; do NOT use general knowledge or web search, "
+        f"and omit anything not present here.\n\n{staged['text']}\n\n---\n"
+    )
+
+
 # Resume interpretation for a source-locked run whose grounding failed: a short
 # "do general research" answer lifts the lock; a long paste is treated as the
 # source text itself.
@@ -452,10 +526,7 @@ def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
     # (b) The operator pasted the page text — treat it as the source itself.
     if len(a) >= 120:
         try:
-            src = operator.folder / "source.md"
-            prior = src.read_text(encoding="utf-8") if src.exists() else "# Fetched sources\n\n"
-            src.write_text(prior + f"## Operator-pasted source\n\n{a}\n\n---\n\n", encoding="utf-8")
-            rec["grounding_ok"] = True
+            _ground_with_text(operator, a, "Operator-pasted source")
             return ("The operator pasted the source text; it is saved to source.md. "
                     "Build the deliverables STRICTLY from that text.")
         except OSError:
@@ -501,6 +572,9 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     await _emit_start(emit, record, command, folder)
 
     operator = OperatorContext(folder=folder, record=record, emit=emit)
+    # v2.3: if the operator attached a PDF / pasted text before this command,
+    # ground the run in it (writes source.md, sets grounding_ok, locks the run).
+    staged_note = _consume_staged_source(operator)
     upload_state_line = _compute_upload_state()
     session = _OperationSession(
         operator=operator, folder=folder, agent=build_planner_agent(),
@@ -508,8 +582,11 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     )
     _SESSIONS[record["id"]] = session
 
+    planner_input = _build_planner_input(command, upload_state_line)
+    if staged_note:
+        planner_input = staged_note + "\n" + planner_input
     try:
-        await _run_turn(session, _build_planner_input(command, upload_state_line))
+        await _run_turn(session, planner_input)
     except Exception as exc:  # noqa: BLE001 — top-level safety net
         log.exception("operator.run_failed id=%s", record.get("id"))
         msg = f"Planner failed: {type(exc).__name__}: {exc}"

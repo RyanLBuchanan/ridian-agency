@@ -1491,6 +1491,34 @@ body {
   z-index: 5;
 }
 
+/* v2.3: attached grounding-source chip (PDF / pasted text). */
+.operator-source-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  font-size: var(--fs-xs);
+  color: var(--color-accent-deep);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+}
+.operator-source-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.operator-source-chip-clear {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 50%;
+}
+.operator-source-chip-clear:hover { background: rgba(0, 0, 0, 0.08); }
+
 .operator-step {
   display: grid;
   grid-template-columns: auto 1fr auto;

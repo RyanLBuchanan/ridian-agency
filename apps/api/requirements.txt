@@ -14,3 +14,7 @@ google-auth-oauthlib>=1.2.1
 httpx>=0.27.0
 trafilatura>=2.0.0      # primary main-content extractor
 beautifulsoup4>=4.12.0  # fallback extractor (uses lxml when available)
+
+# PDF-as-source (upload a PDF, extract its text to ground a run)
+pypdf>=5.0.0
+python-multipart>=0.0.9  # FastAPI UploadFile (PDF upload endpoints)

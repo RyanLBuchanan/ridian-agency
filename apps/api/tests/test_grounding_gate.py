@@ -81,11 +81,12 @@ def test_gate_emits_structured_options(tmp_path):
     op = _ctx(tmp_path, {"source_locked_url": "https://x/y"})
     asyncio.run(_grounding_gate(op))
     opts = op.record["needs_input"][0].get("options", [])
-    assert [o.get("action") for o in opts] == ["submit", "compose", "disabled"]
+    assert [o.get("action") for o in opts] == ["submit", "compose", "upload", "disabled"]
     submit = next(o for o in opts if o["action"] == "submit")
     assert submit.get("value") and len(submit["value"]) < 120   # not mistaken for a paste
     compose = next(o for o in opts if o["action"] == "compose")
     assert compose.get("placeholder")   # composer reveal carries a placeholder
+    assert any(o["action"] == "upload" for o in opts)           # PDF upload affordance
 
 
 def test_gate_allows_when_not_locked(tmp_path):

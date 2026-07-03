@@ -4725,6 +4725,9 @@ function _opRenderNeedsInput(need, interactive = true) {
             OPERATOR.command.focus();
           }
         });
+      } else if (action === 'upload') {
+        b.classList.add('btn-ghost');
+        b.addEventListener('click', () => _opAttachPdfClick());  // → uploads to this awaiting op
       } else { // submit → resume the SAME operation with this choice
         b.classList.add('btn-primary');
         b.addEventListener('click', () => {
@@ -5191,6 +5194,89 @@ async function _opContinue(opId, answer) {
     _opSetRunning(false);
     operatorState.abortController = null;
   }
+}
+
+/* ----- v2.3: PDF / text as a grounding source ----- */
+
+function _opAttachPdfClick() {
+  const input = document.getElementById('operator-pdf-input');
+  if (input) input.click();
+}
+
+async function _opHandlePdfFile(file) {
+  if (!file) return;
+  // If a run is paused awaiting a grounding answer, the PDF ANSWERS it and
+  // resumes that run. Otherwise it's staged as the source for the next command.
+  const awaiting = operatorState.finalRecord && operatorState.finalRecord.awaiting_input
+    && operatorState.active && operatorState.active.id;
+  if (awaiting) {
+    await _opUploadPdfToOperation(operatorState.active.id, file);
+  } else {
+    await _opStageSourcePdf(file);
+  }
+}
+
+async function _opStageSourcePdf(file) {
+  _opSetStatus(`Reading ${file.name}…`);
+  try {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    const res = await fetch(`${BACKEND}/sources/stage-pdf`, { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    _opShowSourceChip(`📎 ${file.name} — ${data.chars} chars${data.truncated ? ' (truncated)' : ''} · Ridian will build only from this`);
+    _opSetStatus('Source attached. Type your command and Ridian will build only from it.', 'ok');
+  } catch (err) {
+    _opSetStatus(`Couldn't attach PDF: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+async function _opUploadPdfToOperation(opId, file) {
+  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
+  _opAppendUserMessage(`📎 Uploaded ${file.name}`);
+  const needsEl = document.getElementById('operator-needs-input');
+  if (needsEl) needsEl.classList.add('hidden');
+  const needsList = document.getElementById('operator-needs-input-list');
+  if (needsList) needsList.innerHTML = '';
+  operatorState.finalRecord = null;
+  _opSetRunning(true);
+  _opSetStatusDot('running');
+  _opStartElapsed();
+  _opScrollToBottom();
+  operatorState.abortController = new AbortController();
+  try {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    const res = await fetch(`${BACKEND}/operations/${encodeURIComponent(opId)}/upload-source`, {
+      method: 'POST', body: fd, signal: operatorState.abortController.signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    await _opParseSSE(res);
+  } catch (err) {
+    if (err.name === 'AbortError') _opSetStatus('Cancelled.', 'err');
+    else _opRenderError(err && err.message ? err.message : String(err));
+    _opSetStatusDot('failed');
+  } finally {
+    _opStopElapsed();
+    _opSetRunning(false);
+    operatorState.abortController = null;
+  }
+}
+
+function _opShowSourceChip(text) {
+  const chip = document.getElementById('operator-source-chip');
+  const label = document.getElementById('operator-source-chip-text');
+  if (label) label.textContent = text;
+  if (chip) chip.classList.remove('hidden');
+}
+
+async function _opClearSource() {
+  const chip = document.getElementById('operator-source-chip');
+  if (chip) chip.classList.add('hidden');
+  try { await fetch(`${BACKEND}/sources/clear`, { method: 'POST' }); } catch (_) { /* ignore */ }
 }
 
 async function _opOpenArtifactFile(filename) {
@@ -5665,6 +5751,20 @@ if (_needsAnswerBtn) {
     if (OPERATOR.command) OPERATOR.command.focus();
   });
 }
+
+// v2.3: attach a PDF as the grounding source (composer button + hidden picker).
+const _attachPdfBtn = document.getElementById('operator-attach-pdf-btn');
+if (_attachPdfBtn) _attachPdfBtn.addEventListener('click', _opAttachPdfClick);
+const _pdfInput = document.getElementById('operator-pdf-input');
+if (_pdfInput) {
+  _pdfInput.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';   // allow re-selecting the same file
+    if (f) _opHandlePdfFile(f);
+  });
+}
+const _sourceChipClear = document.getElementById('operator-source-chip-clear');
+if (_sourceChipClear) _sourceChipClear.addEventListener('click', _opClearSource);
 
 // Example chips populate the textarea.
 document.querySelectorAll('[data-operator-example]').forEach((btn) => {

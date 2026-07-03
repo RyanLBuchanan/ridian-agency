@@ -278,7 +278,18 @@
                     type="button"
                     class="btn btn-ghost hidden"
                   >Stop</button>
+                  <button
+                    id="operator-attach-pdf-btn"
+                    type="button"
+                    class="btn btn-ghost btn-compact"
+                    title="Attach a PDF as the grounding source"
+                  >📎 Attach PDF</button>
+                  <input id="operator-pdf-input" type="file" accept="application/pdf,.pdf" hidden />
                   <span id="operator-elapsed" class="operator-elapsed" aria-live="polite"></span>
+                </div>
+                <div id="operator-source-chip" class="operator-source-chip hidden">
+                  <span id="operator-source-chip-text" class="operator-source-chip-text"></span>
+                  <button id="operator-source-chip-clear" type="button" class="operator-source-chip-clear" title="Remove attached source" aria-label="Remove attached source">✕</button>
                 </div>
                 <div class="operator-examples">
                   <span class="operator-examples-label">Try:</span>

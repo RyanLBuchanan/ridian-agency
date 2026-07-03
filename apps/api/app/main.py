@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,6 +41,7 @@ from .services import google_drive_service  # noqa: E402
 from .services import memory_service  # noqa: E402
 from .services import operation_log_service  # noqa: E402
 from .services import operator_service  # noqa: E402
+from .services import pdf_service  # noqa: E402
 from .services import project_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
@@ -918,6 +919,96 @@ async def operations_continue(operation_id: str, payload: OperationContinueReque
         try:
             await operator_service.continue_operation(
                 operation_id=operation_id, answer=payload.answer, emit=emit,
+            )
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(runner())
+
+    async def event_stream():
+        yield ": connected\n\n"
+        while True:
+            evt = await queue.get()
+            if evt is None:
+                yield "event: end\ndata: {}\n\n"
+                break
+            try:
+                payload_json = json.dumps(evt.get("data", {}), default=str)
+            except (TypeError, ValueError):
+                payload_json = json.dumps({"raw": str(evt)})
+            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Grounding sources — paste text / upload a PDF (verified provenance)
+# ---------------------------------------------------------------------------
+
+
+class SourceTextRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="Source text to ground the next operation.")
+
+
+@app.post("/sources/stage-text")
+async def sources_stage_text(payload: SourceTextRequest) -> dict:
+    """Stage a pasted block of text as the grounding source for the next run."""
+    try:
+        info = operator_service.stage_source(payload.text, "Operator-pasted source")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, **info}
+
+
+@app.post("/sources/clear")
+async def sources_clear() -> dict:
+    """Discard any staged grounding source."""
+    operator_service.clear_staged_source()
+    return {"ok": True}
+
+
+@app.post("/sources/stage-pdf")
+async def sources_stage_pdf(file: UploadFile = File(...)) -> dict:
+    """Validate + extract an uploaded PDF and stage its text as the grounding
+    source for the next run. Refuses image-only/scanned PDFs honestly."""
+    data = await file.read()
+    try:
+        extracted = pdf_service.validate_and_extract(data, file.filename or "upload.pdf")
+    except pdf_service.PdfError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail)
+    label = f"Attached PDF: {file.filename or 'upload.pdf'}"
+    info = operator_service.stage_source(extracted["text"], label)
+    return {"ok": True, "pages": extracted["pages"], "truncated": extracted["truncated"], **info}
+
+
+@app.post("/operations/{operation_id}/upload-source")
+async def operations_upload_source(operation_id: str, file: UploadFile = File(...)) -> StreamingResponse:
+    """Answer a grounding-gate question with an uploaded PDF: extract its text
+    and RESUME the operation grounded in it. Image-only PDFs are refused with a
+    400 (no SSE) so the run stays awaiting and honest."""
+    data = await file.read()
+    try:
+        extracted = pdf_service.validate_and_extract(data, file.filename or "upload.pdf")
+    except pdf_service.PdfError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail)
+
+    operator_service.save_source_pdf(operation_id, data, file.filename or "source.pdf")
+    answer = f"[Attached PDF: {file.filename or 'upload.pdf'}]\n\n{extracted['text']}"
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def emit(event: dict) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        try:
+            await operator_service.continue_operation(
+                operation_id=operation_id, answer=answer, emit=emit,
             )
         finally:
             await queue.put(None)
