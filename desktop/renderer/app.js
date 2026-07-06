@@ -5266,6 +5266,38 @@ async function _opUploadPdfToOperation(opId, file) {
   }
 }
 
+// Stage the text currently in the composer as the grounding source. If a run
+// is paused awaiting a grounding answer, the text ANSWERS it (resumes); else
+// it's staged for the next command (build strictly from it).
+async function _opPasteAsSource() {
+  const text = (OPERATOR.command && OPERATOR.command.value || '').trim();
+  if (text.length < 40) {
+    _opSetStatus('Paste the source text into the box first (a few sentences), then click "Text as source".', 'err');
+    if (OPERATOR.command) OPERATOR.command.focus();
+    return;
+  }
+  const awaiting = operatorState.finalRecord && operatorState.finalRecord.awaiting_input
+    && operatorState.active && operatorState.active.id;
+  if (awaiting) {
+    return _opContinue(operatorState.active.id, text);   // answer the paused question
+  }
+  _opSetStatus('Attaching pasted text as source…');
+  try {
+    const res = await fetch(`${BACKEND}/sources/stage-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    if (OPERATOR.command) OPERATOR.command.value = '';
+    _opShowSourceChip(`📋 Pasted text — ${data.chars} chars · Ridian will build only from this`);
+    _opSetStatus('Source attached. Type your command and Ridian will build only from it.', 'ok');
+  } catch (err) {
+    _opSetStatus(`Couldn't attach text: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
 function _opShowSourceChip(text) {
   const chip = document.getElementById('operator-source-chip');
   const label = document.getElementById('operator-source-chip-text');
@@ -5755,6 +5787,8 @@ if (_needsAnswerBtn) {
 // v2.3: attach a PDF as the grounding source (composer button + hidden picker).
 const _attachPdfBtn = document.getElementById('operator-attach-pdf-btn');
 if (_attachPdfBtn) _attachPdfBtn.addEventListener('click', _opAttachPdfClick);
+const _pasteSourceBtn = document.getElementById('operator-paste-source-btn');
+if (_pasteSourceBtn) _pasteSourceBtn.addEventListener('click', _opPasteAsSource);
 const _pdfInput = document.getElementById('operator-pdf-input');
 if (_pdfInput) {
   _pdfInput.addEventListener('change', (e) => {
