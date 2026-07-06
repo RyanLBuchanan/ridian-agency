@@ -5272,7 +5272,7 @@ async function _opUploadPdfToOperation(opId, file) {
 async function _opPasteAsSource() {
   const text = (OPERATOR.command && OPERATOR.command.value || '').trim();
   if (text.length < 40) {
-    _opSetStatus('Paste the source text into the box first (a few sentences), then click "Text as source".', 'err');
+    _opSetStatus('Paste the source text into the box first (a few sentences), then choose “+ → Paste text as source”.', 'err');
     if (OPERATOR.command) OPERATOR.command.focus();
     return;
   }
@@ -5785,10 +5785,77 @@ if (_needsAnswerBtn) {
 }
 
 // v2.3: attach a PDF as the grounding source (composer button + hidden picker).
-const _attachPdfBtn = document.getElementById('operator-attach-pdf-btn');
-if (_attachPdfBtn) _attachPdfBtn.addEventListener('click', _opAttachPdfClick);
-const _pasteSourceBtn = document.getElementById('operator-paste-source-btn');
-if (_pasteSourceBtn) _pasteSourceBtn.addEventListener('click', _opPasteAsSource);
+// v2.4: single "+" add-source menu. Extensible surface — to add a future input
+// type (image, other file), add a menu item with a new data-add-action in the
+// HTML and a matching handler here; no toolbar redesign needed.
+const _OP_ADD_ACTIONS = {
+  pdf: _opAttachPdfClick,
+  text: _opPasteAsSource,
+};
+
+function _opCloseAddMenu() {
+  const btn = document.getElementById('operator-add-btn');
+  const menu = document.getElementById('operator-add-menu');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function _opOpenAddMenu() {
+  const btn = document.getElementById('operator-add-btn');
+  const menu = document.getElementById('operator-add-menu');
+  if (!btn || !menu) return;
+  menu.classList.remove('hidden');
+  btn.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('.operator-add-item:not([disabled])');
+  if (first) first.focus();
+}
+
+(function _opWireAddMenu() {
+  const btn = document.getElementById('operator-add-btn');
+  const menu = document.getElementById('operator-add-menu');
+  const wrap = document.getElementById('operator-add-wrap');
+  if (!btn || !menu || !wrap) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (menu.classList.contains('hidden')) _opOpenAddMenu(); else _opCloseAddMenu();
+  });
+  btn.addEventListener('keydown', (e) => {
+    if ((e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') && menu.classList.contains('hidden')) {
+      e.preventDefault();
+      _opOpenAddMenu();
+    } else if (e.key === 'Escape') {
+      _opCloseAddMenu();
+    }
+  });
+
+  // Selection → run the action + close.
+  menu.querySelectorAll('.operator-add-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const fn = _OP_ADD_ACTIONS[item.getAttribute('data-add-action')];
+      _opCloseAddMenu();
+      btn.focus();
+      if (typeof fn === 'function') fn();
+    });
+  });
+
+  // Keyboard navigation within the menu.
+  menu.addEventListener('keydown', (e) => {
+    const items = Array.from(menu.querySelectorAll('.operator-add-item:not([disabled])'));
+    if (!items.length) return;
+    const idx = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); (items[idx + 1] || items[0]).focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); (items[idx - 1] || items[items.length - 1]).focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); _opCloseAddMenu(); btn.focus(); }
+  });
+
+  // Close on outside-click.
+  document.addEventListener('click', (e) => {
+    if (!menu.classList.contains('hidden') && !wrap.contains(e.target)) _opCloseAddMenu();
+  });
+})();
 const _pdfInput = document.getElementById('operator-pdf-input');
 if (_pdfInput) {
   _pdfInput.addEventListener('change', (e) => {
