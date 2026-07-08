@@ -4399,10 +4399,22 @@ function _opSetStatus(text, kind) {
 }
 
 function _opSetRunning(running) {
-  if (!OPERATOR.runBtn) return;
-  OPERATOR.runBtn.disabled = running;
-  OPERATOR.runBtn.textContent = running ? 'Running…' : 'Run operation';
+  operatorState.running = running;
+  if (OPERATOR.runBtn) {
+    // Icon button — don't overwrite the SVG; reflect state via class + label.
+    OPERATOR.runBtn.classList.toggle('is-running', running);
+    OPERATOR.runBtn.setAttribute('aria-label', running ? 'Running…' : 'Send');
+  }
   if (OPERATOR.cancelBtn) OPERATOR.cancelBtn.classList.toggle('hidden', !running);
+  _opUpdateSendEnabled();
+}
+
+// The send arrow is enabled only when there's text AND no run is in flight
+// (standard chat behavior — greyed when the field is empty).
+function _opUpdateSendEnabled() {
+  if (!OPERATOR.runBtn) return;
+  const hasText = !!(OPERATOR.command && OPERATOR.command.value.trim());
+  OPERATOR.runBtn.disabled = !!operatorState.running || !hasText;
 }
 
 function _opSetStatusDot(kind) {
@@ -4844,7 +4856,8 @@ async function _opMicToggle() {
           ? OPERATOR.command.value.trimEnd() + ' ' + text
           : text;
         OPERATOR.command.focus();
-        _opSetStatus('Heard you. Review and press Run.', 'ok');
+        _opUpdateSendEnabled();
+        _opSetStatus('Heard you. Review and send.', 'ok');
       } else {
         _opSetStatus("Didn't catch that — try again closer to the mic.", 'err');
       }
@@ -5078,7 +5091,7 @@ async function _opSubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
   // Ignore a submit while a run is in flight (e.g. Enter mid-run) so we don't
   // orphan the running turn. (Phase 2 will route answers to /continue.)
-  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
+  if (operatorState.running) return;
   const command = (OPERATOR.command && OPERATOR.command.value || '').trim();
   if (command.length < 4) {
     _opSetStatus('Type a command first.', 'err');
@@ -5153,7 +5166,7 @@ function _opAppendUserMessage(text) {
 // v2: resume a paused operation. Streams the continued run into the SAME turn
 // via POST /operations/{id}/continue — the operation keeps its context/folder.
 async function _opContinue(opId, answer) {
-  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
+  if (operatorState.running) return;
   if (OPERATOR.command) OPERATOR.command.value = '';
   _opAppendUserMessage(answer);
   // The question has been answered — hide its card.
@@ -5232,7 +5245,7 @@ async function _opStageSourcePdf(file) {
 }
 
 async function _opUploadPdfToOperation(opId, file) {
-  if (OPERATOR.runBtn && OPERATOR.runBtn.disabled) return;
+  if (operatorState.running) return;
   _opAppendUserMessage(`📎 Uploaded ${file.name}`);
   const needsEl = document.getElementById('operator-needs-input');
   if (needsEl) needsEl.classList.add('hidden');
@@ -5291,6 +5304,7 @@ async function _opPasteAsSource() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
     if (OPERATOR.command) OPERATOR.command.value = '';
+    _opUpdateSendEnabled();
     _opShowSourceChip(`📋 Pasted text — ${data.chars} chars · Ridian will build only from this`);
     _opSetStatus('Source attached. Type your command and Ridian will build only from it.', 'ok');
   } catch (err) {
@@ -5867,6 +5881,10 @@ if (_pdfInput) {
 const _sourceChipClear = document.getElementById('operator-source-chip-clear');
 if (_sourceChipClear) _sourceChipClear.addEventListener('click', _opClearSource);
 
+// Send arrow: greyed until the field has text (and no run in flight).
+if (OPERATOR.command) OPERATOR.command.addEventListener('input', _opUpdateSendEnabled);
+_opUpdateSendEnabled();
+
 // Example chips populate the textarea.
 document.querySelectorAll('[data-operator-example]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -5874,6 +5892,7 @@ document.querySelectorAll('[data-operator-example]').forEach((btn) => {
     if (OPERATOR.command) {
       OPERATOR.command.value = text;
       OPERATOR.command.focus();
+      _opUpdateSendEnabled();
     }
   });
 });
@@ -6092,6 +6111,7 @@ function _walkCmdHistory(dir) {
   // Move caret to end so the next ↑ keeps walking (rather than triggering line-up).
   const len = OPERATOR.command.value.length;
   try { OPERATOR.command.setSelectionRange(len, len); } catch (_) {}
+  _opUpdateSendEnabled();
 }
 
 if (OPERATOR.command) {
@@ -6117,6 +6137,7 @@ if (OPERATOR.command) {
       if (_cmdHistoryIdx !== -1) {
         _cmdHistoryIdx = -1;
         OPERATOR.command.value = _cmdHistoryDraft;
+        _opUpdateSendEnabled();
       }
     }
   });

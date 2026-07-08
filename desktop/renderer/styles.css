@@ -1271,23 +1271,18 @@ body {
 
 #operator-command {
   width: 100%;
-  resize: vertical;
-  min-height: 88px;
+  resize: none;
+  min-height: 72px;
   font: inherit;
   font-size: 1.02rem;
   line-height: 1.45;
-  background: var(--color-surface);
+  background: transparent;
   color: var(--color-text-strong);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+  border: none;
+  padding: 12px 14px 4px;
 }
 
-#operator-command:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
-}
+#operator-command:focus { outline: none; }
 
 .operator-actions {
   display: flex;
@@ -1758,17 +1753,68 @@ body {
 
 .operator-command-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.operator-command-wrap #operator-command {
-  /* keep typed text clear of the inset mic */
-  padding-right: 56px;
+.operator-command-wrap:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+/* In-field bottom toolbar: "+" on the left, mic + send on the right. */
+.operator-field-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 8px;
+}
+
+.operator-field-left,
+.operator-field-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Circular ↑ send button (bottom-right), disabled/greyed when empty. */
+.operator-send-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  border: 1px solid var(--color-accent);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.operator-send-btn:hover:not(:disabled) {
+  background: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
+}
+.operator-send-btn:active:not(:disabled) { transform: scale(0.94); }
+.operator-send-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.operator-send-btn:disabled {
+  background: var(--color-border);
+  border-color: var(--color-border);
+  color: var(--color-muted-soft);
+  cursor: not-allowed;
 }
 
 .operator-mic {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  position: static;
   width: 34px;
   height: 34px;
   display: inline-flex;
