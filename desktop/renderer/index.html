@@ -230,16 +230,35 @@
           <section id="view-welcome" class="workspace-view">
 
             <!-- ============= OPERATOR v1 — COMMAND SURFACE ============= -->
-            <section class="operator" aria-labelledby="operator-heading">
-              <header class="operator-head">
-                <span class="operator-eyebrow">Operator v1</span>
-                <h2 id="operator-heading" class="operator-title">Tell Ridian what to do.</h2>
-                <p class="operator-sub">
-                  Ridian drafts your emails, builds your spreadsheets and slide decks,
-                  and files everything in Drive. Sending anything still needs your approval.
-                </p>
-              </header>
+            <section class="operator" aria-label="Ridian Operator">
+              <!-- Left rail: persistent workspace context (memory + last run),
+                   Claude/ChatGPT-style. Chip ids are unchanged so the existing
+                   JS wiring (counts, click-through to Memory) keeps working. -->
+              <aside class="operator-rail" aria-label="Workspace context">
+                <div class="operator-rail-title">Workspace</div>
+                <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
+                  <button
+                    type="button"
+                    id="operator-context-memory"
+                    class="operator-context-chip"
+                    title="Edit memory"
+                  >
+                    <span class="operator-context-chip-label">Memory</span>
+                    <span class="operator-context-chip-value" id="operator-context-memory-value">—</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="operator-context-last"
+                    class="operator-context-chip hidden"
+                    title="Open the last operation"
+                  >
+                    <span class="operator-context-chip-label">Last run</span>
+                    <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
+                  </button>
+                </div>
+              </aside>
 
+              <div class="operator-main">
               <form id="operator-form" class="operator-form" autocomplete="off">
                 <label class="sr-only" for="operator-command">Command for Ridian</label>
                 <!-- Composer: the mic lives INSIDE the input, bottom-right —
@@ -248,7 +267,7 @@
                   <textarea
                     id="operator-command"
                     name="command"
-                    rows="3"
+                    rows="2"
                     placeholder="Tell Ridian what to do…  (try: &quot;Draft check-in emails to everyone I owe a reply.&quot;)"
                     spellcheck="false"
                   ></textarea>
@@ -342,31 +361,6 @@
                 </div>
               </form>
 
-              <!-- Single-pane context strip: persistent state visible without
-                   navigation. Chips show memory counts + the last operation;
-                   each is clickable to drill in. Hidden when there's nothing
-                   useful to say (fresh install). -->
-              <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
-                <button
-                  type="button"
-                  id="operator-context-memory"
-                  class="operator-context-chip"
-                  title="Edit memory"
-                >
-                  <span class="operator-context-chip-label">Memory</span>
-                  <span class="operator-context-chip-value" id="operator-context-memory-value">—</span>
-                </button>
-                <button
-                  type="button"
-                  id="operator-context-last"
-                  class="operator-context-chip hidden"
-                  title="Open the last operation"
-                >
-                  <span class="operator-context-chip-label">Last run</span>
-                  <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
-                </button>
-              </div>
-
               <!-- Conversational thread: frozen past turns stack in
                    #operator-thread; the current run renders live in
                    #operator-live (always the last block before the composer). -->
@@ -380,7 +374,8 @@
                     <span id="operator-active-status-dot" class="operator-status-dot is-running" aria-hidden="true"></span>
                     <span id="operator-active-status-label">Running…</span>
                   </div>
-                  <span id="operator-active-folder" class="operator-active-folder"></span>
+                  <!-- Local path intentionally not shown — "Open output folder"
+                       on the artifacts card is the affordance for finding files. -->
                 </div>
                 <ol id="operator-timeline" class="operator-timeline"></ol>
                 <!-- v1.7: the planner's final receipt — shown on screen and
@@ -454,6 +449,7 @@
               </div>
                 </div><!-- /operator-live -->
               </div><!-- /operator-scroll -->
+              </div><!-- /operator-main -->
             </section>
 
             <!-- Legacy workflows — kept available but no longer the main focus.
@@ -1367,10 +1363,21 @@
     <!-- ============================================================ -->
     <aside id="history-panel" class="history-panel hidden" aria-labelledby="history-title" aria-hidden="true">
       <div class="history-panel-head">
-        <h2 id="history-title" class="history-panel-title">Recent operations</h2>
-        <button id="history-close-btn" type="button" class="modal-close" aria-label="Close history">&times;</button>
+        <h2 id="history-title" class="history-panel-title">Menu</h2>
+        <button id="history-close-btn" type="button" class="modal-close" aria-label="Close menu">&times;</button>
       </div>
       <div class="history-panel-body">
+        <nav class="history-panel-nav" aria-label="App menu">
+          <button id="menu-legacy-btn" type="button" class="history-panel-nav-btn">
+            <span>Legacy workflows</span>
+            <span class="history-panel-nav-hint">Business · Social · Agentic · NotebookLM</span>
+          </button>
+          <button id="menu-settings-btn" type="button" class="history-panel-nav-btn">
+            <span>Settings</span>
+            <span class="history-panel-nav-hint">API keys · Google · voice · Drive</span>
+          </button>
+        </nav>
+        <h3 class="history-panel-section-title">Recent operations</h3>
         <ul id="history-panel-list" class="history-panel-list">
           <li class="history-panel-empty">Loading…</li>
         </ul>

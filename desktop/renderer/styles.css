@@ -1038,8 +1038,17 @@ body {
 }
 .app-shell.single-pane .workspace-view {
   width: 100%;
-  max-width: 920px;
+  max-width: 1120px;   /* room for the context rail + a ~900px conversation */
   margin: 0 auto;
+}
+
+/* v2.6: the operator view fills the window so the composer sits at the
+   BOTTOM like any chat tool, even with an empty thread. The legacy-workflows
+   block (when summoned from the menu) still scrolls in below. */
+.app-shell.single-pane #view-welcome {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Top-bar icon buttons (history + settings). Only visible in single-pane mode
@@ -1074,11 +1083,15 @@ body {
 
 /* Context strip — persistent state visible below the command box without
    navigating anywhere. Chips are clickable to drill in. */
+/* v2.6: lives in the left rail — chips stack vertically, full width. */
 .operator-context-strip {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
-  margin-top: 0.5rem;
-  flex-wrap: wrap;
+}
+.operator-context-strip .operator-context-chip {
+  width: 100%;
+  text-align: left;
 }
 .operator-context-chip {
   display: inline-flex;
@@ -1219,16 +1232,46 @@ body {
 
 /* ---------- Operator v1 (command surface) ---------- */
 
+/* v2.6: ChatGPT/Claude-style shell — slim context rail on the left, the
+   conversation + bottom composer filling the rest. */
 .operator {
   max-width: 1400px;
-  margin: 0 auto var(--space-4);
+  margin: 0 auto;
   width: 100%;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.operator-rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--space-2) 0;
+}
+
+.operator-rail-title {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-muted-soft);
+}
+
+/* The main column: thread scroll area on top, composer pinned at the bottom
+   (the form keeps order:10 + sticky from the conversational-shell work). */
+.operator-main {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
 }
+.operator-main .operator-scroll { flex: 1; }
 
 .operator-head { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1272,7 +1315,7 @@ body {
 #operator-command {
   width: 100%;
   resize: none;
-  min-height: 72px;
+  min-height: 52px;
   font: inherit;
   font-size: 1.02rem;
   line-height: 1.45;
@@ -2191,6 +2234,8 @@ body {
 /* Templates & context — demoted dashboard */
 
 .operator-templates {
+  /* v2.6: tucked away — only summoned from the ☰ menu ("Legacy workflows"). */
+  display: none;
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
@@ -2200,6 +2245,7 @@ body {
   padding: 0;
   overflow: hidden;
 }
+.operator-templates.is-summoned { display: block; }
 
 .operator-templates > summary {
   cursor: pointer;
@@ -4637,4 +4683,60 @@ body {
 @media (max-width: 640px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; } /* TODO: replace with a hamburger overlay */
+}
+
+/* v2.6: ☰ panel as the app menu — quiet nav entries above Recent operations. */
+.history-panel-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.history-panel-nav-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-strong);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.history-panel-nav-btn:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+.history-panel-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+.history-panel-nav-hint {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--color-muted);
+}
+.history-panel-section-title {
+  margin: var(--space-3) var(--space-3) 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-soft);
+}
+
+/* Narrow windows: collapse the context rail above the conversation. */
+@media (max-width: 900px) {
+  .operator { grid-template-columns: 1fr; }
+  .operator-rail { position: static; }
+  .operator-context-strip { flex-direction: row; flex-wrap: wrap; }
+  .operator-context-strip .operator-context-chip { width: auto; }
 }

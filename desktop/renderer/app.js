@@ -6158,6 +6158,27 @@ if (OPERATOR.form) {
 const _topbarSettingsBtn = document.getElementById('topbar-settings-btn');
 if (_topbarSettingsBtn) _topbarSettingsBtn.addEventListener('click', openSettings);
 
+// v2.6: the ☰ panel is now the app menu. "Legacy workflows" lives here — the
+// inline <details> on the welcome view is hidden until summoned.
+const _menuLegacyBtn = document.getElementById('menu-legacy-btn');
+if (_menuLegacyBtn) {
+  _menuLegacyBtn.addEventListener('click', () => {
+    _historyClose();
+    const details = document.getElementById('operator-templates');
+    if (!details) return;
+    details.classList.add('is-summoned');
+    details.open = true;
+    details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+const _menuSettingsBtn = document.getElementById('menu-settings-btn');
+if (_menuSettingsBtn) {
+  _menuSettingsBtn.addEventListener('click', () => {
+    _historyClose();
+    openSettings();
+  });
+}
+
 // Refresh the context strip after each operation completes so "Last run"
 // reflects the freshest data without requiring a full view-switch.
 (function _hookContextStripRefresh() {
