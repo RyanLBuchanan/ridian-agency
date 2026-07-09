@@ -185,16 +185,11 @@
               id="topbar-history-btn"
               type="button"
               class="topbar-icon-btn"
-              aria-label="Recent operations"
-              title="Recent operations"
+              aria-label="Menu"
+              title="Menu"
             >&#x2630;</button>
-            <button
-              id="topbar-settings-btn"
-              type="button"
-              class="topbar-icon-btn"
-              aria-label="Settings"
-              title="Settings"
-            >&#x2699;</button>
+            <!-- Settings moved to the sidebar's bottom-left (rail-settings-btn);
+                 also reachable from the ☰ menu. -->
           </div>
         </header>
 
@@ -234,7 +229,26 @@
               <!-- Left rail: persistent workspace context (memory + last run),
                    Claude/ChatGPT-style. Chip ids are unchanged so the existing
                    JS wiring (counts, click-through to Memory) keeps working. -->
-              <aside class="operator-rail" aria-label="Workspace context">
+              <aside class="operator-rail" aria-label="Workspace navigation">
+                <button id="rail-new-chat" type="button" class="rail-new-chat">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                  <span>New chat</span>
+                </button>
+                <label class="sr-only" for="rail-search">Search chats</label>
+                <input
+                  id="rail-search"
+                  class="rail-search"
+                  type="search"
+                  placeholder="Search chats…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="operator-rail-title">Chats</div>
+                <ul id="rail-threads" class="rail-threads">
+                  <li class="rail-threads-empty">No chats yet.</li>
+                </ul>
                 <div class="operator-rail-title">Workspace</div>
                 <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
                   <button
@@ -256,6 +270,13 @@
                     <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
                   </button>
                 </div>
+                <button id="rail-settings-btn" type="button" class="rail-settings">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>
+                  </svg>
+                  <span>Settings</span>
+                </button>
               </aside>
 
               <div class="operator-main">

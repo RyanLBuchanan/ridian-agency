@@ -6079,6 +6079,92 @@ async function _historyFill() {
 if (_historyEls.topbarBtn) _historyEls.topbarBtn.addEventListener('click', _historyOpen);
 if (_historyEls.closeBtn) _historyEls.closeBtn.addEventListener('click', _historyClose);
 
+/* ----- 2b. v2.7: sidebar chat list + search + new chat + settings ----- */
+
+let _railOps = [];   // last-fetched operations, filtered client-side by search
+
+function _railActiveFolder() {
+  return (operatorState.active && operatorState.active.artifact_folder) || '';
+}
+
+function _railRenderThreads() {
+  const list = document.getElementById('rail-threads');
+  if (!list) return;
+  const q = ((document.getElementById('rail-search') || {}).value || '').trim().toLowerCase();
+  const ops = q
+    ? _railOps.filter((op) => (op.command || '').toLowerCase().includes(q))
+    : _railOps;
+  list.innerHTML = '';
+  if (!ops.length) {
+    const li = document.createElement('li');
+    li.className = 'rail-threads-empty';
+    li.textContent = q ? 'No chats match.' : 'No chats yet.';
+    list.appendChild(li);
+    return;
+  }
+  const activeFolder = _railActiveFolder();
+  ops.forEach((op) => {
+    const li = document.createElement('li');
+    li.className = 'rail-thread';
+    if (op.artifact_folder && op.artifact_folder === activeFolder) li.classList.add('is-active');
+    const cmd = (op.command || '(no command)').split(/\r?\n/)[0];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rail-thread-btn';
+    btn.title = cmd;
+    const label = document.createElement('span');
+    label.className = 'rail-thread-cmd';
+    label.textContent = cmd;
+    const when = document.createElement('span');
+    when.className = 'rail-thread-when';
+    when.textContent = _fmtRelativeShort(op.completed_at);
+    btn.appendChild(label);
+    btn.appendChild(when);
+    btn.addEventListener('click', () => {
+      if (op.artifact_folder) {
+        loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd });
+        list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
+        li.classList.add('is-active');
+      }
+    });
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+}
+
+async function _railThreadsFill() {
+  try {
+    const res = await fetch(`${BACKEND}/operations/recent?limit=30`);
+    if (!res.ok) return;
+    const data = await res.json();
+    _railOps = (data && data.operations) || [];
+    _railRenderThreads();
+  } catch (_) { /* backend not up yet — the poll below retries */ }
+}
+
+// New chat: abort any in-flight run, clear the thread, fresh composer.
+function _opNewChat() {
+  if (operatorState.abortController) {
+    try { operatorState.abortController.abort(); } catch (_) {}
+  }
+  _opResetUI();
+  operatorState.active = null;
+  operatorState.finalRecord = null;
+  if (OPERATOR.active) OPERATOR.active.classList.add('hidden');
+  if (OPERATOR.command) { OPERATOR.command.value = ''; OPERATOR.command.focus(); }
+  const list = document.getElementById('rail-threads');
+  if (list) list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
+}
+
+const _railNewChatBtn = document.getElementById('rail-new-chat');
+if (_railNewChatBtn) _railNewChatBtn.addEventListener('click', _opNewChat);
+const _railSearch = document.getElementById('rail-search');
+if (_railSearch) _railSearch.addEventListener('input', _railRenderThreads);
+const _railSettingsBtn = document.getElementById('rail-settings-btn');
+if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
+
+_railThreadsFill();
+
 /* ----- 3. Command-history (↑/↓) in the command box ----- */
 
 const _CMD_HISTORY_KEY = 'ridian.cmdHistory';
@@ -6191,7 +6277,7 @@ if (_menuSettingsBtn) {
     if (fid && fid !== lastSeenFinalId) {
       lastSeenFinalId = fid;
       // Wait a moment for the operation_log.json on disk + log append to settle.
-      setTimeout(() => loadOperatorContextStrip(), 500);
+      setTimeout(() => { loadOperatorContextStrip(); _railThreadsFill(); }, 500);
     }
   }, 1500);
 })();
