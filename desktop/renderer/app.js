@@ -200,7 +200,7 @@ const SETTINGS_FIELDS = [
   'google_drive_root_folder_id',
   'appearance',
 ];
-const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password'];
+const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password'];
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
@@ -422,6 +422,7 @@ const els = {
   settingsTestEmailBtn: document.getElementById('settings-test-email-btn'),
   settingsStatus: document.getElementById('settings-status'),
   settingsPasswordHint: document.getElementById('settings-password-hint'),
+  settingsAnthropicKeyHint: document.getElementById('settings-anthropic-key-hint'),
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
   googleConnectBtn: document.getElementById('google-connect-btn'),
@@ -2021,7 +2022,7 @@ async function runWorkflow() {
   const task = els.taskInput.value.trim();
   if (task.length < 10) { showError('Please describe the task in at least 10 characters.'); return; }
   if (backendUp === false) { showError('Backend is not running. Start the FastAPI server first.'); return; }
-  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
 
   hide(els.errorRegion);
   setRunning(true);
@@ -2076,7 +2077,7 @@ async function runSocialWorkflow() {
   }
   if (!payload.channel) { showError('Choose a Channel / Brand before running the social workflow.'); return; }
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
 
   // Capture meta now so the run summary has it after completion
   currentRunMeta = { ...payload };
@@ -2127,7 +2128,7 @@ async function runAgenticAdvancesWorkflow() {
     output_depth: (els.agenticOutputDepth && els.agenticOutputDepth.value) || 'Strategic brief',
   };
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
 
   currentRunMeta = { ...payload };
 
@@ -2186,7 +2187,7 @@ async function runNotebookLMWorkflow() {
     notes: (els.notebooklmNotes && els.notebooklmNotes.value) || '',
   };
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
 
   currentRunMeta = { ...payload };
 
@@ -3048,13 +3049,22 @@ function applySettingsToForm(settings) {
     const input = els.settingsForm.elements.namedItem(name);
     if (input) input.value = '';
   });
+  if (els.settingsAnthropicKeyHint) {
+    if (settings.anthropic_api_key_configured) {
+      els.settingsAnthropicKeyHint.className = 'field-hint is-ok';
+      els.settingsAnthropicKeyHint.textContent = 'An Anthropic API key is currently saved. Leave blank to keep it; type a new one to replace it.';
+    } else {
+      els.settingsAnthropicKeyHint.className = 'field-hint';
+      els.settingsAnthropicKeyHint.textContent = 'Paste your Anthropic API key here. Get one at console.anthropic.com/settings/keys.';
+    }
+  }
   if (els.settingsOpenaiKeyHint) {
     if (settings.openai_api_key_configured) {
       els.settingsOpenaiKeyHint.className = 'field-hint is-ok';
-      els.settingsOpenaiKeyHint.textContent = 'An OpenAI API key is currently saved. Leave blank to keep it; type a new one to replace it.';
+      els.settingsOpenaiKeyHint.textContent = 'An OpenAI key is saved (voice input only). Leave blank to keep it.';
     } else {
       els.settingsOpenaiKeyHint.className = 'field-hint';
-      els.settingsOpenaiKeyHint.textContent = 'Paste your OpenAI API key here. Get one at platform.openai.com/api-keys.';
+      els.settingsOpenaiKeyHint.textContent = 'Optional — only needed for microphone voice input (Whisper).';
     }
   }
   if (els.settingsPasswordHint) {
@@ -3389,8 +3399,8 @@ function setOpenAIKeyState(configured) {
     if (els.socialRunBtn) { els.socialRunBtn.disabled = false; els.socialRunBtn.title = ''; }
   } else {
     show(els.openaiMissingBanner);
-    if (els.runBtn) { els.runBtn.disabled = true; els.runBtn.title = 'Configure your OpenAI API key in Settings first.'; }
-    if (els.socialRunBtn) { els.socialRunBtn.disabled = true; els.socialRunBtn.title = 'Configure your OpenAI API key in Settings first.'; }
+    if (els.runBtn) { els.runBtn.disabled = true; els.runBtn.title = 'Configure your Anthropic API key in Settings first.'; }
+    if (els.socialRunBtn) { els.socialRunBtn.disabled = true; els.socialRunBtn.title = 'Configure your Anthropic API key in Settings first.'; }
   }
 }
 
@@ -3403,7 +3413,7 @@ async function pollHealth() {
     setBackendStatus(res.ok);
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
-      setOpenAIKeyState(!!data.openai_key_loaded);
+      setOpenAIKeyState(!!data.anthropic_key_loaded);
     }
   } catch (_) { setBackendStatus(false); }
 }

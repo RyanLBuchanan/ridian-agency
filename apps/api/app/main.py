@@ -129,6 +129,8 @@ class SettingsView(BaseModel):
     operator_email: str = ""
     default_to_email: str = ""
     company_name: str = ""
+    anthropic_model: str = ""
+    anthropic_api_key_configured: bool = False
     openai_model: str = ""
     openai_api_key_configured: bool = False
     smtp_host: str = ""
@@ -160,6 +162,8 @@ class SettingsUpdate(BaseModel):
     operator_email: str | None = None
     default_to_email: str | None = None
     company_name: str | None = None
+    anthropic_api_key: str | None = None
+    anthropic_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
     smtp_host: str | None = None
@@ -336,15 +340,16 @@ async def health() -> dict:
     return {
         "status": "ok",
         "service": "ridian-agency",
-        "model": settings_service.get_effective_value("OPENAI_MODEL") or "gpt-4o-mini",
+        "model": settings_service.get_effective_value("ANTHROPIC_MODEL") or "claude-opus-4-8",
+        "anthropic_key_loaded": bool(settings_service.get_effective_value("ANTHROPIC_API_KEY")),
         "openai_key_loaded": bool(settings_service.get_effective_value("OPENAI_API_KEY")),
     }
 
 
 @app.post("/workflows/run", response_model=WorkflowResponse)
 async def workflows_run(payload: WorkflowRequest) -> WorkflowResponse:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set.")
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not set.")
 
     log.info("workflow.start task=%r", payload.task[:120])
     try:
@@ -373,10 +378,10 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
     OPENAI_API_KEY and OPENAI_MODEL via settings_service the same way the
     business workflow does.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     log.info("social_workflow.start channel=%r format=%r depth=%r",
@@ -419,10 +424,10 @@ async def workflows_agentic_advances_run(payload: AgenticAdvancesRequest) -> Age
     in current sources. The artifact is a single Markdown file:
     ``agentic_advances_brief.md``.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     if payload.time_window and payload.time_window not in AGENTIC_WINDOWS:
@@ -460,10 +465,10 @@ async def workflows_notebooklm_run(payload: NotebookLMRequest) -> NotebookLMResp
     Produces a single Markdown artifact, ``notebooklm_package.md``, with
     a copy-paste-ready Audio Overview prompt and supporting prompts.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     if payload.purpose and payload.purpose not in NLM_PURPOSES:

@@ -213,11 +213,11 @@
             class="banner banner-warn hidden"
             role="alert"
           >
-            <div class="banner-title">OpenAI API key is not configured.</div>
+            <div class="banner-title">Anthropic API key is not configured.</div>
             <div class="banner-body">
               Open <strong>Settings</strong> (bottom left) to add your key before
               running workflows. Get a key at
-              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
             </div>
           </section>
 
@@ -1548,7 +1548,24 @@
           </fieldset>
 
           <fieldset class="form-group">
-            <legend>AI provider</legend>
+            <legend>AI provider — Anthropic</legend>
+            <label class="field">
+              <span class="field-label">Anthropic API key</span>
+              <input name="anthropic_api_key" type="password" autocomplete="new-password" />
+              <span id="settings-anthropic-key-hint" class="field-hint"></span>
+            </label>
+            <label class="field">
+              <span class="field-label">Model</span>
+              <input name="anthropic_model" type="text" autocomplete="off" placeholder="claude-opus-4-8" />
+              <span class="field-hint">
+                The Claude model every agent uses. Defaults to
+                <code>claude-opus-4-8</code>. Changes take effect on the next run.
+              </span>
+            </label>
+          </fieldset>
+
+          <fieldset class="form-group">
+            <legend>Voice input (OpenAI Whisper)</legend>
             <label class="field">
               <span class="field-label">OpenAI API key</span>
               <input name="openai_api_key" type="password" autocomplete="new-password" />
@@ -1558,8 +1575,8 @@
               <span class="field-label">Model</span>
               <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-4o-mini" />
               <span class="field-hint">
-                The OpenAI model every agent uses. Defaults to
-                <code>gpt-4o-mini</code>. Changes take effect on the next workflow run.
+                Only used for microphone transcription (Whisper). Leave blank to
+                disable voice input — everything else runs on Claude.
               </span>
             </label>
           </fieldset>

@@ -33,6 +33,10 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "operator_email",
     "default_to_email",
     "company_name",
+    # Anthropic powers all agents/workflows; the OpenAI key remains only for
+    # voice-input transcription (Whisper — Anthropic has no transcription API).
+    "anthropic_api_key",
+    "anthropic_model",
     "openai_api_key",
     "openai_model",
     "smtp_host",
@@ -47,13 +51,18 @@ SETTABLE_KEYS: tuple[str, ...] = (
 
 # Secrets — never returned by the public view, and preserved-on-blank when
 # the GUI submits an empty field (so the renderer never round-trips them).
-SECRET_KEYS: frozenset[str] = frozenset({"smtp_password", "openai_api_key"})
+SECRET_KEYS: frozenset[str] = frozenset({
+    "smtp_password", "openai_api_key", "anthropic_api_key",
+})
 
 PUBLIC_KEYS: tuple[str, ...] = tuple(k for k in SETTABLE_KEYS if k not in SECRET_KEYS)
 
 # Settings whose values we mirror into os.environ so SDKs that read env vars
-# directly (notably the OpenAI SDK reading OPENAI_API_KEY) see the value.
+# directly (the Anthropic SDK reading ANTHROPIC_API_KEY, the OpenAI SDK
+# reading OPENAI_API_KEY for Whisper) see the value.
 _SDK_ENV_MAP: dict[str, str] = {
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "anthropic_model": "ANTHROPIC_MODEL",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_model": "OPENAI_MODEL",
 }
@@ -124,6 +133,9 @@ def public_view() -> dict[str, Any]:
     out: dict[str, Any] = {k: s.get(k, "") for k in PUBLIC_KEYS}
     out["smtp_password_configured"] = bool(s.get("smtp_password"))
     out["openai_api_key_configured"] = bool(s.get("openai_api_key"))
+    out["anthropic_api_key_configured"] = bool(
+        s.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+    )
     return out
 
 

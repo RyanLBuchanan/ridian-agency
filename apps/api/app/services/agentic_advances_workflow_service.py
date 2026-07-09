@@ -1,11 +1,11 @@
 """Agentic Advances Daily Brief workflow.
 
-A single OpenAI Agents SDK agent equipped with the hosted ``WebSearchTool``
+A single Claude agent equipped with the server-side web search tool
 produces a Markdown brief of significant agentic AI developments relevant
 to Ridian. The brief is saved to its own per-run folder under
 ``outputs/<timestamp>_<slug>/agentic_advances_brief.md``.
 
-Kept deliberately simple: one agent, one ``Runner.run``, one artifact.
+Kept deliberately simple: one agent, one call, one artifact.
 """
 
 from __future__ import annotations
@@ -14,9 +14,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents import Agent, Runner, WebSearchTool, trace
-
-from ..agents import default_model, load_prompt
+from ..agents import load_prompt
+from .anthropic_runtime import run_text_agent
 from .artifact_service import create_run_folder, write_artifact
 from .settings_service import apply_to_environment
 
@@ -47,15 +46,6 @@ class AgenticAdvancesInput:
 class AgenticAdvancesResult:
     artifact_folder: Path
     agentic_advances_brief: str
-
-
-def _build_agent() -> Agent:
-    return Agent(
-        name="Agentic Advances Analyst",
-        instructions=load_prompt("agentic_advances_prompt.txt"),
-        model=default_model(),
-        tools=[WebSearchTool(search_context_size="high")],
-    )
 
 
 def _format_input(payload: AgenticAdvancesInput) -> str:
@@ -107,16 +97,13 @@ def _slug_for_run(payload: AgenticAdvancesInput) -> str:
 async def run_agentic_advances_workflow(payload: AgenticAdvancesInput) -> AgenticAdvancesResult:
     apply_to_environment()
 
-    agent = _build_agent()
-    agent.model = default_model()
-
     folder = create_run_folder(_slug_for_run(payload))
     formatted_input = _format_input(payload)
 
-    with trace("ridian-agency.agentic-advances"):
-        result = await Runner.run(agent, input=formatted_input)
-
-    brief = (result.final_output or "").strip()
+    brief = (await run_text_agent(
+        load_prompt("agentic_advances_prompt.txt"), formatted_input,
+        use_web_search=True,
+    )).strip()
     if not brief:
         brief = (
             "# Agentic Advances Brief\n\n"

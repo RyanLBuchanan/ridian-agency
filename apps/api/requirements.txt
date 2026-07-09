@@ -2,7 +2,11 @@ fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 pydantic>=2.11.0
 python-dotenv>=1.0.1
-openai-agents>=0.0.13
+# Anthropic powers all agents + workflows (planner tool runner, sub-agents,
+# server-side web search). The bare openai package remains ONLY for voice-input
+# transcription (Whisper) — Anthropic has no transcription API.
+anthropic>=0.116.0
+openai>=1.50.0
 python-docx>=1.1.0
 python-pptx>=1.0.0
 google-api-python-client>=2.150.0

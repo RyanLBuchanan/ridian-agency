@@ -1,10 +1,10 @@
 """NotebookLM Prompt + Audio Overview Builder workflow.
 
-A single OpenAI Agents SDK agent produces a ready-to-paste Markdown
+A single Claude agent produces a ready-to-paste Markdown
 package for Google's NotebookLM. The package is saved to its own per-run
 folder under ``outputs/<timestamp>_<slug>/notebooklm_package.md``.
 
-Kept deliberately simple: one agent, one ``Runner.run``, one artifact.
+Kept deliberately simple: one agent, one call, one artifact.
 """
 
 from __future__ import annotations
@@ -13,9 +13,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents import Agent, Runner, trace
-
-from ..agents import default_model, load_prompt
+from ..agents import load_prompt
+from .anthropic_runtime import run_text_agent
 from .artifact_service import create_run_folder, write_artifact
 from .settings_service import apply_to_environment
 
@@ -57,14 +56,6 @@ class NotebookLMInput:
 class NotebookLMResult:
     artifact_folder: Path
     notebooklm_package: str
-
-
-def _build_agent() -> Agent:
-    return Agent(
-        name="NotebookLM Package Builder",
-        instructions=load_prompt("notebooklm_prompt.txt"),
-        model=default_model(),
-    )
 
 
 def _format_input(payload: NotebookLMInput) -> str:
@@ -110,16 +101,12 @@ def _slug_for_run(payload: NotebookLMInput) -> str:
 async def run_notebooklm_workflow(payload: NotebookLMInput) -> NotebookLMResult:
     apply_to_environment()
 
-    agent = _build_agent()
-    agent.model = default_model()
-
     folder = create_run_folder(_slug_for_run(payload))
     formatted_input = _format_input(payload)
 
-    with trace("ridian-agency.notebooklm"):
-        result = await Runner.run(agent, input=formatted_input)
-
-    package = (result.final_output or "").strip()
+    package = (await run_text_agent(
+        load_prompt("notebooklm_prompt.txt"), formatted_input,
+    )).strip()
     if not package:
         package = (
             "# NotebookLM Package\n\n"

@@ -28,19 +28,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from agents import Runner
-from agents.items import (
-    MessageOutputItem,
-    ToolCallItem,
-    ToolCallOutputItem,
-)
-from agents.stream_events import RunItemStreamEvent
-
-from ..agents.planner_agent import build_planner_agent
+from ..agents import default_model
+from ..agents.planner_agent import build_planner_system
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
+from .anthropic_runtime import get_client
 from .artifact_service import create_run_folder
-from .operator_context import OperatorContext
-from .operator_tools import detect_deliverable_intent, detect_source_lock, extract_emails
+from .operator_context import OperatorContext, set_current_operator
+from .operator_tools import (
+    PLANNER_TOOLS,
+    detect_deliverable_intent,
+    detect_source_lock,
+    extract_emails,
+)
 from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
 
 log = logging.getLogger("ridian.operator")
@@ -63,8 +62,8 @@ _MAX_PLANNER_TURNS = 24
 class _OperationSession:
     operator: OperatorContext
     folder: Path
-    agent: object
-    input_list: list
+    system: str          # the planner system prompt (tool list spliced in)
+    input_list: list     # mirrored Anthropic messages — full conversation history
     upload_state_line: str
 
 
@@ -261,47 +260,25 @@ def _memory_context_snippet() -> str:
     return "\n".join(parts)
 
 
-async def _drain_planner_events(streamed, operator: OperatorContext) -> None:
-    """Translate Agents SDK stream events into Operator timeline events.
+async def _surface_planner_message(operator: OperatorContext, message) -> None:
+    """Surface one planner turn to the renderer.
 
-    The SDK emits ``RunItemStreamEvent`` for each ``ToolCallItem`` /
-    ``ToolCallOutputItem`` / ``MessageOutputItem`` produced during the run.
-    Tools emit their own step + artifact SSE events from inside their bodies,
-    so this translator is mostly about surfacing the planner's *meta*
-    decisions (which tool it just called, the final summary message).
+    Tools emit their own step/artifact SSE events from inside their bodies, so
+    this only handles the planner's *meta* output: the tool-call markers the
+    renderer may show, and the text — every turn's text goes out as a
+    'message' event and the last non-empty one is captured as the receipt (so
+    receipt-only runs count as completed, and the receipt survives reloads).
     """
-    async for event in streamed.stream_events():
-        if not isinstance(event, RunItemStreamEvent):
-            continue
-        item = event.item
-        if isinstance(item, ToolCallItem):
-            # Tool name is on the raw call; surface a lightweight marker so the
-            # renderer can show "Planner: calling <tool>" if it ever wants to.
-            try:
-                name = getattr(item.raw_item, "name", "(unknown)")
-            except Exception:
-                name = "(unknown)"
+    for block in message.content:
+        if block.type == "tool_use":
             await operator.emit({
                 "event": "message",
-                "data": {"text": f"Planner → calling tool: {name}"},
+                "data": {"text": f"Planner → calling tool: {block.name}"},
             })
-        elif isinstance(item, ToolCallOutputItem):
-            # Tool already emitted step/artifact events from inside its body;
-            # nothing more to do here. Kept in the dispatch for future use.
-            pass
-        elif isinstance(item, MessageOutputItem):
-            # The planner's final summary message. Render as a 'message' event
-            # AND capture it on the record so the receipt survives reloads and
-            # so receipt-only runs (questions answered from memory) count as
-            # completed rather than failed.
-            try:
-                from agents.items import ItemHelpers
-                text = ItemHelpers.text_message_output(item).strip()
-            except Exception:
-                text = ""
-            if text:
-                operator.record["receipt"] = text
-                await operator.emit({"event": "message", "data": {"text": text}})
+    text = "".join(b.text for b in message.content if b.type == "text").strip()
+    if text:
+        operator.record["receipt"] = text
+        await operator.emit({"event": "message", "data": {"text": text}})
 
 
 async def _emit_start(emit: EmitFn, record: dict, command: str, folder: Path) -> None:
@@ -399,20 +376,44 @@ def _build_planner_input(command: str, upload_state_line: str) -> str:
     )
 
 
-async def _run_turn(session: _OperationSession, input_items) -> None:
-    """Run ONE planner turn against the session's context, streaming events, and
-    save the resulting SDK conversation history so a /continue can resume it."""
-    streamed = Runner.run_streamed(
-        session.agent,
-        input=input_items,
-        context=session.operator,
-        max_turns=_MAX_PLANNER_TURNS,
-    )
-    await _drain_planner_events(streamed, session.operator)
-    try:
-        session.input_list = streamed.to_input_list()
-    except Exception:  # noqa: BLE001 — keep the prior list if the SDK can't
-        pass
+async def _run_turn(session: _OperationSession, messages: list) -> None:
+    """Run ONE planner turn on the Anthropic tool runner.
+
+    The runner drives the model → tool → result loop; our tools emit their own
+    step/artifact SSE from inside their bodies (they read the OperatorContext
+    off the contextvar bound here). We mirror the conversation into
+    ``session.input_list`` as it grows — the runner keeps its own private
+    copy — so a /continue can resume the SAME operation with full history.
+    ``pause_turn`` (a long server-tool turn parking itself) is resumed by
+    restarting the runner with the paused assistant turn appended, capped.
+    """
+    set_current_operator(session.operator)
+    client = get_client()
+    restarts = 0
+    while True:
+        runner = client.beta.messages.tool_runner(
+            model=default_model(),
+            max_tokens=16000,
+            system=session.system,
+            tools=PLANNER_TOOLS,
+            messages=messages,
+            max_iterations=_MAX_PLANNER_TURNS,
+        )
+        last = None
+        async for message in runner:
+            last = message
+            # Mirror history: the assistant turn, then any tool results the
+            # runner produced for it (cached — tools still execute once).
+            messages.append({"role": "assistant", "content": message.content})
+            tool_response = await runner.generate_tool_call_response()
+            if tool_response is not None:
+                messages.append(tool_response)
+            await _surface_planner_message(session.operator, message)
+        if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
+            break
+        restarts += 1
+
+    session.input_list = messages
 
 
 async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
@@ -557,9 +558,9 @@ def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
 async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
-    if not get_effective_value("OPENAI_API_KEY"):
+    if not get_effective_value("ANTHROPIC_API_KEY"):
         await emit({"event": "error", "data": {
-            "message": "OPENAI_API_KEY is not set. Open Settings to add your key."
+            "message": "ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key."
         }})
         return {}
 
@@ -599,7 +600,7 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> 
     staged_note = _consume_staged_source(operator)
     upload_state_line = _compute_upload_state()
     session = _OperationSession(
-        operator=operator, folder=folder, agent=build_planner_agent(),
+        operator=operator, folder=folder, system=build_planner_system(),
         input_list=[], upload_state_line=upload_state_line,
     )
     _SESSIONS[record["id"]] = session
@@ -608,7 +609,7 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> 
     if staged_note:
         planner_input = staged_note + "\n" + planner_input
     try:
-        await _run_turn(session, planner_input)
+        await _run_turn(session, [{"role": "user", "content": planner_input}])
     except Exception as exc:  # noqa: BLE001 — top-level safety net
         log.exception("operator.run_failed id=%s", record.get("id"))
         msg = f"Planner failed: {type(exc).__name__}: {exc}"
