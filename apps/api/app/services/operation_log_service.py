@@ -59,6 +59,69 @@ def append_operation(record: dict) -> dict:
     return record
 
 
+# ---------------------------------------------------------------------------
+# Projects — lightweight grouping for operations (v2.8)
+# ---------------------------------------------------------------------------
+# A project is just {id, name, created_at} in state/projects.json; operations
+# carry a project_id. Assignment happens at run time (the operator picks a
+# project in the sidebar before running) or retroactively via
+# assign_operation_project. No nesting, no per-project settings — organizing
+# only.
+
+_PROJECTS_NAME = "projects"
+_PROJECT_NAME_MAX = 60
+
+
+def list_projects() -> list[dict]:
+    return state_store.load_list(_PROJECTS_NAME)
+
+
+def create_project(name: str) -> dict:
+    """Create a project (or return the existing one with the same name,
+    case-insensitively — organizing shouldn't spawn near-duplicates)."""
+    clean = (name or "").strip()
+    if not clean:
+        raise ValueError("Project name is required.")
+    if len(clean) > _PROJECT_NAME_MAX:
+        clean = clean[:_PROJECT_NAME_MAX].rstrip()
+    items = state_store.load_list(_PROJECTS_NAME)
+    for p in items:
+        if (p.get("name") or "").strip().lower() == clean.lower():
+            return p
+    project = {
+        "id": "proj_" + uuid.uuid4().hex[:10],
+        "name": clean,
+        "created_at": _now_iso(),
+    }
+    items.insert(0, project)
+    state_store.save(_PROJECTS_NAME, items)
+    log.info("project.created id=%s name=%s", project["id"], clean)
+    return project
+
+
+def project_exists(project_id: str) -> bool:
+    if not project_id:
+        return False
+    return any(p.get("id") == project_id for p in state_store.load_list(_PROJECTS_NAME))
+
+
+def assign_operation_project(operation_id: str, project_id: str) -> Optional[dict]:
+    """Set (or clear, with "") the project on a stored operation. Returns the
+    updated record, or None if the operation isn't found."""
+    if not operation_id:
+        return None
+    items = state_store.load_list(_OPS_NAME)
+    for i, item in enumerate(items):
+        if item.get("id") != operation_id:
+            continue
+        item["project_id"] = project_id or ""
+        items[i] = item
+        state_store.save(_OPS_NAME, items)
+        log.info("operation.project_assigned id=%s project=%s", operation_id, project_id)
+        return item
+    return None
+
+
 def upsert_operation(record: dict) -> dict:
     """Insert a finished/awaiting operation, or replace the existing entry with
     the same id in place. Used for resumable (pause→resume) operations so a run

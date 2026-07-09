@@ -853,6 +853,7 @@ async def dashboard_get() -> dict:
 
 class OperationRunRequest(BaseModel):
     command: str = Field(..., min_length=4, description="Natural-language command for Ridian to execute.")
+    project_id: str = Field("", description="Optional operator project to file this run under.")
 
 
 @app.post("/operations/run")
@@ -870,7 +871,9 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
 
     async def runner() -> None:
         try:
-            await operator_service.run_operation(command=payload.command, emit=emit)
+            await operator_service.run_operation(
+                command=payload.command, emit=emit, project_id=payload.project_id,
+            )
         finally:
             await queue.put(None)  # sentinel — stop the stream
 
@@ -963,6 +966,44 @@ async def sources_stage_text(payload: SourceTextRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, **info}
+
+
+# ---------------------------------------------------------------------------
+# Operator projects — lightweight grouping for runs (v2.8). Namespaced under
+# /operator/projects because the legacy /projects/* routes are the run-folder
+# browser (a different "project" concept).
+# ---------------------------------------------------------------------------
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60, description="Project name.")
+
+
+class ProjectAssignRequest(BaseModel):
+    project_id: str = Field("", description="Project id, or empty to unfile the run.")
+
+
+@app.get("/operator/projects")
+async def operator_projects_list() -> dict:
+    return {"projects": operation_log_service.list_projects()}
+
+
+@app.post("/operator/projects")
+async def operator_projects_create(payload: ProjectCreateRequest) -> dict:
+    try:
+        return operation_log_service.create_project(payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/operations/{operation_id}/project")
+async def operations_assign_project(operation_id: str, payload: ProjectAssignRequest) -> dict:
+    if payload.project_id and not operation_log_service.project_exists(payload.project_id):
+        raise HTTPException(status_code=404, detail="Unknown project id.")
+    updated = operation_log_service.assign_operation_project(operation_id, payload.project_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Unknown operation id.")
+    return {"ok": True, "id": operation_id, "project_id": payload.project_id}
 
 
 @app.post("/sources/clear")

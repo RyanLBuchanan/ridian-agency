@@ -245,6 +245,33 @@
                   autocomplete="off"
                   spellcheck="false"
                 />
+                <div class="operator-rail-title rail-projects-head">
+                  <span>Projects</span>
+                  <button
+                    id="rail-new-project"
+                    type="button"
+                    class="rail-title-action"
+                    title="New project"
+                    aria-label="New project"
+                  >
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                  </button>
+                </div>
+                <label class="sr-only" for="rail-project-name">New project name</label>
+                <input
+                  id="rail-project-name"
+                  class="rail-search hidden"
+                  type="text"
+                  placeholder="Project name… (Enter)"
+                  maxlength="60"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <ul id="rail-projects" class="rail-projects">
+                  <li class="rail-threads-empty">No projects yet.</li>
+                </ul>
                 <div class="operator-rail-title">Chats</div>
                 <ul id="rail-threads" class="rail-threads">
                   <li class="rail-threads-empty">No chats yet.</li>
@@ -372,6 +399,10 @@
                 <div id="operator-source-chip" class="operator-source-chip hidden">
                   <span id="operator-source-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-source-chip-clear" type="button" class="operator-source-chip-clear" title="Remove attached source" aria-label="Remove attached source">✕</button>
+                </div>
+                <div id="operator-project-chip" class="operator-source-chip operator-project-chip hidden">
+                  <span id="operator-project-chip-text" class="operator-source-chip-text"></span>
+                  <button id="operator-project-chip-clear" type="button" class="operator-source-chip-clear" title="Stop filing runs under this project" aria-label="Clear active project">✕</button>
                 </div>
                 <div class="operator-examples">
                   <span class="operator-examples-label">Try:</span>

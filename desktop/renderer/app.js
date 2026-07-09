@@ -5122,7 +5122,7 @@ async function _opSubmit(e) {
     const res = await fetch(`${BACKEND}/operations/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, project_id: _activeProjectId || '' }),
       signal: operatorState.abortController.signal,
     });
     if (!res.ok) {
@@ -6083,6 +6083,15 @@ if (_historyEls.closeBtn) _historyEls.closeBtn.addEventListener('click', _histor
 
 let _railOps = [];   // last-fetched operations, filtered client-side by search
 
+/* v2.8: projects — select one to file new runs under it AND filter the chat
+   list to it. Selection persists across restarts via localStorage. */
+const _ACTIVE_PROJECT_KEY = 'ridian.activeProject';
+let _railProjects = [];
+let _activeProjectId = (() => {
+  try { return window.localStorage.getItem(_ACTIVE_PROJECT_KEY) || ''; }
+  catch (_) { return ''; }
+})();
+
 function _railActiveFolder() {
   return (operatorState.active && operatorState.active.artifact_folder) || '';
 }
@@ -6091,14 +6100,17 @@ function _railRenderThreads() {
   const list = document.getElementById('rail-threads');
   if (!list) return;
   const q = ((document.getElementById('rail-search') || {}).value || '').trim().toLowerCase();
-  const ops = q
-    ? _railOps.filter((op) => (op.command || '').toLowerCase().includes(q))
+  let ops = _activeProjectId
+    ? _railOps.filter((op) => (op.project_id || '') === _activeProjectId)
     : _railOps;
+  if (q) ops = ops.filter((op) => (op.command || '').toLowerCase().includes(q));
   list.innerHTML = '';
   if (!ops.length) {
     const li = document.createElement('li');
     li.className = 'rail-threads-empty';
-    li.textContent = q ? 'No chats match.' : 'No chats yet.';
+    li.textContent = q ? 'No chats match.'
+      : _activeProjectId ? 'No chats in this project yet.'
+      : 'No chats yet.';
     list.appendChild(li);
     return;
   }
@@ -6139,6 +6151,7 @@ async function _railThreadsFill() {
     const data = await res.json();
     _railOps = (data && data.operations) || [];
     _railRenderThreads();
+    _railRenderProjects();   // per-project chat counts derive from _railOps
   } catch (_) { /* backend not up yet — the poll below retries */ }
 }
 
@@ -6156,6 +6169,93 @@ function _opNewChat() {
   if (list) list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
 }
 
+function _opProjectChipUpdate() {
+  const chip = document.getElementById('operator-project-chip');
+  const label = document.getElementById('operator-project-chip-text');
+  if (!chip || !label) return;
+  const active = _railProjects.find((p) => p.id === _activeProjectId);
+  if (active) {
+    label.textContent = `Filing new runs under: ${active.name}`;
+    chip.classList.remove('hidden');
+  } else {
+    chip.classList.add('hidden');
+  }
+}
+
+function _railSelectProject(projectId) {
+  // Clicking the active project again deselects (back to All chats).
+  _activeProjectId = projectId === _activeProjectId ? '' : (projectId || '');
+  try { window.localStorage.setItem(_ACTIVE_PROJECT_KEY, _activeProjectId); } catch (_) {}
+  _railRenderProjects();
+  _railRenderThreads();
+  _opProjectChipUpdate();
+}
+
+function _railRenderProjects() {
+  const list = document.getElementById('rail-projects');
+  if (!list) return;
+  list.innerHTML = '';
+  // "All chats" pseudo-entry — active when no project is selected.
+  const all = document.createElement('li');
+  all.className = 'rail-thread' + (!_activeProjectId ? ' is-active' : '');
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.className = 'rail-thread-btn';
+  allBtn.innerHTML = '<span class="rail-thread-cmd">All chats</span>';
+  allBtn.addEventListener('click', () => _railSelectProject(''));
+  all.appendChild(allBtn);
+  list.appendChild(all);
+
+  _railProjects.forEach((p) => {
+    const li = document.createElement('li');
+    li.className = 'rail-thread' + (p.id === _activeProjectId ? ' is-active' : '');
+    const count = _railOps.filter((op) => (op.project_id || '') === p.id).length;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rail-thread-btn';
+    btn.title = p.name;
+    const label = document.createElement('span');
+    label.className = 'rail-thread-cmd';
+    label.textContent = p.name;
+    const meta = document.createElement('span');
+    meta.className = 'rail-thread-when';
+    meta.textContent = count === 1 ? '1 chat' : `${count} chats`;
+    btn.appendChild(label);
+    btn.appendChild(meta);
+    btn.addEventListener('click', () => _railSelectProject(p.id));
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+}
+
+async function _railProjectsFill() {
+  try {
+    const res = await fetch(`${BACKEND}/operator/projects`);
+    if (!res.ok) return;
+    const data = await res.json();
+    _railProjects = (data && data.projects) || [];
+    // A stale persisted selection (project deleted / fresh state) falls back
+    // to All chats rather than filtering everything to nothing.
+    if (_activeProjectId && !_railProjects.some((p) => p.id === _activeProjectId)) {
+      _activeProjectId = '';
+    }
+    _railRenderProjects();
+    _opProjectChipUpdate();
+  } catch (_) { /* backend not up yet */ }
+}
+
+async function _railCreateProject(name) {
+  const res = await fetch(`${BACKEND}/operator/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+  await _railProjectsFill();
+  if (data && data.id) _railSelectProject(data.id);
+}
+
 const _railNewChatBtn = document.getElementById('rail-new-chat');
 if (_railNewChatBtn) _railNewChatBtn.addEventListener('click', _opNewChat);
 const _railSearch = document.getElementById('rail-search');
@@ -6163,7 +6263,41 @@ if (_railSearch) _railSearch.addEventListener('input', _railRenderThreads);
 const _railSettingsBtn = document.getElementById('rail-settings-btn');
 if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
 
-_railThreadsFill();
+// New-project: the + reveals an inline name input (window.prompt doesn't
+// exist in Electron); Enter creates, Escape/blur cancels.
+const _railNewProjectBtn = document.getElementById('rail-new-project');
+const _railProjectName = document.getElementById('rail-project-name');
+if (_railNewProjectBtn && _railProjectName) {
+  _railNewProjectBtn.addEventListener('click', () => {
+    _railProjectName.classList.toggle('hidden');
+    if (!_railProjectName.classList.contains('hidden')) _railProjectName.focus();
+  });
+  _railProjectName.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') {
+      _railProjectName.value = '';
+      _railProjectName.classList.add('hidden');
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const name = _railProjectName.value.trim();
+    if (!name) return;
+    try {
+      await _railCreateProject(name);
+      _railProjectName.value = '';
+      _railProjectName.classList.add('hidden');
+    } catch (err) {
+      _opSetStatus(`Couldn't create project: ${err && err.message ? err.message : err}`, 'err');
+    }
+  });
+  _railProjectName.addEventListener('blur', () => {
+    if (!_railProjectName.value.trim()) _railProjectName.classList.add('hidden');
+  });
+}
+const _projectChipClear = document.getElementById('operator-project-chip-clear');
+if (_projectChipClear) _projectChipClear.addEventListener('click', () => _railSelectProject(''));
+
+_railThreadsFill().then(() => _railProjectsFill());
 
 /* ----- 3. Command-history (↑/↓) in the command box ----- */
 

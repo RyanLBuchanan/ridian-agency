@@ -118,6 +118,8 @@ def _finalized_view(record: dict) -> dict:
         # v2: paused-awaiting-user? The renderer routes the next answer to
         # POST /operations/{id}/continue (resume) instead of starting a new run.
         "awaiting_input": bool(record.get("awaiting_input")),
+        # v2.8: project grouping (sidebar Projects section).
+        "project_id": record.get("project_id", ""),
     }
 
 
@@ -552,7 +554,7 @@ def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
     return ""  # e.g. the operator supplied a different URL — the planner handles it
 
 
-async def run_operation(*, command: str, emit: EmitFn) -> dict:
+async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
     if not get_effective_value("OPENAI_API_KEY"):
@@ -583,6 +585,11 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     # tools refuse (operator_tools._deliverable_gate) unless the command
     # actually asked for a deliverable.
     record["deliverable_intent"] = detect_deliverable_intent(command)
+    # v2.8: project grouping. Unknown ids are dropped (never fail the run over
+    # organizing metadata).
+    record["project_id"] = (
+        project_id if operation_log_service.project_exists(project_id) else ""
+    )
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
