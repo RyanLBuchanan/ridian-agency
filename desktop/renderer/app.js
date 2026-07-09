@@ -5698,9 +5698,11 @@ function _opRenderRehydrateWarnings(missing) {
     }
   }
   const ul = OPERATOR.errors.querySelector('.operator-errors-list');
-  missing.forEach((name) => {
+  missing.forEach((entry) => {
     const li = document.createElement('li');
-    li.textContent = `${name} — expected but not found in the run folder`;
+    // The backend composes the full reason (it knows WHY something is
+    // missing — local file vs. external link); render it verbatim.
+    li.textContent = entry;
     ul.appendChild(li);
   });
 }

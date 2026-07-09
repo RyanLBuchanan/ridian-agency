@@ -44,6 +44,28 @@ function createWindow() {
 
   win.once('ready-to-show', () => win.show());
 
+  // Native edit context menu. Electron shows no right-click menu by default,
+  // so paste-by-mouse silently didn't exist. One handler at the main level
+  // covers every editable field (textarea, input, contenteditable — Chromium
+  // sets params.isEditable for all of them); non-editable UI gets Copy only
+  // when text is selected, and no menu otherwise. Roles reuse Chromium's
+  // built-in clipboard actions, so keyboard shortcuts are untouched.
+  win.webContents.on('context-menu', (_event, params) => {
+    const template = [];
+    if (params.isEditable) {
+      template.push(
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll },
+      );
+    } else if (params.selectionText && params.selectionText.trim()) {
+      template.push({ role: 'copy' });
+    }
+    if (template.length) Menu.buildFromTemplate(template).popup({ window: win });
+  });
+
   // Open any external links in the user's default browser rather than a new
   // Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {

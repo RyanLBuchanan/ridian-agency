@@ -1149,18 +1149,33 @@ async def operations_load(artifact_folder: str) -> dict:
     has_audio = audio_path.is_file()
     audio_bytes = audio_path.stat().st_size if has_audio else 0
 
+    # Verify the artifacts this operation actually DECLARED — the manifest in
+    # its own operation_log — never a global checklist. (The old v1 code
+    # expected sources_packet.md / script.md / audiobook.mp3 on every run, an
+    # audiobook-era leftover that produced false "missing" warnings for
+    # document/deck/sheet operations.) Rules:
+    #   - external kinds (Drive/Slides/Sheets/Gmail/browser) are cloud-only:
+    #     verified by having an http(s) link, never "missing on disk";
+    #   - every other kind is a local file: verified by existence in the run
+    #     folder (by declared name, falling back to the recorded path);
+    #   - operation_log.json is expected for every operation.
+    external_kinds = {"gmail_draft", "drive_folder", "spreadsheet", "slides", "browser"}
     missing: list[str] = []
     if not log_path.is_file():
-        missing.append("operation_log.json")
-    if not sources_path.is_file():
-        missing.append("sources_packet.md")
-    if not script_path.is_file():
-        missing.append("script.md")
-    # audiobook.mp3 is "optional" in the sense that failed runs legitimately
-    # don't produce one — surface that as a warning only when the log shows
-    # audio was supposed to have been generated.
-    if operation_log and operation_log.get("audio_generated") and not has_audio:
-        missing.append("audiobook.mp3")
+        missing.append("operation_log.json — expected but not found in the run folder")
+    for art in (operation_log.get("artifacts") or []) if operation_log else []:
+        name = str(art.get("name") or "").strip()
+        kind = str(art.get("kind") or "").strip().lower()
+        art_path = str(art.get("path") or "").strip()
+        if not name:
+            continue
+        if kind in external_kinds:
+            if not art_path.lower().startswith(("http://", "https://")):
+                missing.append(f"{name} — {kind} artifact has no link recorded")
+            continue
+        local = folder / name
+        if not local.is_file() and not (art_path and Path(art_path).is_file()):
+            missing.append(f"{name} — declared as a local file but not found in the run folder")
 
     return {
         "artifact_folder": str(folder),
