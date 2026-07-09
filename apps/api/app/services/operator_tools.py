@@ -192,6 +192,67 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Deliverable-intent gate (deterministic — no documents for small talk)
+# ---------------------------------------------------------------------------
+#
+# "How do you feel?" once produced a 6-slide deck and a spreadsheet because the
+# planner prompt's deliverables-first identity filled the vacuum with profile
+# content. Prompt rules alone have been overridden before (grounding,
+# recipient), so this is enforced in code: the build tools refuse on a run
+# whose command never asked for a deliverable, and the planner is told to just
+# answer conversationally. False positives are harmless (an open gate doesn't
+# force building); false negatives get a conversational reply asking what to
+# build — the correct failure direction for ambiguous input.
+
+_DELIVERABLE_VERB_RE = _re.compile(
+    r"\b(build|create|make|draft|write|compose|prepare|generate|produce|"
+    r"assemble|put together|whip up|research|sweep|summari[sz]e|turn\b.{0,30}\binto)\b",
+    _re.IGNORECASE,
+)
+_DELIVERABLE_NOUN_RE = _re.compile(
+    r"\b(deck|slides?|presentation|pitch|spread ?sheet|sheet|tracker|"
+    r"documents?|docs?|one-? ?pagers?|letters?|briefs?|briefings?|packets?|"
+    r"reports?|memos?|outlines?|proposals?|emails?|drafts?|summar(?:y|ies)|"
+    r"audiobooks?|scripts?|comparison)\b",
+    _re.IGNORECASE,
+)
+
+
+def detect_deliverable_intent(command: str) -> bool:
+    """True when the command plausibly asks for a deliverable.
+
+    Permissive by design — a deliverable VERB (build/draft/research/...) OR a
+    deliverable NOUN (deck/sheet/doc/email/...) counts. Only clearly
+    conversational input (greetings, opinions, chit-chat: no verb AND no noun)
+    closes the gate.
+    """
+    if not command:
+        return False
+    return bool(_DELIVERABLE_VERB_RE.search(command)
+                or _DELIVERABLE_NOUN_RE.search(command))
+
+
+def _deliverable_gate(operator: OperatorContext) -> dict | None:
+    """Refuse to build on a run whose command never asked for a deliverable.
+
+    Quiet refusal (no step, no needs-input): a conversational message deserves
+    a conversational answer, not an interrogation. Returns None when building
+    is allowed; missing key defaults to allowed (legacy/resumed records).
+    """
+    if operator.record.get("deliverable_intent", True):
+        return None
+    return {
+        "error": (
+            "BLOCKED: the operator's message is conversational — it did not ask "
+            "for a deliverable. Do NOT build a deck, spreadsheet, or document. "
+            "Answer the operator directly and warmly in your final receipt, with "
+            "no further tool calls."
+        ),
+        "reason": "no_deliverable_request",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Recipient provenance gate (deterministic — draft_gmail never guesses an email)
 # ---------------------------------------------------------------------------
 #
@@ -357,6 +418,9 @@ async def write_sources_packet(
     """
     operator = ctx.context
     operator.note_tool("write_file")
+    block = _deliverable_gate(operator)
+    if block:
+        return block
     if not content or not content.strip():
         await operator.emit_error("write_sources_packet called with empty content; skipping.")
         return {"path": "", "bytes": 0, "error": "empty content"}
@@ -402,6 +466,9 @@ async def build_research_packet(
     """
     operator = ctx.context
     operator.note_tool("build_research_packet")
+    block = _deliverable_gate(operator)
+    if block:
+        return block
     if not topic or not topic.strip():
         await operator.emit_error("build_research_packet called without a topic; skipping.")
         return {"path": "", "bytes": 0, "sources_count": 0, "error": "no topic"}
@@ -690,6 +757,9 @@ async def write_file(
     """
     operator = ctx.context
     operator.note_tool("write_file")
+    block = _deliverable_gate(operator)
+    if block:
+        return block
     gate = await _grounding_gate(operator)
     if gate:
         return gate
@@ -1058,6 +1128,9 @@ async def create_spreadsheet(
     """
     operator = ctx.context
     operator.note_tool("create_spreadsheet")
+    block = _deliverable_gate(operator)
+    if block:
+        return block
     gate = await _grounding_gate(operator)
     if gate:
         return gate
@@ -1119,6 +1192,9 @@ async def create_slide_deck(
     """
     operator = ctx.context
     operator.note_tool("create_slide_deck")
+    block = _deliverable_gate(operator)
+    if block:
+        return block
     gate = await _grounding_gate(operator)
     if gate:
         return gate

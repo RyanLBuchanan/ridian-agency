@@ -40,7 +40,7 @@ from ..agents.planner_agent import build_planner_agent
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext
-from .operator_tools import detect_source_lock, extract_emails
+from .operator_tools import detect_deliverable_intent, detect_source_lock, extract_emails
 from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
 
 log = logging.getLogger("ridian.operator")
@@ -383,9 +383,12 @@ def _build_planner_input(command: str, upload_state_line: str) -> str:
         f"Operator command:\n{command}\n\n"
         f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
         f"Auto-upload state: {upload_state_line}\n\n"
-        "Plan the minimum-viable sequence of tool calls from your registry, "
-        "execute them, verify each result, and then give a short final "
-        "receipt of what landed on disk. Do not invent tools.\n\n"
+        "If the command is conversational (a greeting, an opinion question, "
+        "small talk) or fully answerable from the memory context above, call "
+        "NO tools — just answer directly and briefly in your receipt. "
+        "Otherwise plan the minimum-viable sequence of tool calls from your "
+        "registry, execute them, verify each result, and then give a short "
+        "final receipt of what landed on disk. Do not invent tools.\n\n"
         "After the artifact tools finish (and only if the operation produced "
         "real artifacts), you MAY call propose_memory_update for up to three "
         "items the user would want Ridian to remember from this run — facts, "
@@ -485,9 +488,17 @@ def save_source_pdf(operation_id: str, data: bytes, filename: str = "source.pdf"
 
 def _consume_staged_source(operator: OperatorContext) -> str:
     """If a source is staged, ground the run in it and return a planner note+text
-    to prepend to the command. Clears the staged source. "" when none."""
+    to prepend to the command. Clears the staged source. "" when none.
+
+    v2.5: only consumed when the run actually asked for a deliverable — a
+    staged PDF must not glue itself to small talk ("How do you feel?") and burn
+    tokens. Without intent it STAYS staged (the chip persists) for the next
+    real build command."""
     global _STAGED_SOURCE
     if not _STAGED_SOURCE:
+        return ""
+    if not operator.record.get("deliverable_intent", True):
+        log.info("source.staged_held reason=no_deliverable_intent")
         return ""
     staged = _STAGED_SOURCE
     _STAGED_SOURCE = None
@@ -568,6 +579,10 @@ async def run_operation(*, command: str, emit: EmitFn) -> dict:
     # v2.1: addresses the operator explicitly typed in the command are verified
     # recipients for draft_gmail's provenance gate (it never invents one).
     record["user_provided_emails"] = extract_emails(command)
+    # v2.5: conversational input must get a conversational answer — the build
+    # tools refuse (operator_tools._deliverable_gate) unless the command
+    # actually asked for a deliverable.
+    record["deliverable_intent"] = detect_deliverable_intent(command)
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
@@ -626,6 +641,10 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         for e in extract_emails(answer):
             if e not in typed:
                 typed.append(e)
+        # v2.5: a resume answer can add deliverable intent ("yes, build the
+        # deck") to a run that started conversational. Never downgrades.
+        if not record.get("deliverable_intent") and detect_deliverable_intent(answer):
+            record["deliverable_intent"] = True
 
         await emit({"event": "start", "data": {
             "id": record["id"], "command": answer, "resumed": True,
