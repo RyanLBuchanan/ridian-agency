@@ -9,19 +9,19 @@ necessarily a developer. ~15 minutes start to finish.
 A local desktop app that turns a business task into a polished package:
 a market research summary, a business document, a slide outline, and a
 draft email. Everything runs on your computer; nothing is uploaded except
-the prompts you send to OpenAI to power the agents.
+the prompts you send to Anthropic (Claude) to power the agents.
 
 ## What you'll install
 
 | Tool       | Why                                                  |
 | ---------- | ---------------------------------------------------- |
 | Git        | To clone the repo from GitHub.                       |
-| Python 3.11+ | The backend (FastAPI + OpenAI Agents SDK) runs in Python. |
+| Python 3.11+ | The backend (FastAPI + the Anthropic SDK) runs in Python. |
 | Node.js 18+ | The desktop app (Electron) is a Node program.       |
-| OpenAI API key | Required for the agents to call the model.       |
+| Anthropic API key | Required for the agents to call Claude.       |
 
-You'll also need a free OpenAI account to create the API key at
-<https://platform.openai.com/api-keys>.
+You'll also need an Anthropic account to create the API key at
+<https://console.anthropic.com/settings/keys>.
 
 ## 1. Prerequisites — install once per machine
 
@@ -93,7 +93,7 @@ You should see:
 - A **Ridian Agency -- Backend (uvicorn)** PowerShell window (leave it open).
 - The **Ridian Agency** desktop window.
 
-If you see *"OpenAI API key is not configured"* in the desktop window —
+If you see *"Anthropic API key is not configured"* in the desktop window —
 that's expected on first run. Continue to step 6.
 
 ## 6. First-run setup — configure your settings
@@ -102,9 +102,14 @@ In the Ridian Agency desktop window, click **Settings** in the top right.
 
 Fill in:
 
-**AI provider**
-- **OpenAI API key** — paste your key from <https://platform.openai.com/api-keys>.
-- **Model** — leave as `gpt-4o-mini` unless you want a different OpenAI model.
+**AI provider — Anthropic**
+- **Anthropic API key** — paste your key from <https://console.anthropic.com/settings/keys>.
+- **Model** — leave as `claude-opus-4-8` unless you want a different Claude model.
+
+**Voice input (OpenAI Whisper)** (optional — skip unless you want microphone
+dictation)
+- **OpenAI API key** — only used for voice transcription; everything else
+  runs on Claude. Leave blank to disable voice input.
 
 **Operator profile** (optional, used as personal defaults later)
 - Operator name
@@ -119,8 +124,8 @@ Fill in:
 
 Click **Save settings**. You should see a green "Settings saved" message.
 
-The orange "OpenAI API key is not configured" banner should disappear and
-the **Run workflow** button becomes active.
+The orange "Anthropic API key is not configured" banner should disappear
+and the **Run workflow** button becomes active.
 
 ## 7. Run your first workflow
 
@@ -407,10 +412,10 @@ Run this once and accept the prompt, then try again:
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
-**OpenAI API key is missing / "OpenAI API key is not configured" banner**
+**Anthropic API key is missing / "Anthropic API key is not configured" banner**
 Click **Settings** in the desktop window's top right, paste your key in
-the **AI provider** section, and click **Save settings**. The banner
-disappears immediately.
+the **AI provider — Anthropic** section, and click **Save settings**. The
+banner disappears immediately.
 
 **"SMTP not configured" when clicking Approve & Send**
 You haven't filled in SMTP credentials in Settings. See the *SMTP setup
@@ -425,17 +430,17 @@ Get-NetTCPConnection -LocalPort 8000 -State Listen
 Then either stop that process, or close it via Task Manager (look up
 the `OwningProcess` ID). Re-launch Ridian Agency.
 
-**Workflow fails with an OpenAI error**
+**Workflow fails with an Anthropic error**
 - Check your API key in Settings is correct.
-- Check your OpenAI account has credit at <https://platform.openai.com/usage>.
-- Check the model name in Settings is a real OpenAI model (default
-  `gpt-4o-mini` always works).
+- Check your Anthropic account has credit at <https://console.anthropic.com/settings/billing>.
+- Check the model name in Settings is a real Claude model (default
+  `claude-opus-4-8` always works).
 
 ## Safety notes
 
 - **Do not enter sensitive, private, or regulated data** in tasks
   (patient records, legal client data, financial PII, etc.). Task content
-  is sent to OpenAI to power the agents.
+  is sent to Anthropic (Claude) to power the agents.
 - **Outputs are saved locally** under `outputs/`. They are not uploaded
   anywhere. If a task contains sensitive content, the artifact files on
   disk will too.
@@ -446,4 +451,4 @@ the `OwningProcess` ID). Re-launch Ridian Agency.
   instead). Both files are excluded from Git and never uploaded.
 - **Treat `local_settings.json` like any other secret file.** Don't share
   it, don't commit it, don't paste it into chat. If you suspect it leaked,
-  rotate your OpenAI key and SMTP App Password immediately.
+  rotate your API keys and SMTP App Password immediately.
