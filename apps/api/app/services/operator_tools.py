@@ -37,7 +37,7 @@ from anthropic import beta_async_tool
 
 import re as _re
 
-from ..agents import load_prompt
+from ..agents import load_prompt, research_model
 from . import (
     browser_service,
     gmail_service,
@@ -428,7 +428,7 @@ async def web_research(
     try:
         res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
-            return_stats=True,
+            return_stats=True, model=research_model(),
         )
         sources_md = res.text.strip()
     except Exception as exc:
@@ -542,7 +542,7 @@ async def build_research_packet(
     try:
         res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
-            return_stats=True,
+            return_stats=True, model=research_model(),
         )
         body = res.text.strip()
     except Exception as exc:  # noqa: BLE001

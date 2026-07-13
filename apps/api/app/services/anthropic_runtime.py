@@ -105,6 +105,7 @@ async def run_text_agent(
     use_web_search: bool = False,
     max_tokens: int = 16000,
     return_stats: bool = False,
+    model: str | None = None,
 ):
     """One-shot agent: system prompt + user input → final text.
 
@@ -113,11 +114,12 @@ async def run_text_agent(
     tool is attached and ``pause_turn`` continuations are handled. With
     ``return_stats`` returns a :class:`TextAgentResult` (text + search count)
     instead of a plain string, so research callers can flag zero-search runs
-    as ungrounded.
+    as ungrounded. ``model`` overrides default_model() for this call (the
+    research sub-agents pass research_model()).
     """
     client = get_client()
     kwargs: dict = {
-        "model": default_model(),
+        "model": model or default_model(),
         "max_tokens": max_tokens,
         "system": f"{date_line()}\n\n{system}",
         "messages": [{"role": "user", "content": user_input}],

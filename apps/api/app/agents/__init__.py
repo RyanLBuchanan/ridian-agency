@@ -20,6 +20,14 @@ def default_model() -> str:
     return os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
 
+def research_model() -> str:
+    """Model for the research/packet sub-agents ONLY. They spend their time on
+    web-search round-trips + summarizing, where Sonnet-tier quality holds up
+    and the foreground wait matters — the planner (tool selection, gates
+    context, receipts) stays on default_model()."""
+    return os.getenv("ANTHROPIC_RESEARCH_MODEL", "claude-sonnet-5")
+
+
 @dataclass(frozen=True)
 class PromptAgent:
     """A named system prompt. Replaces the OpenAI Agents SDK ``Agent`` object
