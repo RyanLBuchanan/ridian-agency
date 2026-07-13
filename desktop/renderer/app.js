@@ -4398,6 +4398,7 @@ const operatorState = {
   drive: null,         // { drive_path, drive_folder_url, uploaded_files }  set after a successful upload
   proposals: [],       // v1.2: planner-proposed memory updates awaiting user decision
   receipt: '',         // v1.7: the planner's final receipt text (shown + spoken)
+  answerMode: null,    // v2.7: {opId, question} — composer sends an ANSWER while set
 };
 
 function _opSetStatus(text, kind) {
@@ -4425,6 +4426,39 @@ function _opUpdateSendEnabled() {
   if (!OPERATOR.runBtn) return;
   const hasText = !!(OPERATOR.command && OPERATOR.command.value.trim());
   OPERATOR.runBtn.disabled = !!operatorState.running || !hasText;
+}
+
+// v2.7: composer state is scoped to its chat. Reset on every navigation
+// boundary (New chat, loading a thread) so drafts + the ↑/↓ history-walk
+// scratch state can never leak across chats and fuse with later input.
+const _COMPOSER_PLACEHOLDER =
+  (OPERATOR.command && OPERATOR.command.getAttribute('placeholder')) || '';
+
+function _opResetComposer() {
+  if (OPERATOR.command) {
+    OPERATOR.command.value = '';
+    OPERATOR.command.setAttribute('placeholder', _COMPOSER_PLACEHOLDER);
+  }
+  _cmdHistoryIdx = -1;
+  _cmdHistoryDraft = '';
+  _opUpdateSendEnabled();
+}
+
+// Answer mode is EXPLICIT: the chip shows exactly what the next send does.
+// Armed when a live needs_input arrives; cleared on dispatch, dismissal, or
+// any navigation. Never armed for rehydrated (dead-session) questions.
+function _opSetAnswerMode(mode) {
+  operatorState.answerMode = mode || null;
+  const chip = document.getElementById('operator-answer-chip');
+  const label = document.getElementById('operator-answer-chip-text');
+  if (!chip || !label) return;
+  if (mode) {
+    const q = (mode.question || '').replace(/s+/g, ' ').trim();
+    label.textContent = 'Answering: ' + (q.length > 70 ? q.slice(0, 67) + '…' : q);
+    chip.classList.remove('hidden');
+  } else {
+    chip.classList.add('hidden');
+  }
 }
 
 function _opSetStatusDot(kind) {
@@ -5065,7 +5099,13 @@ function _opHandleEvent(evt) {
     }
     case 'needs_input': {
       const need = evt.data || {};
-      if (need && need.question) _opRenderNeedsInput(need);
+      if (need && need.question) {
+        _opRenderNeedsInput(need);
+        _opSetAnswerMode({
+          opId: operatorState.active && operatorState.active.id,
+          question: need.question,
+        });
+      }
       break;
     }
     case 'message': {
@@ -5083,6 +5123,7 @@ function _opHandleEvent(evt) {
       break;
     case 'complete':
       operatorState.finalRecord = evt.data || null;
+      if (!(evt.data && evt.data.awaiting_input)) _opSetAnswerMode(null);
       _opSetStatusDot(((evt.data && evt.data.status) || 'completed'));
       // v1.7: speak the receipt aloud if voice replies are on.
       if (operatorState.receipt) _opSpeak(operatorState.receipt);
@@ -5099,18 +5140,21 @@ function _opHandleEvent(evt) {
 
 async function _opSubmit(e) {
   if (e && e.preventDefault) e.preventDefault();
-  // Ignore a submit while a run is in flight (e.g. Enter mid-run) so we don't
-  // orphan the running turn. (Phase 2 will route answers to /continue.)
-  if (operatorState.running) return;
+  // A run is in flight: don't dispatch, but never swallow silently — the
+  // draft stays visible in the composer and the user is told why.
+  if (operatorState.running) {
+    _opSetStatus('Ridian is still working — wait for it to finish (or press Stop). Your draft stays in the box.', 'err');
+    return;
+  }
   const command = (OPERATOR.command && OPERATOR.command.value || '').trim();
   if (command.length < 4) {
     _opSetStatus('Type a command first.', 'err');
     return;
   }
-  // Answer mode (v2): if the current turn is paused awaiting an answer, resume
-  // the SAME operation instead of starting a new run.
-  if (operatorState.finalRecord && operatorState.finalRecord.awaiting_input
-      && operatorState.active && operatorState.active.id) {
+  // Answer mode (v2.7 — explicit, chip-visible): the composer sends an ANSWER
+  // only while answer mode is armed. Dismissing the chip makes this a new
+  // command even though a question is still open.
+  if (operatorState.answerMode && operatorState.active && operatorState.active.id) {
     return _opContinue(operatorState.active.id, command);
   }
   // Conversation flow: archive the finished turn into the thread instead of
@@ -5179,6 +5223,7 @@ async function _opContinue(opId, answer) {
   if (operatorState.running) return;
   if (OPERATOR.command) OPERATOR.command.value = '';
   _opAppendUserMessage(answer);
+  _opSetAnswerMode(null);   // dispatched; re-armed if Ridian asks again
   // The question has been answered — hide its card.
   const needsEl = document.getElementById('operator-needs-input');
   if (needsEl) needsEl.classList.add('hidden');
@@ -5230,7 +5275,7 @@ async function _opHandlePdfFile(file) {
   if (!file) return;
   // If a run is paused awaiting a grounding answer, the PDF ANSWERS it and
   // resumes that run. Otherwise it's staged as the source for the next command.
-  const awaiting = operatorState.finalRecord && operatorState.finalRecord.awaiting_input
+  const awaiting = operatorState.answerMode
     && operatorState.active && operatorState.active.id;
   if (awaiting) {
     await _opUploadPdfToOperation(operatorState.active.id, file);
@@ -5299,7 +5344,7 @@ async function _opPasteAsSource() {
     if (OPERATOR.command) OPERATOR.command.focus();
     return;
   }
-  const awaiting = operatorState.finalRecord && operatorState.finalRecord.awaiting_input
+  const awaiting = operatorState.answerMode
     && operatorState.active && operatorState.active.id;
   if (awaiting) {
     return _opContinue(operatorState.active.id, text);   // answer the paused question
@@ -5569,6 +5614,11 @@ async function loadOperatorRun(run) {
   // Always land on the Operator surface (welcome view).
   setWorkspaceView('welcome');
   _opResetUI();
+  // Composer state is scoped to its chat: switching threads drops any
+  // undispatched draft, the ↑/↓ history-walk scratch, and answer mode —
+  // input can never leak across chat boundaries.
+  _opResetComposer();
+  _opSetAnswerMode(null);
 
   // Reveal panels even before the fetch resolves so the user has feedback.
   if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
@@ -5892,6 +5942,13 @@ if (_pdfInput) {
 }
 const _sourceChipClear = document.getElementById('operator-source-chip-clear');
 if (_sourceChipClear) _sourceChipClear.addEventListener('click', _opClearSource);
+const _answerChipClear = document.getElementById('operator-answer-chip-clear');
+if (_answerChipClear) {
+  _answerChipClear.addEventListener('click', () => {
+    _opSetAnswerMode(null);
+    _opSetStatus("Next message starts a new command. Use the question's buttons above to answer it later.", 'ok');
+  });
+}
 
 // Send arrow: greyed until the field has text (and no run in flight).
 if (OPERATOR.command) OPERATOR.command.addEventListener('input', _opUpdateSendEnabled);
@@ -6176,7 +6233,9 @@ function _opNewChat() {
   operatorState.active = null;
   operatorState.finalRecord = null;
   if (OPERATOR.active) OPERATOR.active.classList.add('hidden');
-  if (OPERATOR.command) { OPERATOR.command.value = ''; OPERATOR.command.focus(); }
+  _opResetComposer();
+  _opSetAnswerMode(null);
+  if (OPERATOR.command) OPERATOR.command.focus();
   const list = document.getElementById('rail-threads');
   if (list) list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
 }

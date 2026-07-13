@@ -1419,6 +1419,14 @@ body {
   border-color: var(--color-border-strong);
 }
 
+/* v2.7: answer-mode chip — amber like the needs-input card it belongs to, so
+   "your next send answers the question" is unmissable and dismissible. */
+.operator-answer-chip {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
 .operator-rail-title {
   font-size: var(--fs-xs);
   font-weight: 700;

@@ -404,6 +404,14 @@
                   <span id="operator-project-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-project-chip-clear" type="button" class="operator-source-chip-clear" title="Stop filing runs under this project" aria-label="Clear active project">✕</button>
                 </div>
+                <!-- Answer-mode chip: visible whenever the composer will send an
+                     ANSWER to the open question instead of a new command. ✕
+                     switches the composer back to new-command mode (the
+                     question's own buttons remain the way to answer it). -->
+                <div id="operator-answer-chip" class="operator-source-chip operator-answer-chip hidden">
+                  <span id="operator-answer-chip-text" class="operator-source-chip-text"></span>
+                  <button id="operator-answer-chip-clear" type="button" class="operator-source-chip-clear" title="Start a new command instead" aria-label="Exit answer mode">✕</button>
+                </div>
                 <div class="operator-examples">
                   <span class="operator-examples-label">Try:</span>
                   <button type="button" class="operator-example" data-operator-example="Sweep my contacts and follow-ups, and draft a personalized check-in email to everyone I owe a reply.">Draft my follow-up emails</button>
