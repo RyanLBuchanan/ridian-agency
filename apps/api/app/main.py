@@ -878,13 +878,28 @@ class OperationRunRequest(BaseModel):
     project_id: str = Field("", description="Optional operator project to file this run under.")
 
 
-@app.post("/operations/run")
-async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
-    """Run an operation and stream timeline events as Server-Sent Events.
+# Comment-line heartbeat cadence for operation SSE streams. Long tool calls
+# (live web research) can go minutes without emitting an event; a stream that
+# sends zero bytes for that long gets killed by idle-socket policies between
+# Electron and uvicorn, and the renderer then reports a healthy run as Failed.
+# SSE comment lines (": ...") are protocol-legal keep-alives the renderer
+# already skips.
+_SSE_HEARTBEAT_SECONDS = 15.0
 
-    The renderer subscribes via fetch + ReadableStream (or EventSource).
-    Each event is a JSON object on a single ``data:`` line, terminated by
-    a blank line per SSE spec.
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
+
+def _operation_sse(run) -> StreamingResponse:
+    """Queue-backed SSE stream for one operation run.
+
+    ``run`` is an async callable taking the emit function. The runner task is
+    detached from the HTTP request, so its exceptions would otherwise die
+    unlogged on stderr — they are logged here, and the stream always closes
+    with an ``end`` event.
     """
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -893,9 +908,9 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
 
     async def runner() -> None:
         try:
-            await operator_service.run_operation(
-                command=payload.command, emit=emit, project_id=payload.project_id,
-            )
+            await run(emit)
+        except Exception:  # noqa: BLE001 — persist the traceback, never re-raise
+            log.exception("operation runner failed")
         finally:
             await queue.put(None)  # sentinel — stop the stream
 
@@ -905,7 +920,11 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
         # Initial comment line so the client immediately knows the stream is live.
         yield ": connected\n\n"
         while True:
-            evt = await queue.get()
+            try:
+                evt = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
             if evt is None:
                 yield "event: end\ndata: {}\n\n"
                 break
@@ -915,12 +934,21 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
                 payload_json = json.dumps({"raw": str(evt)})
             yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
 
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers=dict(_SSE_HEADERS))
+
+
+@app.post("/operations/run")
+async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
+    """Run an operation and stream timeline events as Server-Sent Events.
+
+    The renderer subscribes via fetch + ReadableStream (or EventSource).
+    Each event is a JSON object on a single ``data:`` line, terminated by
+    a blank line per SSE spec.
+    """
+    return _operation_sse(lambda emit: operator_service.run_operation(
+        command=payload.command, emit=emit, project_id=payload.project_id,
+    ))
 
 
 class OperationContinueRequest(BaseModel):
@@ -935,40 +963,9 @@ async def operations_continue(operation_id: str, payload: OperationContinueReque
     operation reuses its original context/folder/flags, so this is a true
     resume — not a new run.
     """
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def emit(event: dict) -> None:
-        await queue.put(event)
-
-    async def runner() -> None:
-        try:
-            await operator_service.continue_operation(
-                operation_id=operation_id, answer=payload.answer, emit=emit,
-            )
-        finally:
-            await queue.put(None)
-
-    asyncio.create_task(runner())
-
-    async def event_stream():
-        yield ": connected\n\n"
-        while True:
-            evt = await queue.get()
-            if evt is None:
-                yield "event: end\ndata: {}\n\n"
-                break
-            try:
-                payload_json = json.dumps(evt.get("data", {}), default=str)
-            except (TypeError, ValueError):
-                payload_json = json.dumps({"raw": str(evt)})
-            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return _operation_sse(lambda emit: operator_service.continue_operation(
+        operation_id=operation_id, answer=payload.answer, emit=emit,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1063,40 +1060,9 @@ async def operations_upload_source(operation_id: str, file: UploadFile = File(..
     operator_service.save_source_pdf(operation_id, data, file.filename or "source.pdf")
     answer = f"[Attached PDF: {file.filename or 'upload.pdf'}]\n\n{extracted['text']}"
 
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def emit(event: dict) -> None:
-        await queue.put(event)
-
-    async def runner() -> None:
-        try:
-            await operator_service.continue_operation(
-                operation_id=operation_id, answer=answer, emit=emit,
-            )
-        finally:
-            await queue.put(None)
-
-    asyncio.create_task(runner())
-
-    async def event_stream():
-        yield ": connected\n\n"
-        while True:
-            evt = await queue.get()
-            if evt is None:
-                yield "event: end\ndata: {}\n\n"
-                break
-            try:
-                payload_json = json.dumps(evt.get("data", {}), default=str)
-            except (TypeError, ValueError):
-                payload_json = json.dumps({"raw": str(evt)})
-            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return _operation_sse(lambda emit: operator_service.continue_operation(
+        operation_id=operation_id, answer=answer, emit=emit,
+    ))
 
 
 @app.get("/operations/recent")

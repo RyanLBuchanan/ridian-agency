@@ -31,6 +31,15 @@ WEB_SEARCH_TOOL: dict = {"type": "web_search_20260209", "name": "web_search", "m
 
 _MAX_PAUSE_RESTARTS = 4
 
+# Per-request bound + single retry: healthy turns finish well under two
+# minutes (a full 8-search research turn measured ~80s), while the SDK
+# defaults (up to 450s/attempt x 3 attempts for our max_tokens) let one
+# wedged request grind ~23 minutes with the run showing nothing. 300s keeps
+# 3-4x headroom over the slowest healthy turn and turns a hung request into
+# an honest, reported failure within ~10 minutes worst case.
+_REQUEST_TIMEOUT_SECONDS = 300.0
+_MAX_REQUEST_RETRIES = 1
+
 _client: AsyncAnthropic | None = None
 _client_key: str | None = None
 
@@ -44,7 +53,9 @@ def get_client() -> AsyncAnthropic:
     import os
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if _client is None or _client_key != key:
-        _client = AsyncAnthropic()
+        _client = AsyncAnthropic(
+            timeout=_REQUEST_TIMEOUT_SECONDS, max_retries=_MAX_REQUEST_RETRIES,
+        )
         _client_key = key
     return _client
 
