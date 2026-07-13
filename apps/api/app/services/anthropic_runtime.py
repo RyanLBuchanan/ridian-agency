@@ -23,7 +23,9 @@ from ..agents import default_model
 
 log = logging.getLogger("ridian.anthropic")
 
-WEB_SEARCH_TOOL: dict = {"type": "web_search_20260209", "name": "web_search"}
+# max_uses bounds per-search billing on a single sub-agent turn: the research
+# prompts ask for 5-12 sources, which a handful of searches covers.
+WEB_SEARCH_TOOL: dict = {"type": "web_search_20260209", "name": "web_search", "max_uses": 8}
 
 _MAX_PAUSE_RESTARTS = 4
 
@@ -74,7 +76,11 @@ async def run_text_agent(
     if use_web_search:
         kwargs["tools"] = [WEB_SEARCH_TOOL]
 
+    def _search_count(resp) -> int:
+        return sum(1 for b in resp.content if getattr(b, "type", "") == "server_tool_use")
+
     response = await client.messages.create(**kwargs)
+    searches = _search_count(response)
     restarts = 0
     while response.stop_reason == "pause_turn" and restarts < _MAX_PAUSE_RESTARTS:
         restarts += 1
@@ -83,6 +89,12 @@ async def run_text_agent(
             {"role": "assistant", "content": response.content},
         ]
         response = await client.messages.create(**kwargs)
+        searches += _search_count(response)
+
+    if use_web_search:
+        # Billing sanity: web search is billed per search. Surfaced in the
+        # backend log so a live run's search count is verifiable.
+        log.info("anthropic.web_search searches=%d restarts=%d", searches, restarts)
 
     if response.stop_reason == "refusal":
         log.warning("anthropic.refusal stop_details=%s", getattr(response, "stop_details", None))

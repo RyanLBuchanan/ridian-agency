@@ -196,6 +196,32 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
     }
 
 
+def _search_lock_gate(operator: OperatorContext) -> dict | None:
+    """Deterministic search exclusion for source-locked runs.
+
+    "Use only what's on this page" means the web is off-limits — even AFTER a
+    successful read (grounding_ok does NOT unlock search; supplementing a
+    locked source from the open web would violate the lock). The only key is
+    ``grounding_override``: the operator explicitly authorizing general web
+    research on resume. Enforced in code so the model cannot be talked (or
+    talk itself) into searching on a locked run — the prompt rule alone is
+    obedience, not a guarantee.
+    """
+    rec = operator.record
+    if not rec.get("source_locked_url") or rec.get("grounding_override"):
+        return None
+    return {
+        "error": (
+            f"BLOCKED: this run is locked to {rec.get('source_locked_url')} as its "
+            "only source — web search is disabled in code for locked runs. Use "
+            "read_url on the named source (or the already-provided source text). "
+            "If the source can't be read, the build tools will raise the "
+            "needs-input question; do NOT retry search."
+        ),
+        "reason": "search_locked",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Deliverable-intent gate (deterministic — no documents for small talk)
 # ---------------------------------------------------------------------------
@@ -373,6 +399,9 @@ async def web_research(
     """
     operator = current_operator()
     operator.note_tool("web_research")
+    block = _search_lock_gate(operator)
+    if block:
+        return block
     await operator.emit_step(
         name="research", status="running",
         detail=f"Searching the live web — topic: {topic} ({time_window}, {depth}).",
@@ -466,7 +495,7 @@ async def build_research_packet(
     """
     operator = current_operator()
     operator.note_tool("build_research_packet")
-    block = _deliverable_gate(operator)
+    block = _deliverable_gate(operator) or _search_lock_gate(operator)
     if block:
         return block
     if not topic or not topic.strip():
