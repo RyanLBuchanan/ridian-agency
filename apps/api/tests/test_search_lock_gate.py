@@ -72,8 +72,13 @@ def test_build_research_packet_refuses_on_locked_run(tmp_path):
 def test_web_research_runs_on_unlocked_run(tmp_path, monkeypatch):
     """Positive path wiring (search itself mocked): unlocked run reaches the
     sub-agent and produces a sources packet result."""
+    from app.services.anthropic_runtime import TextAgentResult
+
     async def fake_agent(system, prompt, **kw):
-        return "### Source One\n- URL: https://real.example\n"
+        return TextAgentResult(
+            text="### Source One\n- URL: https://real.example\n",
+            searches=2, restarts=0,
+        )
     monkeypatch.setattr(t, "run_text_agent", fake_agent)
     op = _ctx(tmp_path, {"source_locked_url": "", "deliverable_intent": True})
     set_current_operator(op)

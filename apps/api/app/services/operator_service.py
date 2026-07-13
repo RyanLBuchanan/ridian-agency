@@ -31,7 +31,7 @@ from typing import Awaitable, Callable
 from ..agents import default_model
 from ..agents.planner_agent import build_planner_system
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
-from .anthropic_runtime import get_client
+from .anthropic_runtime import date_line, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
@@ -358,7 +358,10 @@ def _compute_upload_state() -> str:
 
 
 def _build_planner_input(command: str, upload_state_line: str) -> str:
+    # date_line() reads the live clock per run — "this week" / "latest" in
+    # commands must resolve against today, not the model's training era.
     return (
+        f"{date_line()}\n\n"
         f"Operator command:\n{command}\n\n"
         f"Current memory + recent operations:\n{_memory_context_snippet()}\n\n"
         f"Auto-upload state: {upload_state_line}\n\n"

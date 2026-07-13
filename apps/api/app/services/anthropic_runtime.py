@@ -16,6 +16,8 @@ conversation to resume, capped so a wedged turn can't loop forever.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 
 from anthropic import AsyncAnthropic
 
@@ -47,9 +49,41 @@ def get_client() -> AsyncAnthropic:
     return _client
 
 
-def _text_of(response) -> str:
+def date_line() -> str:
+    """The 'today' line injected into every agent context — evaluated from the
+    live clock at CALL time, never a constant. Without it the model anchors
+    "this week" to its training data (a live run on 2026-07-13 narrated "the
+    current date context appears to be around mid-December 2025"). Weekday
+    included so relative phrases like "this week" resolve unambiguously."""
+    now = datetime.now()
+    return f"Today's date: {now.strftime('%A, %B %d, %Y')} ({now.date().isoformat()})."
+
+
+@dataclass
+class TextAgentResult:
+    """Final text plus run forensics, for callers that must verify grounding."""
+    text: str
+    searches: int
+    restarts: int
+
+
+def _final_text(blocks) -> str:
+    """Only the text AFTER the last non-text block — final-output semantics.
+
+    With server-side web search the model narrates between searches ("I'll
+    search the live web…", "I hit the search limit…") as text blocks
+    interleaved with ``server_tool_use`` / ``web_search_tool_result`` blocks.
+    Joining ALL text blocks leaked that narration into artifacts; the final
+    synthesis is everything after the last tool block. A turn with no tool
+    blocks keeps all its text (pause_turn can split one answer in segments).
+    """
+    last_tool = -1
+    for i, block in enumerate(blocks):
+        if getattr(block, "type", "") != "text":
+            last_tool = i
     return "".join(
-        block.text for block in response.content if block.type == "text"
+        block.text for block in blocks[last_tool + 1:]
+        if getattr(block, "type", "") == "text"
     ).strip()
 
 
@@ -59,18 +93,22 @@ async def run_text_agent(
     *,
     use_web_search: bool = False,
     max_tokens: int = 16000,
-) -> str:
+    return_stats: bool = False,
+):
     """One-shot agent: system prompt + user input → final text.
 
     ``user_input`` is a plain string or an Anthropic content-block list
     (for multimodal input). With ``use_web_search`` the server-side web search
-    tool is attached and ``pause_turn`` continuations are handled.
+    tool is attached and ``pause_turn`` continuations are handled. With
+    ``return_stats`` returns a :class:`TextAgentResult` (text + search count)
+    instead of a plain string, so research callers can flag zero-search runs
+    as ungrounded.
     """
     client = get_client()
     kwargs: dict = {
         "model": default_model(),
         "max_tokens": max_tokens,
-        "system": system,
+        "system": f"{date_line()}\n\n{system}",
         "messages": [{"role": "user", "content": user_input}],
     }
     if use_web_search:
@@ -80,15 +118,20 @@ async def run_text_agent(
         return sum(1 for b in resp.content if getattr(b, "type", "") == "server_tool_use")
 
     response = await client.messages.create(**kwargs)
+    blocks = list(response.content)
     searches = _search_count(response)
     restarts = 0
     while response.stop_reason == "pause_turn" and restarts < _MAX_PAUSE_RESTARTS:
         restarts += 1
+        # Resume with the FULL accumulated assistant content. Rebuilding with
+        # only the latest segment dropped earlier continuations' blocks from
+        # the conversation on the second and later restarts.
         kwargs["messages"] = [
             {"role": "user", "content": user_input},
-            {"role": "assistant", "content": response.content},
+            {"role": "assistant", "content": blocks},
         ]
         response = await client.messages.create(**kwargs)
+        blocks = blocks + list(response.content)
         searches += _search_count(response)
 
     if use_web_search:
@@ -98,5 +141,9 @@ async def run_text_agent(
 
     if response.stop_reason == "refusal":
         log.warning("anthropic.refusal stop_details=%s", getattr(response, "stop_details", None))
-        return ""
-    return _text_of(response)
+        text = ""
+    else:
+        text = _final_text(blocks)
+    if return_stats:
+        return TextAgentResult(text=text, searches=searches, restarts=restarts)
+    return text

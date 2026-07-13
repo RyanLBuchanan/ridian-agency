@@ -371,6 +371,15 @@ async def _require_known_recipient(operator: OperatorContext, to: str) -> dict |
     }
 
 
+# Prepended to research output when the sub-agent ran ZERO live web searches:
+# the content is model memory, and the artifact itself must say so — a code
+# guarantee, not a prompt rule (the model would happily present it as live).
+_UNGROUNDED_BANNER = (
+    "> ⚠ **UNGROUNDED** — built without any live web searches; this content "
+    "comes from model memory, not current sources. Verify before use.\n\n"
+)
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -384,7 +393,7 @@ async def web_research(
 ) -> dict:
     """Run live web research on ``topic`` and return a finished sources packet.
 
-    Uses the OpenAI hosted WebSearchTool through an internal sub-agent. The
+    Uses Anthropic's server-side web search through an internal sub-agent. The
     returned ``sources_md`` is a Markdown sources packet ready to be passed
     to ``write_sources_packet`` or ``write_audiobook_script``. Source URLs
     are cited; confidence flags are included.
@@ -395,7 +404,10 @@ async def web_research(
         depth: One of "quick" | "strategic" | "deep" — controls source count.
 
     Returns:
-        {"sources_md": str, "sources_count": int}
+        {"sources_md": str, "sources_count": int, "ungrounded": bool} —
+        ``ungrounded`` is true when ZERO live searches ran, meaning the
+        content came from model memory; report that honestly, never as
+        live research.
     """
     operator = current_operator()
     operator.note_tool("web_research")
@@ -414,9 +426,11 @@ async def web_research(
         "Produce the sources packet now."
     )
     try:
-        sources_md = (await run_text_agent(
+        res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
-        )).strip()
+            return_stats=True,
+        )
+        sources_md = res.text.strip()
     except Exception as exc:
         await operator.emit_step(name="research", status="failed",
                                  detail=f"Web research failed: {type(exc).__name__}: {exc}")
@@ -427,11 +441,21 @@ async def web_research(
     import re
     count = len(re.findall(r"^###\s+\S", sources_md, flags=re.MULTILINE))
 
+    # Zero live searches means every "source" came from model memory — the
+    # packet must say so, in the artifact and to the planner, not present
+    # itself as live research.
+    ungrounded = res.searches == 0
+    if ungrounded and sources_md:
+        sources_md = _UNGROUNDED_BANNER + sources_md
+        operator.record["ungrounded_research"] = True
+
     operator.sources_packet_text = sources_md
     operator.record["sources_count"] = count
-    await operator.emit_step(name="research", status="completed",
-                             detail=f"{count} sources gathered.")
-    return {"sources_md": sources_md, "sources_count": count}
+    detail = f"{count} sources gathered."
+    if ungrounded:
+        detail = f"{count} sources gathered — ⚠ UNGROUNDED (0 live web searches; model memory)."
+    await operator.emit_step(name="research", status="completed", detail=detail)
+    return {"sources_md": sources_md, "sources_count": count, "ungrounded": ungrounded}
 
 
 @planner_tool
@@ -490,8 +514,11 @@ async def build_research_packet(
             "this week" / "last 7 days" when the command says so).
 
     Returns:
-        {"path": str, "bytes": int, "sources_count": int} on success,
-        {"path": "", "bytes": 0, "sources_count": 0, "error": str} on failure.
+        {"path": str, "bytes": int, "sources_count": int, "ungrounded": bool}
+        on success — ``ungrounded`` true means ZERO live searches ran and the
+        packet is model memory (the file carries a warning banner; say so in
+        the receipt). {"path": "", "bytes": 0, "sources_count": 0,
+        "error": str} on failure.
     """
     operator = current_operator()
     operator.note_tool("build_research_packet")
@@ -513,9 +540,11 @@ async def build_research_packet(
         "Produce the research packet body now (focus line + sources)."
     )
     try:
-        body = (await run_text_agent(
+        res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
-        )).strip()
+            return_stats=True,
+        )
+        body = res.text.strip()
     except Exception as exc:  # noqa: BLE001
         await operator.emit_step(name="research_packet", status="failed",
                                  detail=f"Research failed: {type(exc).__name__}: {exc}")
@@ -538,7 +567,16 @@ async def build_research_packet(
     if len(title) > 80:
         title = title[:77].rstrip() + "…"
     dateline = datetime.now().strftime("%B %d, %Y")
-    packet = f"# Research Packet — {title}\n\n**Prepared by Ridian · {dateline}**\n\n{body}\n"
+    # Zero live searches → the packet is model memory, and it must say so at
+    # the top, before any content the user might paste into NotebookLM.
+    ungrounded = res.searches == 0
+    banner = _UNGROUNDED_BANNER if ungrounded else ""
+    if ungrounded:
+        operator.record["ungrounded_research"] = True
+    packet = (
+        f"# Research Packet — {title}\n\n"
+        f"**Prepared by Ridian · {dateline}**\n\n{banner}{body}\n"
+    )
 
     path = operator.folder / "research_packet.md"
     write_artifact(operator.folder, "research_packet.md", packet)
@@ -551,12 +589,14 @@ async def build_research_packet(
     # email/sheet/deck runs still auto-file to Drive normally.
     operator.record["skip_drive_upload"] = True
     await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
-    await operator.emit_step(
-        name="research_packet", status="completed",
-        detail=f"Packet ready — {count} sources. Paste research_packet.md into "
-               f"NotebookLM as one source, then generate the Audio Overview.",
-    )
-    return {"path": str(path), "bytes": size, "sources_count": count}
+    detail = (f"Packet ready — {count} sources. Paste research_packet.md into "
+              f"NotebookLM as one source, then generate the Audio Overview.")
+    if ungrounded:
+        detail = (f"Packet ready — {count} sources, ⚠ UNGROUNDED (0 live web "
+                  f"searches; content is model memory — verify before use).")
+    await operator.emit_step(name="research_packet", status="completed", detail=detail)
+    return {"path": str(path), "bytes": size, "sources_count": count,
+            "ungrounded": ungrounded}
 
 
 @planner_tool

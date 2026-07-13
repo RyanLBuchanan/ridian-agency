@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -63,7 +64,23 @@ from .services.social_media_workflow_service import (  # noqa: E402
 )
 from .services.workflow_service import run_workflow  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
+# Console + rotating file: run forensics (e.g. anthropic.web_search
+# searches=N) must survive the uvicorn console. state/ is git-ignored.
+from .services.state_store import STATE_DIR  # noqa: E402
+
+_LOG_DIR = STATE_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.handlers.RotatingFileHandler(
+            _LOG_DIR / "backend.log", maxBytes=2_000_000, backupCount=3,
+            encoding="utf-8",
+        ),
+    ],
+)
 log = logging.getLogger("ridian.api")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
