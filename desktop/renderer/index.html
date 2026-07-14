@@ -404,10 +404,14 @@
                   <span id="operator-project-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-project-chip-clear" type="button" class="operator-source-chip-clear" title="Stop filing runs under this project" aria-label="Clear active project">✕</button>
                 </div>
+                <!-- Structured-question options (Claude-style suggested
+                     replies): tappable choices ride the composer while a
+                     question is live; hidden once answered or dismissed. -->
+                <div id="operator-options-row" class="operator-options-row hidden"></div>
                 <!-- Answer-mode chip: visible whenever the composer will send an
                      ANSWER to the open question instead of a new command. ✕
-                     switches the composer back to new-command mode (the
-                     question's own buttons remain the way to answer it). -->
+                     switches the composer back to new-command mode and clears
+                     the question furniture (placeholder + options row). -->
                 <div id="operator-answer-chip" class="operator-source-chip operator-answer-chip hidden">
                   <span id="operator-answer-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-answer-chip-clear" type="button" class="operator-source-chip-clear" title="Start a new command instead" aria-label="Exit answer mode">✕</button>
@@ -469,18 +473,6 @@
                   </div>
                   <div id="operator-receipt-text" class="operator-receipt-text"></div>
                 </div>
-              </div>
-
-              <!-- v1.7: missing-information card. Amber, prominent, one click
-                   to answer in the command box. -->
-              <div id="operator-needs-input" class="operator-needs-input hidden" role="alert">
-                <div class="operator-needs-input-title">Ridian needs one answer from you</div>
-                <ul id="operator-needs-input-list" class="operator-needs-input-list"></ul>
-                <button
-                  id="operator-needs-input-answer"
-                  type="button"
-                  class="btn btn-primary btn-compact"
-                >Answer below ↓</button>
               </div>
 
               <!-- Artifacts panel (live as artifacts land) -->

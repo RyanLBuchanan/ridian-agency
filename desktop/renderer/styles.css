@@ -1419,7 +1419,7 @@ body {
   border-color: var(--color-border-strong);
 }
 
-/* v2.7: answer-mode chip — amber like the needs-input card it belongs to, so
+/* v2.7: answer-mode chip — amber like the open question it belongs to, so
    "your next send answers the question" is unmissable and dismissible. */
 .operator-answer-chip {
   color: #92400e;
@@ -1678,7 +1678,7 @@ body {
 }
 .operator-turn .operator-active,
 .operator-turn .operator-artifacts-card,
-.operator-turn .operator-needs-input { opacity: 0.94; }
+.operator-turn .operator-question { opacity: 0.94; }
 .operator-turn button.is-frozen,
 .operator-turn .is-frozen button {
   opacity: 0.45;
@@ -1903,54 +1903,44 @@ body {
 
 /* v1.7: missing-information card */
 
-.operator-needs-input {
-  background: var(--color-warn-bg);
-  border: 1px solid var(--color-warn-border);
-  border-left: 4px solid var(--color-warn-text);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.operator-needs-input-title {
-  font-weight: 700;
-  color: var(--color-warn-text);
-  font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.operator-needs-input-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.operator-needs-input-item {
+/* The open question — a normal Ridian message in the thread (no banner).
+   A thin amber accent marks it as needing attention; the answering surface
+   is the composer (placeholder + answer chip + options row). */
+.operator-question {
   font-size: var(--fs-sm);
   color: var(--color-text-strong);
   line-height: 1.5;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warn-text);
+  border-radius: var(--radius-md);
 }
 
-.operator-needs-input-hint {
+.operator-question-label {
+  display: block;
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  color: var(--color-warn-text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.operator-question-hint {
   display: block;
   font-size: var(--fs-xs);
   color: var(--color-muted);
+  margin-top: 2px;
 }
 
-/* v2.2: tappable choice buttons for structured questions. */
-.operator-needs-input-q { margin-bottom: 2px; }
-
-.operator-needs-input-options {
+/* v2.2: tappable choice buttons for structured questions — riding the
+   composer like suggested replies, hidden once answered or dismissed. */
+.operator-options-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .operator-choice-btn { align-self: flex-start; }
@@ -1961,8 +1951,6 @@ body {
   cursor: not-allowed;
   pointer-events: none;
 }
-
-.operator-needs-input .btn { align-self: flex-start; }
 
 /* v1.7.1: composer with inset mic (industry-standard placement) */
 
