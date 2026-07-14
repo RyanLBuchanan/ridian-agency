@@ -1,12 +1,9 @@
 """Presentation Agent — turns the polished document into a slide deck outline."""
 
-from agents import Agent
-
-from . import default_model, load_prompt
+from . import PromptAgent, load_prompt
 
 
-presentation_agent = Agent(
+presentation_agent = PromptAgent(
     name="Presentation Agent",
     instructions=load_prompt("presentation_prompt.txt"),
-    model=default_model(),
 )

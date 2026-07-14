@@ -4,20 +4,23 @@ Per the redesign memo, §13: "Every tool in the registry must produce a side
 effect (file written, draft created, upload completed) or it doesn't ship.
 No tool whose output is 'here's a prompt.'"
 
-These tools are decorated with ``@function_tool`` so the OpenAI Agents SDK
-exposes them to the planner agent. Each tool receives a
-``RunContextWrapper[OperatorContext]`` as its first argument and reads the
-run folder + emits SSE timeline events through that context.
+These tools are decorated with ``@planner_tool`` — a thin wrapper around the
+Anthropic SDK's ``beta_async_tool`` that (a) JSON-encodes each tool's dict
+return for the model and (b) preserves the tool's signature/docstring so the
+input schema is generated exactly as the OpenAI Agents SDK used to. Tools read
+the active run's ``OperatorContext`` from a task-local contextvar
+(``operator_context.current_operator``) set by operator_service, and emit SSE
+timeline events + write artifacts through it.
 
 Tools are intentionally narrow:
     web_research            — live web search, returns structured sources Markdown
     write_sources_packet    — writes sources_packet.md to disk
     write_audiobook_script  — generates a two-host script via a sub-agent
-    synthesize_audio        — writes audiobook.mp3 via OpenAI TTS
+    synthesize_audio        — writes audiobook.mp3 (legacy; unexposed)
     write_file              — generic allowlisted artifact writer
 
-The planner does NOT see WebSearchTool or the script-writer sub-agent
-directly — they're encapsulated inside ``web_research`` and
+The planner does NOT see web search or the script-writer sub-agent directly —
+they're encapsulated inside ``web_research`` / ``build_research_packet`` /
 ``write_audiobook_script`` so the planner's tool list stays small and
 business-shaped rather than infrastructure-shaped.
 """
@@ -25,14 +28,16 @@ business-shaped rather than infrastructure-shaped.
 from __future__ import annotations
 
 import asyncio
+import functools
+import json
 import logging
 from pathlib import Path
 
-from agents import Agent, RunContextWrapper, Runner, WebSearchTool, function_tool, trace
+from anthropic import beta_async_tool
 
 import re as _re
 
-from ..agents import default_model, load_prompt
+from ..agents import load_prompt, research_model
 from . import (
     browser_service,
     gmail_service,
@@ -42,10 +47,33 @@ from . import (
     tts_service,
     url_fetch_service,
 )
+from .anthropic_runtime import run_text_agent
 from .artifact_service import write_artifact
-from .operator_context import ALLOWED_PROPOSAL_KINDS, OperatorContext
+from .operator_context import (
+    ALLOWED_PROPOSAL_KINDS,
+    OperatorContext,
+    current_operator,
+)
 
 log = logging.getLogger("ridian.operator.tools")
+
+
+def planner_tool(fn):
+    """Register an async tool with the Anthropic tool runner.
+
+    The wrapped function keeps its exact signature and Google-style docstring
+    (the SDK generates the input schema from both — same behavior as the old
+    ``@function_tool``). Bodies keep returning dicts; the wrapper JSON-encodes
+    them into the tool_result string the model reads.
+    """
+    @functools.wraps(fn)
+    async def wrapper(**kwargs):
+        result = await fn(**kwargs)
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, default=str)
+
+    return beta_async_tool(wrapper)
 
 
 # Files the planner is allowed to write via the generic write_file tool.
@@ -68,36 +96,13 @@ _WRITE_FILE_ALLOWLIST: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # Internal sub-agents (not exposed to the planner directly)
 # ---------------------------------------------------------------------------
+# Each is a system prompt run one-shot via anthropic_runtime.run_text_agent;
+# the research/packet ones attach the server-side web_search tool. The planner
+# never sees web search directly — same encapsulation as before.
 
-
-def _research_subagent() -> Agent:
-    """The sources-packet writer. Owns WebSearchTool; planner doesn't see it."""
-    return Agent(
-        name="Operator Researcher",
-        instructions=load_prompt("operator_research_prompt.txt"),
-        model=default_model(),
-        tools=[WebSearchTool(search_context_size="high")],
-    )
-
-
-def _script_subagent() -> Agent:
-    return Agent(
-        name="Operator Scriptwriter",
-        instructions=load_prompt("operator_script_prompt.txt"),
-        model=default_model(),
-    )
-
-
-def _packet_subagent() -> Agent:
-    """The NotebookLM research-packet writer. Owns WebSearchTool and emits the
-    paste-clean packet body (focus line + `## Source` sections). Planner doesn't
-    see WebSearchTool directly."""
-    return Agent(
-        name="Ridian Research Packet Builder",
-        instructions=load_prompt("operator_research_packet_prompt.txt"),
-        model=default_model(),
-        tools=[WebSearchTool(search_context_size="high")],
-    )
+_RESEARCH_PROMPT = "operator_research_prompt.txt"
+_SCRIPT_PROMPT = "operator_script_prompt.txt"
+_PACKET_PROMPT = "operator_research_packet_prompt.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +193,32 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
             "raised for the operator. Stop after this."
         ),
         "reason": "grounding_required",
+    }
+
+
+def _search_lock_gate(operator: OperatorContext) -> dict | None:
+    """Deterministic search exclusion for source-locked runs.
+
+    "Use only what's on this page" means the web is off-limits — even AFTER a
+    successful read (grounding_ok does NOT unlock search; supplementing a
+    locked source from the open web would violate the lock). The only key is
+    ``grounding_override``: the operator explicitly authorizing general web
+    research on resume. Enforced in code so the model cannot be talked (or
+    talk itself) into searching on a locked run — the prompt rule alone is
+    obedience, not a guarantee.
+    """
+    rec = operator.record
+    if not rec.get("source_locked_url") or rec.get("grounding_override"):
+        return None
+    return {
+        "error": (
+            f"BLOCKED: this run is locked to {rec.get('source_locked_url')} as its "
+            "only source — web search is disabled in code for locked runs. Use "
+            "read_url on the named source (or the already-provided source text). "
+            "If the source can't be read, the build tools will raise the "
+            "needs-input question; do NOT retry search."
+        ),
+        "reason": "search_locked",
     }
 
 
@@ -340,21 +371,29 @@ async def _require_known_recipient(operator: OperatorContext, to: str) -> dict |
     }
 
 
+# Prepended to research output when the sub-agent ran ZERO live web searches:
+# the content is model memory, and the artifact itself must say so — a code
+# guarantee, not a prompt rule (the model would happily present it as live).
+_UNGROUNDED_BANNER = (
+    "> ⚠ **UNGROUNDED** — built without any live web searches; this content "
+    "comes from model memory, not current sources. Verify before use.\n\n"
+)
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
 
-@function_tool
+@planner_tool
 async def web_research(
-    ctx: RunContextWrapper[OperatorContext],
     topic: str,
     time_window: str = "last 30 days",
     depth: str = "strategic",
 ) -> dict:
     """Run live web research on ``topic`` and return a finished sources packet.
 
-    Uses the OpenAI hosted WebSearchTool through an internal sub-agent. The
+    Uses Anthropic's server-side web search through an internal sub-agent. The
     returned ``sources_md`` is a Markdown sources packet ready to be passed
     to ``write_sources_packet`` or ``write_audiobook_script``. Source URLs
     are cited; confidence flags are included.
@@ -365,17 +404,21 @@ async def web_research(
         depth: One of "quick" | "strategic" | "deep" — controls source count.
 
     Returns:
-        {"sources_md": str, "sources_count": int}
+        {"sources_md": str, "sources_count": int, "ungrounded": bool} —
+        ``ungrounded`` is true when ZERO live searches ran, meaning the
+        content came from model memory; report that honestly, never as
+        live research.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("web_research")
+    block = _search_lock_gate(operator)
+    if block:
+        return block
     await operator.emit_step(
         name="research", status="running",
         detail=f"Searching the live web — topic: {topic} ({time_window}, {depth}).",
     )
 
-    agent = _research_subagent()
-    agent.model = default_model()
     prompt = (
         f"Operator command topic: {topic}\n"
         f"Time window: {time_window}\n"
@@ -383,9 +426,11 @@ async def web_research(
         "Produce the sources packet now."
     )
     try:
-        with trace("ridian.operator.tool.web_research"):
-            result = await Runner.run(agent, input=prompt)
-        sources_md = (result.final_output or "").strip()
+        res = await run_text_agent(
+            load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
+            return_stats=True, model=research_model(),
+        )
+        sources_md = res.text.strip()
     except Exception as exc:
         await operator.emit_step(name="research", status="failed",
                                  detail=f"Web research failed: {type(exc).__name__}: {exc}")
@@ -396,16 +441,25 @@ async def web_research(
     import re
     count = len(re.findall(r"^###\s+\S", sources_md, flags=re.MULTILINE))
 
+    # Zero live searches means every "source" came from model memory — the
+    # packet must say so, in the artifact and to the planner, not present
+    # itself as live research.
+    ungrounded = res.searches == 0
+    if ungrounded and sources_md:
+        sources_md = _UNGROUNDED_BANNER + sources_md
+        operator.record["ungrounded_research"] = True
+
     operator.sources_packet_text = sources_md
     operator.record["sources_count"] = count
-    await operator.emit_step(name="research", status="completed",
-                             detail=f"{count} sources gathered.")
-    return {"sources_md": sources_md, "sources_count": count}
+    detail = f"{count} sources gathered."
+    if ungrounded:
+        detail = f"{count} sources gathered — ⚠ UNGROUNDED (0 live web searches; model memory)."
+    await operator.emit_step(name="research", status="completed", detail=detail)
+    return {"sources_md": sources_md, "sources_count": count, "ungrounded": ungrounded}
 
 
-@function_tool
+@planner_tool
 async def write_sources_packet(
-    ctx: RunContextWrapper[OperatorContext],
     content: str,
 ) -> dict:
     """Write a sources packet to ``sources_packet.md`` in the run folder.
@@ -416,7 +470,7 @@ async def write_sources_packet(
     Returns:
         {"path": str, "bytes": int}
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("write_file")
     block = _deliverable_gate(operator)
     if block:
@@ -433,9 +487,8 @@ async def write_sources_packet(
     return {"path": str(path), "bytes": size}
 
 
-@function_tool
+@planner_tool
 async def build_research_packet(
-    ctx: RunContextWrapper[OperatorContext],
     topic: str,
     time_window: str = "last 30 days",
 ) -> dict:
@@ -461,12 +514,15 @@ async def build_research_packet(
             "this week" / "last 7 days" when the command says so).
 
     Returns:
-        {"path": str, "bytes": int, "sources_count": int} on success,
-        {"path": "", "bytes": 0, "sources_count": 0, "error": str} on failure.
+        {"path": str, "bytes": int, "sources_count": int, "ungrounded": bool}
+        on success — ``ungrounded`` true means ZERO live searches ran and the
+        packet is model memory (the file carries a warning banner; say so in
+        the receipt). {"path": "", "bytes": 0, "sources_count": 0,
+        "error": str} on failure.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("build_research_packet")
-    block = _deliverable_gate(operator)
+    block = _deliverable_gate(operator) or _search_lock_gate(operator)
     if block:
         return block
     if not topic or not topic.strip():
@@ -478,17 +534,17 @@ async def build_research_packet(
         detail=f"Researching for a NotebookLM packet — topic: {topic} ({time_window}).",
     )
 
-    agent = _packet_subagent()
-    agent.model = default_model()
     prompt = (
         f"Topic: {topic}\n"
         f"Time window: {time_window}\n\n"
         "Produce the research packet body now (focus line + sources)."
     )
     try:
-        with trace("ridian.operator.tool.build_research_packet"):
-            result = await Runner.run(agent, input=prompt)
-        body = (result.final_output or "").strip()
+        res = await run_text_agent(
+            load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
+            return_stats=True, model=research_model(),
+        )
+        body = res.text.strip()
     except Exception as exc:  # noqa: BLE001
         await operator.emit_step(name="research_packet", status="failed",
                                  detail=f"Research failed: {type(exc).__name__}: {exc}")
@@ -511,7 +567,16 @@ async def build_research_packet(
     if len(title) > 80:
         title = title[:77].rstrip() + "…"
     dateline = datetime.now().strftime("%B %d, %Y")
-    packet = f"# Research Packet — {title}\n\n**Prepared by Ridian · {dateline}**\n\n{body}\n"
+    # Zero live searches → the packet is model memory, and it must say so at
+    # the top, before any content the user might paste into NotebookLM.
+    ungrounded = res.searches == 0
+    banner = _UNGROUNDED_BANNER if ungrounded else ""
+    if ungrounded:
+        operator.record["ungrounded_research"] = True
+    packet = (
+        f"# Research Packet — {title}\n\n"
+        f"**Prepared by Ridian · {dateline}**\n\n{banner}{body}\n"
+    )
 
     path = operator.folder / "research_packet.md"
     write_artifact(operator.folder, "research_packet.md", packet)
@@ -524,17 +589,18 @@ async def build_research_packet(
     # email/sheet/deck runs still auto-file to Drive normally.
     operator.record["skip_drive_upload"] = True
     await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
-    await operator.emit_step(
-        name="research_packet", status="completed",
-        detail=f"Packet ready — {count} sources. Paste research_packet.md into "
-               f"NotebookLM as one source, then generate the Audio Overview.",
-    )
-    return {"path": str(path), "bytes": size, "sources_count": count}
+    detail = (f"Packet ready — {count} sources. Paste research_packet.md into "
+              f"NotebookLM as one source, then generate the Audio Overview.")
+    if ungrounded:
+        detail = (f"Packet ready — {count} sources, ⚠ UNGROUNDED (0 live web "
+                  f"searches; content is model memory — verify before use).")
+    await operator.emit_step(name="research_packet", status="completed", detail=detail)
+    return {"path": str(path), "bytes": size, "sources_count": count,
+            "ungrounded": ungrounded}
 
 
-@function_tool
+@planner_tool
 async def read_url(
-    ctx: RunContextWrapper[OperatorContext],
     url: str,
 ) -> dict:
     """Fetch a SPECIFIC web page the operator named and return its real text.
@@ -560,7 +626,7 @@ async def read_url(
         success, {"error": str} on a blocked/failed fetch (do NOT fabricate
         content — report the failure instead).
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("read_url")
     if not url or not url.strip():
         await operator.emit_error("read_url called without a URL; skipping.")
@@ -618,9 +684,8 @@ async def read_url(
     }
 
 
-@function_tool
+@planner_tool
 async def write_audiobook_script(
-    ctx: RunContextWrapper[OperatorContext],
     sources_md: str,
     target_minutes: int = 15,
 ) -> dict:
@@ -632,7 +697,7 @@ async def write_audiobook_script(
     Returns:
         {"path": str, "bytes": int, "estimated_seconds": int}
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("write_audiobook_script")
     if not sources_md or not sources_md.strip():
         await operator.emit_error("write_audiobook_script called without sources; skipping.")
@@ -641,17 +706,15 @@ async def write_audiobook_script(
     await operator.emit_step(name="script", status="running",
                              detail=f"Writing two-host script (~{target_minutes} min target).")
 
-    agent = _script_subagent()
-    agent.model = default_model()
     prompt = (
         f"Sources packet:\n\n{sources_md}\n\n"
         f"Target spoken runtime: ~{target_minutes} minutes.\n"
         "Produce the audiobook script now."
     )
     try:
-        with trace("ridian.operator.tool.write_audiobook_script"):
-            result = await Runner.run(agent, input=prompt)
-        script_md = (result.final_output or "").strip()
+        script_md = (await run_text_agent(
+            load_prompt(_SCRIPT_PROMPT), prompt,
+        )).strip()
     except Exception as exc:
         await operator.emit_step(name="script", status="failed",
                                  detail=f"Script generation failed: {type(exc).__name__}: {exc}")
@@ -670,9 +733,8 @@ async def write_audiobook_script(
     return {"path": str(path), "bytes": size, "estimated_seconds": runtime}
 
 
-@function_tool
+@planner_tool
 async def synthesize_audio(
-    ctx: RunContextWrapper[OperatorContext],
     script_md: str,
     voice_a: str = "onyx",
     voice_b: str = "nova",
@@ -686,7 +748,7 @@ async def synthesize_audio(
     Returns:
         {"path": str, "bytes": int, "segments": int}
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("synthesize_audio")
     if not script_md or not script_md.strip():
         await operator.emit_error("synthesize_audio called with empty script; skipping.")
@@ -735,9 +797,8 @@ async def synthesize_audio(
     return {"path": str(audio_path), "bytes": meta["bytes"], "segments": meta["segments"]}
 
 
-@function_tool
+@planner_tool
 async def write_file(
-    ctx: RunContextWrapper[OperatorContext],
     filename: str,
     content: str,
     kind: str = "markdown",
@@ -755,7 +816,7 @@ async def write_file(
     Returns:
         {"path": str, "bytes": int}
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("write_file")
     block = _deliverable_gate(operator)
     if block:
@@ -838,9 +899,8 @@ def _fact_quality_error(payload: dict) -> str | None:
 # whose schema depends on ``kind`` (each kind validates differently inside
 # the function body). The Agents SDK's strict mode rejects ``dict`` params
 # because they emit ``additionalProperties`` in the JSON schema.
-@function_tool(strict_mode=False)
+@planner_tool
 async def propose_memory_update(
-    ctx: RunContextWrapper[OperatorContext],
     kind: str,
     payload: dict,
     reason: str = "",
@@ -869,7 +929,7 @@ async def propose_memory_update(
         {"id": str, "kind": str, "status": "proposed"} on success,
         {"error": str} on validation failure.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("propose_memory_update")
 
     if kind not in ALLOWED_PROPOSAL_KINDS:
@@ -903,9 +963,8 @@ async def propose_memory_update(
     return {"id": proposal["id"], "kind": proposal["kind"], "status": proposal["status"]}
 
 
-@function_tool
+@planner_tool
 async def draft_gmail(
-    ctx: RunContextWrapper[OperatorContext],
     to: str,
     subject: str,
     body: str,
@@ -933,7 +992,7 @@ async def draft_gmail(
         {"error": str} if the recipient is unverified, Gmail isn't connected, or
         the API call failed.
     """
-    return await _draft_gmail(ctx.context, to, subject, body)
+    return await _draft_gmail(current_operator(), to, subject, body)
 
 
 async def _draft_gmail(operator: OperatorContext, to: str, subject: str, body: str) -> dict:
@@ -1011,9 +1070,8 @@ async def _draft_gmail(operator: OperatorContext, to: str, subject: str, body: s
     return meta
 
 
-@function_tool
+@planner_tool
 async def auto_upload_drive(
-    ctx: RunContextWrapper[OperatorContext],
 ) -> dict:
     """File the current run's artifacts in the operator's Google Drive.
 
@@ -1029,7 +1087,7 @@ async def auto_upload_drive(
         in the final summary but NOT retry — the manual Upload button is the
         re-try path).
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("auto_upload_drive")
 
     # Some runs produce LOCAL-only deliverables (e.g. build_research_packet's
@@ -1097,9 +1155,8 @@ async def auto_upload_drive(
     }
 
 
-@function_tool
+@planner_tool
 async def create_spreadsheet(
-    ctx: RunContextWrapper[OperatorContext],
     title: str,
     headers: list[str],
     rows: list[list[str]],
@@ -1126,7 +1183,7 @@ async def create_spreadsheet(
     Returns:
         {"spreadsheet_id": str, "url": str} on success, {"error": str} on failure.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("create_spreadsheet")
     block = _deliverable_gate(operator)
     if block:
@@ -1164,9 +1221,8 @@ async def create_spreadsheet(
 
 # strict_mode stays ON: parallel lists (titles + bullets) keep the JSON
 # schema strict-compatible, unlike a list-of-dicts slides param.
-@function_tool
+@planner_tool
 async def create_slide_deck(
-    ctx: RunContextWrapper[OperatorContext],
     title: str,
     slide_titles: list[str],
     slide_bullets: list[list[str]],
@@ -1190,7 +1246,7 @@ async def create_slide_deck(
     Returns:
         {"presentation_id": str, "url": str} on success, {"error": str} on failure.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("create_slide_deck")
     block = _deliverable_gate(operator)
     if block:
@@ -1241,9 +1297,8 @@ async def create_slide_deck(
 # TTS billing made the audiobook path the most expensive per-run capability.
 # The tool functions stay defined in this file for backward compat and to
 # allow easy re-introduction; they're just not exposed to the planner.
-@function_tool
+@planner_tool
 async def request_missing_info(
-    ctx: RunContextWrapper[OperatorContext],
     question: str,
     context_hint: str = "",
 ) -> dict:
@@ -1267,7 +1322,7 @@ async def request_missing_info(
     Returns:
         {"status": "awaiting_user", "id": str}
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("request_missing_info")
     entry = await operator.emit_needs_input(question=question, context_hint=context_hint)
     await operator.emit_step(
@@ -1279,9 +1334,8 @@ async def request_missing_info(
 
 # strict_mode=False: like propose_memory_update, the payload shape depends
 # on kind, so the JSON schema can't be strict.
-@function_tool(strict_mode=False)
+@planner_tool
 async def save_memory(
-    ctx: RunContextWrapper[OperatorContext],
     kind: str,
     payload: dict,
 ) -> dict:
@@ -1301,7 +1355,7 @@ async def save_memory(
     Returns:
         {"id": str, "kind": str, "status": "saved"} or {"error": str}.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("save_memory")
 
     if kind not in ALLOWED_PROPOSAL_KINDS:
@@ -1361,9 +1415,8 @@ async def save_memory(
     return {"id": entry.get("id", ""), "kind": kind, "status": "saved"}
 
 
-@function_tool
+@planner_tool
 async def open_browser(
-    ctx: RunContextWrapper[OperatorContext],
     target: str,
     browser: str = "chrome",
 ) -> dict:
@@ -1385,7 +1438,7 @@ async def open_browser(
     Returns:
         {"url": str, "browser_used": str, "opened": bool} or {"error": str}.
     """
-    operator = ctx.context
+    operator = current_operator()
     operator.note_tool("open_browser")
     await operator.emit_step(
         name="browser", status="running",
@@ -1434,7 +1487,8 @@ PLANNER_TOOLS = [
 
 def tool_capability_summary() -> str:
     """Plain-text capability list rendered into the planner system prompt."""
-    return "\n".join(
-        f"- {t.name}: {(t.description or '').splitlines()[0] if t.description else ''}"
-        for t in PLANNER_TOOLS
-    )
+    lines = []
+    for t in PLANNER_TOOLS:
+        desc = (t.to_dict().get("description") or "").strip()
+        lines.append(f"- {t.name}: {desc.splitlines()[0] if desc else ''}")
+    return "\n".join(lines)

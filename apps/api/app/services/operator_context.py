@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -32,6 +33,30 @@ ALLOWED_PROPOSAL_KINDS: tuple[str, ...] = ("fact", "contact", "follow_up", "deci
 # An emit function pushes a single dict event into the SSE queue. Mirrors
 # the operator_service.EmitFn alias so the two stay interchangeable.
 EmitFn = Callable[[dict], Awaitable[None]]
+
+# The operator context for the run currently executing on this async task.
+# The Anthropic tool runner calls tools as plain functions (no per-call context
+# argument like the old SDK's RunContextWrapper), so operator_service sets this
+# contextvar at the start of every run/continue turn and the tools read it.
+# Contextvars are task-local, so concurrent runs can't cross-contaminate.
+_CURRENT_OPERATOR: ContextVar["OperatorContext | None"] = ContextVar(
+    "ridian_current_operator", default=None
+)
+
+
+def set_current_operator(operator: "OperatorContext"):
+    """Bind ``operator`` to the current async context. Returns the reset token."""
+    return _CURRENT_OPERATOR.set(operator)
+
+
+def current_operator() -> "OperatorContext":
+    op = _CURRENT_OPERATOR.get()
+    if op is None:
+        raise RuntimeError(
+            "No OperatorContext bound — operator tools must run inside an "
+            "operation (operator_service.set_current_operator was not called)."
+        )
+    return op
 
 
 @dataclass

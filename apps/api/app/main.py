@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -63,7 +64,23 @@ from .services.social_media_workflow_service import (  # noqa: E402
 )
 from .services.workflow_service import run_workflow  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
+# Console + rotating file: run forensics (e.g. anthropic.web_search
+# searches=N) must survive the uvicorn console. state/ is git-ignored.
+from .services.state_store import STATE_DIR  # noqa: E402
+
+_LOG_DIR = STATE_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.handlers.RotatingFileHandler(
+            _LOG_DIR / "backend.log", maxBytes=2_000_000, backupCount=3,
+            encoding="utf-8",
+        ),
+    ],
+)
 log = logging.getLogger("ridian.api")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -129,6 +146,8 @@ class SettingsView(BaseModel):
     operator_email: str = ""
     default_to_email: str = ""
     company_name: str = ""
+    anthropic_model: str = ""
+    anthropic_api_key_configured: bool = False
     openai_model: str = ""
     openai_api_key_configured: bool = False
     smtp_host: str = ""
@@ -160,6 +179,8 @@ class SettingsUpdate(BaseModel):
     operator_email: str | None = None
     default_to_email: str | None = None
     company_name: str | None = None
+    anthropic_api_key: str | None = None
+    anthropic_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
     smtp_host: str | None = None
@@ -336,15 +357,16 @@ async def health() -> dict:
     return {
         "status": "ok",
         "service": "ridian-agency",
-        "model": settings_service.get_effective_value("OPENAI_MODEL") or "gpt-4o-mini",
+        "model": settings_service.get_effective_value("ANTHROPIC_MODEL") or "claude-opus-4-8",
+        "anthropic_key_loaded": bool(settings_service.get_effective_value("ANTHROPIC_API_KEY")),
         "openai_key_loaded": bool(settings_service.get_effective_value("OPENAI_API_KEY")),
     }
 
 
 @app.post("/workflows/run", response_model=WorkflowResponse)
 async def workflows_run(payload: WorkflowRequest) -> WorkflowResponse:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set.")
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not set.")
 
     log.info("workflow.start task=%r", payload.task[:120])
     try:
@@ -373,10 +395,10 @@ async def workflows_social_media_run(payload: SocialMediaRequest) -> SocialMedia
     OPENAI_API_KEY and OPENAI_MODEL via settings_service the same way the
     business workflow does.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     log.info("social_workflow.start channel=%r format=%r depth=%r",
@@ -419,10 +441,10 @@ async def workflows_agentic_advances_run(payload: AgenticAdvancesRequest) -> Age
     in current sources. The artifact is a single Markdown file:
     ``agentic_advances_brief.md``.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     if payload.time_window and payload.time_window not in AGENTIC_WINDOWS:
@@ -460,10 +482,10 @@ async def workflows_notebooklm_run(payload: NotebookLMRequest) -> NotebookLMResp
     Produces a single Markdown artifact, ``notebooklm_package.md``, with
     a copy-paste-ready Audio Overview prompt and supporting prompts.
     """
-    if not settings_service.get_effective_value("OPENAI_API_KEY"):
+    if not settings_service.get_effective_value("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set. Open Settings to add your key.",
+            detail="ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key.",
         )
 
     if payload.purpose and payload.purpose not in NLM_PURPOSES:
@@ -856,13 +878,28 @@ class OperationRunRequest(BaseModel):
     project_id: str = Field("", description="Optional operator project to file this run under.")
 
 
-@app.post("/operations/run")
-async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
-    """Run an operation and stream timeline events as Server-Sent Events.
+# Comment-line heartbeat cadence for operation SSE streams. Long tool calls
+# (live web research) can go minutes without emitting an event; a stream that
+# sends zero bytes for that long gets killed by idle-socket policies between
+# Electron and uvicorn, and the renderer then reports a healthy run as Failed.
+# SSE comment lines (": ...") are protocol-legal keep-alives the renderer
+# already skips.
+_SSE_HEARTBEAT_SECONDS = 15.0
 
-    The renderer subscribes via fetch + ReadableStream (or EventSource).
-    Each event is a JSON object on a single ``data:`` line, terminated by
-    a blank line per SSE spec.
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
+
+def _operation_sse(run) -> StreamingResponse:
+    """Queue-backed SSE stream for one operation run.
+
+    ``run`` is an async callable taking the emit function. The runner task is
+    detached from the HTTP request, so its exceptions would otherwise die
+    unlogged on stderr — they are logged here, and the stream always closes
+    with an ``end`` event.
     """
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -871,9 +908,9 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
 
     async def runner() -> None:
         try:
-            await operator_service.run_operation(
-                command=payload.command, emit=emit, project_id=payload.project_id,
-            )
+            await run(emit)
+        except Exception:  # noqa: BLE001 — persist the traceback, never re-raise
+            log.exception("operation runner failed")
         finally:
             await queue.put(None)  # sentinel — stop the stream
 
@@ -883,7 +920,11 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
         # Initial comment line so the client immediately knows the stream is live.
         yield ": connected\n\n"
         while True:
-            evt = await queue.get()
+            try:
+                evt = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
             if evt is None:
                 yield "event: end\ndata: {}\n\n"
                 break
@@ -893,12 +934,21 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
                 payload_json = json.dumps({"raw": str(evt)})
             yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
 
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers=dict(_SSE_HEADERS))
+
+
+@app.post("/operations/run")
+async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
+    """Run an operation and stream timeline events as Server-Sent Events.
+
+    The renderer subscribes via fetch + ReadableStream (or EventSource).
+    Each event is a JSON object on a single ``data:`` line, terminated by
+    a blank line per SSE spec.
+    """
+    return _operation_sse(lambda emit: operator_service.run_operation(
+        command=payload.command, emit=emit, project_id=payload.project_id,
+    ))
 
 
 class OperationContinueRequest(BaseModel):
@@ -913,40 +963,9 @@ async def operations_continue(operation_id: str, payload: OperationContinueReque
     operation reuses its original context/folder/flags, so this is a true
     resume — not a new run.
     """
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def emit(event: dict) -> None:
-        await queue.put(event)
-
-    async def runner() -> None:
-        try:
-            await operator_service.continue_operation(
-                operation_id=operation_id, answer=payload.answer, emit=emit,
-            )
-        finally:
-            await queue.put(None)
-
-    asyncio.create_task(runner())
-
-    async def event_stream():
-        yield ": connected\n\n"
-        while True:
-            evt = await queue.get()
-            if evt is None:
-                yield "event: end\ndata: {}\n\n"
-                break
-            try:
-                payload_json = json.dumps(evt.get("data", {}), default=str)
-            except (TypeError, ValueError):
-                payload_json = json.dumps({"raw": str(evt)})
-            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return _operation_sse(lambda emit: operator_service.continue_operation(
+        operation_id=operation_id, answer=payload.answer, emit=emit,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1041,40 +1060,9 @@ async def operations_upload_source(operation_id: str, file: UploadFile = File(..
     operator_service.save_source_pdf(operation_id, data, file.filename or "source.pdf")
     answer = f"[Attached PDF: {file.filename or 'upload.pdf'}]\n\n{extracted['text']}"
 
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def emit(event: dict) -> None:
-        await queue.put(event)
-
-    async def runner() -> None:
-        try:
-            await operator_service.continue_operation(
-                operation_id=operation_id, answer=answer, emit=emit,
-            )
-        finally:
-            await queue.put(None)
-
-    asyncio.create_task(runner())
-
-    async def event_stream():
-        yield ": connected\n\n"
-        while True:
-            evt = await queue.get()
-            if evt is None:
-                yield "event: end\ndata: {}\n\n"
-                break
-            try:
-                payload_json = json.dumps(evt.get("data", {}), default=str)
-            except (TypeError, ValueError):
-                payload_json = json.dumps({"raw": str(evt)})
-            yield f"event: {evt.get('event', 'message')}\ndata: {payload_json}\n\n"
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+    return _operation_sse(lambda emit: operator_service.continue_operation(
+        operation_id=operation_id, answer=answer, emit=emit,
+    ))
 
 
 @app.get("/operations/recent")

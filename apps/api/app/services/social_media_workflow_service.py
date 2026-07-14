@@ -5,7 +5,7 @@ A single OpenAI Agents SDK agent produces a five-section Markdown package
 Production). We split it on the `# <Header>` markers and persist each
 section to its own file under ``outputs/<timestamp>_<slug>/``.
 
-Kept deliberately simple — one agent, one Runner.run, five files — so a
+Kept deliberately simple — one agent, one call, five files — so a
 non-trivial brief still returns in roughly the same 30-90 seconds as the
 business workflow.
 """
@@ -19,9 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from agents import Agent, Runner, trace
-
-from ..agents import default_model, load_prompt
+from ..agents import load_prompt
+from .anthropic_runtime import run_text_agent
 from .artifact_service import create_run_folder, write_artifact
 from .settings_service import apply_to_environment
 
@@ -72,14 +71,6 @@ class SocialMediaResult:
     caption_package: str
     posting_checklist: str
     visual_production: str
-
-
-def _build_agent() -> Agent:
-    return Agent(
-        name="Social Media Agent",
-        instructions=load_prompt("social_media_prompt.txt"),
-        model=default_model(),
-    )
 
 
 def _format_input(payload: SocialMediaInput) -> str:
@@ -186,29 +177,25 @@ def _save_thumbnail(folder: Path, data_uri: str) -> Optional[str]:
 
 
 def _build_agent_input(text: str, image_data_uri: Optional[str]):
-    """Build Runner.run input — plain string or multimodal message list."""
+    """Build the user content — plain string or Anthropic multimodal blocks."""
     if not image_data_uri:
         return text
 
-    content_parts = [
-        {"type": "input_text", "text": text},
-        {
-            "type": "input_image",
-            "image_url": image_data_uri,
-            "detail": "auto",
-        },
+    # data:image/png;base64,<data> → Anthropic base64 image source block
+    try:
+        header, b64 = image_data_uri.split(",", 1)
+        media_type = header.split(":", 1)[1].split(";", 1)[0] or "image/png"
+    except (ValueError, IndexError):
+        return text
+    return [
+        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+        {"type": "text", "text": text},
     ]
-    return [{"role": "user", "content": content_parts}]
 
 
 async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaResult:
     # Pick up any settings changes made since startup (key/model swap, etc.)
     apply_to_environment()
-
-    agent = _build_agent()
-    # Be defensive about model — agent above already reads default_model(),
-    # but reassign in case settings changed between _build_agent() and now.
-    agent.model = default_model()
 
     folder = create_run_folder(_slug_for_run(payload))
     formatted_input = _format_input(payload)
@@ -225,10 +212,9 @@ async def run_social_media_workflow(payload: SocialMediaInput) -> SocialMediaRes
 
     agent_input = _build_agent_input(formatted_input, image_data_uri)
 
-    with trace("ridian-agency.social-media"):
-        result = await Runner.run(agent, input=agent_input)
-
-    raw = (result.final_output or "").strip()
+    raw = (await run_text_agent(
+        load_prompt("social_media_prompt.txt"), agent_input,
+    )).strip()
     sections = _split_sections(raw)
 
     content_package = sections.get("Content Package", "")

@@ -4,21 +4,22 @@ A local desktop app that turns a business task into a polished package:
 market research summary, business document, slide outline, and a draft
 email — all in one ~90-second run, all saved to a folder on your machine.
 
-Built on Python (FastAPI + the official OpenAI Agents SDK) for the backend
+Built on Python (FastAPI + the official Anthropic SDK, with Claude powering
+every agent) for the backend
 and Electron for the desktop GUI. Local-first, no cloud, no auth, no
 database.
 
 ## New here? Read [QUICKSTART.md](QUICKSTART.md)
 
 A non-developer-friendly, step-by-step Windows setup guide. ~15 minutes
-to clone, install, configure your OpenAI key in the desktop Settings
+to clone, install, configure your Anthropic key in the desktop Settings
 panel, and run your first workflow.
 
 ## What you get
 
-- **Five OpenAI Agents** wired in a sequential pipeline: research → writer
-  → reviewer → presentation → email. Whole run is wrapped in a single
-  Agents SDK `trace`.
+- **Five Claude agents** wired in a sequential pipeline: research → writer
+  → reviewer → presentation → email — plus the Ridian Operator, a
+  tool-calling planner built on the Anthropic SDK's tool runner.
 - **Desktop GUI** (Electron) with a Settings panel, a prompt library, live
   backend status, copy buttons on every result, and an approval-only
   "send draft email" action.
@@ -31,7 +32,7 @@ panel, and run your first workflow.
 
 - The API server binds to `127.0.0.1:8000` (loopback only). Nothing
   outside your machine can reach it.
-- The OpenAI key and SMTP password live on disk in
+- The Anthropic key and SMTP password live on disk in
   `apps/api/local_settings.json` (saved via the Settings panel) or
   `apps/api/.env`. Both files are git-ignored.
 - The desktop renderer talks to the backend over plain HTTP. CSP locks
@@ -170,8 +171,11 @@ this README.
 You don't need to edit environment variables for normal use. Launch the
 app, click **Settings** in the top-right header, fill in:
 
-- **AI provider** — OpenAI API key (required), model (defaults to
-  `gpt-4o-mini`).
+- **AI provider — Anthropic** — Anthropic API key (required; get one at
+  <https://console.anthropic.com/settings/keys>), model (defaults to
+  `claude-opus-4-8`).
+- **Voice input (OpenAI Whisper)** — optional OpenAI API key, used ONLY
+  for microphone transcription. Everything else runs on Claude.
 - **Operator profile** — your name, email, company name.
 - **Default email recipient** — where the Approve & Send button delivers.
 - **SMTP credentials** — only needed for the email send button.
@@ -179,7 +183,7 @@ app, click **Settings** in the top-right header, fill in:
 Settings persist to `apps/api/local_settings.json` and take precedence
 over any values in `apps/api/.env`. If neither is set, the GUI shows a
 first-run banner pointing you at Settings; the **Run workflow** button
-stays disabled until an OpenAI key is configured.
+stays disabled until an Anthropic key is configured.
 
 ## Developer setup (Windows PowerShell)
 
@@ -224,7 +228,7 @@ Useful URLs (backend only):
 | --- | --- |
 | <http://127.0.0.1:8000>            | The same operator console served as static HTML |
 | <http://127.0.0.1:8000/docs>       | Swagger UI for the API |
-| <http://127.0.0.1:8000/health>     | `{ openai_key_loaded, model, ... }` |
+| <http://127.0.0.1:8000/health>     | `{ anthropic_key_loaded, model, ... }` |
 | <http://127.0.0.1:8000/settings>   | GET / POST settings (never returns secrets) |
 | <http://127.0.0.1:8000/workflows/run> | POST the workflow |
 | <http://127.0.0.1:8000/email/send-approved> | POST to send an approved email |
@@ -268,16 +272,16 @@ presentation_agent -> slide_outline.md
 email_agent        -> draft_email.md
 ```
 
-A single `trace("ridian-agency.workflow")` wraps the whole pipeline so it
-shows up as one workflow at <https://platform.openai.com/traces>.
+The pipeline runs as five sequential Claude calls; each step's output is
+written to disk before the next begins.
 
 ## Files that must never be committed
 
 These are already in [.gitignore](.gitignore). Double-check before pushing:
 
-- `apps/api/.env` — contains your OpenAI key and SMTP password if you used
+- `apps/api/.env` — contains your API keys and SMTP password if you used
   the env-var route.
-- `apps/api/local_settings.json` — contains your OpenAI key and SMTP
+- `apps/api/local_settings.json` — contains your API keys and SMTP
   password as saved through the desktop Settings panel.
 - `outputs/` (except `outputs/.gitkeep`) — generated artifacts may contain
   task content you don't want to publish.
