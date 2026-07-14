@@ -47,7 +47,7 @@ from . import (
     tts_service,
     url_fetch_service,
 )
-from .anthropic_runtime import run_text_agent
+from .anthropic_runtime import WEB_SEARCH_TOOL, run_text_agent
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -381,6 +381,93 @@ _UNGROUNDED_BANNER = (
 
 
 # ---------------------------------------------------------------------------
+# Research plan gate — approve BEFORE any search spend (v3 governed research)
+# ---------------------------------------------------------------------------
+
+# Deterministic estimate constants — no model call builds the plan (instant,
+# free, can't hallucinate the numbers). Pricing verified 2026-07-14 against
+# the Anthropic pricing docs: web search $10 per 1,000 searches; Sonnet 5
+# tokens $2/M in, $10/M out (introductory through 2026-08-31, then $3/$15).
+# A typical 8-search research turn spends ~30-60k input + ~2-4k output tokens.
+_SEARCH_COST_USD = 0.01
+_RESEARCH_COST_ESTIMATE = "$0.15–$0.30"
+_RESEARCH_TIME_ESTIMATE = "about 1–2 minutes"
+
+# Button values for the plan question. operator_service._apply_research_answer
+# matches these (plus plain-language equivalents) on resume.
+RESEARCH_PLAN_PROCEED = "Proceed with the research plan"
+RESEARCH_PLAN_CANCEL = "Cancel the research"
+
+
+async def _research_plan_gate(
+    operator: OperatorContext, topic: str, time_window: str,
+) -> dict | None:
+    """Approve-before-spend for live web research.
+
+    Research runs cost real money (per-search billing + model tokens) and
+    minutes of foreground time, so the FIRST research call on an operation
+    presents a deterministic plan through the standard needs_input pause and
+    waits. The gate passes only on record["research_approved"] — set
+    EXCLUSIVELY by operator_service._apply_research_answer from the
+    operator's own resume answer, so the planner can never talk itself (or
+    be talked) past it. Positioned before run_text_agent is ever called:
+    zero API spend on the unapproved and declined paths, by construction.
+    """
+    rec = operator.record
+    if rec.get("research_approved"):
+        if rec.get("research_plan_asked") and not rec.get("research_plan_resolved"):
+            rec["research_plan_resolved"] = True
+            await operator.emit_step(
+                name="research_plan", status="completed",
+                detail="Approved by the operator — starting research.",
+            )
+        return None
+    if rec.get("research_declined"):
+        if not rec.get("research_plan_resolved"):
+            rec["research_plan_resolved"] = True
+            await operator.emit_step(
+                name="research_plan", status="skipped",
+                detail="Declined by the operator — no searches were run.",
+            )
+        return {
+            "error": ("The operator DECLINED the research plan. Do NOT run web "
+                      "research and do NOT retry or work around it; acknowledge "
+                      "the cancellation briefly in your receipt."),
+            "reason": "research_declined",
+        }
+    if not rec.get("research_plan_asked"):
+        rec["research_plan_asked"] = True
+        max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
+        search_fees = f"${max_uses * _SEARCH_COST_USD:.2f}"
+        await operator.emit_needs_input(
+            question=(
+                f"Research plan — approve before I spend anything. "
+                f"Topic: {topic}. Window: {time_window}. "
+                f"Up to {max_uses} live web searches ({search_fees} in search fees) "
+                f"on {research_model()}, {_RESEARCH_TIME_ESTIMATE}, "
+                f"≈{_RESEARCH_COST_ESTIMATE} total. Proceed?"
+            ),
+            context_hint="research plan approval — no spend until you answer",
+            options=[
+                {"label": "Proceed", "action": "submit", "value": RESEARCH_PLAN_PROCEED},
+                {"label": "Cancel", "action": "submit", "value": RESEARCH_PLAN_CANCEL},
+            ],
+        )
+        await operator.emit_step(
+            name="research_plan", status="running",
+            detail=(f"Awaiting your approval — up to {max_uses} searches on "
+                    f"{research_model()}, ≈{_RESEARCH_COST_ESTIMATE}."),
+        )
+    return {
+        "error": ("BLOCKED: the research plan needs the operator's approval before "
+                  "any search spend. A needs-input question has been raised; wait "
+                  "for the operator's answer. Do NOT retry and do NOT research "
+                  "another way."),
+        "reason": "research_plan_pending",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -407,17 +494,30 @@ async def web_research(
         {"sources_md": str, "sources_count": int, "ungrounded": bool} —
         ``ungrounded`` is true when ZERO live searches ran, meaning the
         content came from model memory; report that honestly, never as
-        live research.
+        live research. The FIRST research call on an operation pauses for
+        the operator's plan approval (a code gate): on
+        {"reason": "research_plan_pending"} WAIT for the operator's answer;
+        on {"reason": "research_declined"} acknowledge and stop.
     """
     operator = current_operator()
     operator.note_tool("web_research")
     block = _search_lock_gate(operator)
     if block:
         return block
+    block = await _research_plan_gate(operator, topic, time_window)
+    if block:
+        return block
     await operator.emit_step(
         name="research", status="running",
         detail=f"Searching the live web — topic: {topic} ({time_window}, {depth}).",
     )
+
+    max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
+
+    async def _progress(phase: str, n: int) -> None:
+        detail = (f"Searching {n} of up to {max_uses}…" if phase == "search"
+                  else f"Reading results and writing… ({n} searches so far)")
+        await operator.emit_step(name="research", status="running", detail=detail)
 
     prompt = (
         f"Operator command topic: {topic}\n"
@@ -428,7 +528,7 @@ async def web_research(
     try:
         res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(),
+            return_stats=True, model=research_model(), on_progress=_progress,
         )
         sources_md = res.text.strip()
     except Exception as exc:
@@ -518,7 +618,10 @@ async def build_research_packet(
         on success — ``ungrounded`` true means ZERO live searches ran and the
         packet is model memory (the file carries a warning banner; say so in
         the receipt). {"path": "", "bytes": 0, "sources_count": 0,
-        "error": str} on failure.
+        "error": str} on failure. The FIRST research call on an operation
+        pauses for the operator's plan approval (a code gate): on
+        {"reason": "research_plan_pending"} WAIT for the operator's answer;
+        on {"reason": "research_declined"} acknowledge and stop.
     """
     operator = current_operator()
     operator.note_tool("build_research_packet")
@@ -528,11 +631,21 @@ async def build_research_packet(
     if not topic or not topic.strip():
         await operator.emit_error("build_research_packet called without a topic; skipping.")
         return {"path": "", "bytes": 0, "sources_count": 0, "error": "no topic"}
+    block = await _research_plan_gate(operator, topic, time_window)
+    if block:
+        return block
 
     await operator.emit_step(
         name="research_packet", status="running",
         detail=f"Researching for a NotebookLM packet — topic: {topic} ({time_window}).",
     )
+
+    max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
+
+    async def _progress(phase: str, n: int) -> None:
+        detail = (f"Searching {n} of up to {max_uses}…" if phase == "search"
+                  else f"Reading results and writing… ({n} searches so far)")
+        await operator.emit_step(name="research_packet", status="running", detail=detail)
 
     prompt = (
         f"Topic: {topic}\n"
@@ -542,7 +655,7 @@ async def build_research_packet(
     try:
         res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(),
+            return_stats=True, model=research_model(), on_progress=_progress,
         )
         body = res.text.strip()
     except Exception as exc:  # noqa: BLE001

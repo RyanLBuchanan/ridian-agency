@@ -36,6 +36,8 @@ from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
     PLANNER_TOOLS,
+    RESEARCH_PLAN_CANCEL,
+    RESEARCH_PLAN_PROCEED,
     detect_deliverable_intent,
     detect_source_lock,
     extract_emails,
@@ -558,6 +560,44 @@ def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
     return ""  # e.g. the operator supplied a different URL — the planner handles it
 
 
+# Plain-language equivalents of the plan buttons — matched at the START of the
+# answer so "proceed, but keep it short" approves while an unrelated sentence
+# that merely contains "go" does not.
+_RESEARCH_APPROVE_RE = re.compile(
+    r"^\s*(proceed|yes|yep|go(\s+ahead)?|approved?|run\s+it|do\s+it|ok(ay)?)\b", re.I)
+_RESEARCH_DECLINE_RE = re.compile(
+    r"^\s*(cancel|no\b|nope|stop|don'?t|abort|skip)", re.I)
+
+
+def _apply_research_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending research-plan approval from the operator's resume
+    answer. This is the ONLY writer of record["research_approved"] /
+    ["research_declined"], so approval always comes from the operator's own
+    words — the planner cannot set it (operator_tools._research_plan_gate
+    checks the flags in code).
+
+    Returns a note to prepend to the planner input, or "" if nothing to do.
+    """
+    rec = operator.record
+    if (not rec.get("research_plan_asked")
+            or rec.get("research_approved") or rec.get("research_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == RESEARCH_PLAN_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["research_approved"] = True
+        return ("The operator APPROVED the research plan. Call the research tool "
+                "again now and complete the deliverable.")
+    if a == RESEARCH_PLAN_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["research_declined"] = True
+        return ("The operator DECLINED the research plan. Do not run any web "
+                "research; acknowledge the cancellation briefly in your receipt.")
+    # Unrecognized answer (a question, extra context): clear the asked flag so
+    # the gate re-presents the plan on the next research call, and let the
+    # planner respond to what the operator actually said.
+    rec["research_plan_asked"] = False
+    return ""
+
+
 async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
@@ -662,8 +702,16 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
             "artifact_folder": str(session.folder), "started_at": record["started_at"],
         }})
 
-        # Source-lock resume relaxation (a: general research → unlock; b: paste).
-        note = _apply_grounding_answer(operator, answer)
+        # Deterministic resume-answer hooks: source-lock relaxation (a: general
+        # research → unlock; b: paste) and research-plan approval. Both flip
+        # record flags in code — the gates never trust the planner's word.
+        notes = [
+            n for n in (
+                _apply_grounding_answer(operator, answer),
+                _apply_research_answer(operator, answer),
+            ) if n
+        ]
+        note = "\n\n".join(notes)
         user_content = (
             (note + "\n\n" if note else "")
             + f"The operator's answer to your question: {answer}"

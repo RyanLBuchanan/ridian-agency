@@ -106,6 +106,7 @@ async def run_text_agent(
     max_tokens: int = 16000,
     return_stats: bool = False,
     model: str | None = None,
+    on_progress=None,
 ):
     """One-shot agent: system prompt + user input → final text.
 
@@ -116,6 +117,12 @@ async def run_text_agent(
     instead of a plain string, so research callers can flag zero-search runs
     as ungrounded. ``model`` overrides default_model() for this call (the
     research sub-agents pass research_model()).
+
+    ``on_progress`` is an optional ``async (phase, n)`` callback that makes
+    the request STREAM instead of run silent: it fires ``("search", n)`` as
+    each server-side search starts and ``("writing", n)`` when text follows a
+    search, with ``n`` counting searches across pause_turn restarts. Callers
+    surface these as live step updates instead of a 1-3 minute dead screen.
     """
     client = get_client()
     kwargs: dict = {
@@ -130,7 +137,26 @@ async def run_text_agent(
     def _search_count(resp) -> int:
         return sum(1 for b in resp.content if getattr(b, "type", "") == "server_tool_use")
 
-    response = await client.messages.create(**kwargs)
+    progress_searches = 0
+
+    async def _request():
+        """One API round trip — plain create, or streamed when progress is on."""
+        nonlocal progress_searches
+        if on_progress is None:
+            return await client.messages.create(**kwargs)
+        async with client.messages.stream(**kwargs) as stream:
+            async for event in stream:
+                if getattr(event, "type", "") != "content_block_start":
+                    continue
+                btype = getattr(getattr(event, "content_block", None), "type", "")
+                if btype == "server_tool_use":
+                    progress_searches += 1
+                    await on_progress("search", progress_searches)
+                elif btype == "text" and progress_searches:
+                    await on_progress("writing", progress_searches)
+            return await stream.get_final_message()
+
+    response = await _request()
     blocks = list(response.content)
     searches = _search_count(response)
     restarts = 0
@@ -143,7 +169,7 @@ async def run_text_agent(
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": blocks},
         ]
-        response = await client.messages.create(**kwargs)
+        response = await _request()
         blocks = blocks + list(response.content)
         searches += _search_count(response)
 

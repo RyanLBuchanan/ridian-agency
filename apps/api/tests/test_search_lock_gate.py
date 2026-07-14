@@ -80,7 +80,8 @@ def test_web_research_runs_on_unlocked_run(tmp_path, monkeypatch):
             searches=2, restarts=0,
         )
     monkeypatch.setattr(t, "run_text_agent", fake_agent)
-    op = _ctx(tmp_path, {"source_locked_url": "", "deliverable_intent": True})
+    op = _ctx(tmp_path, {"source_locked_url": "", "deliverable_intent": True,
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("web_research").call({"topic": "agentic AI"})))
     assert payload["sources_count"] == 1
