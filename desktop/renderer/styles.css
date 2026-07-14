@@ -2116,11 +2116,16 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
-.operator-receipt-speak[aria-pressed="true"] {
-  background: var(--color-accent);
-  color: #fff;
-  border-color: var(--color-accent);
-  animation: operator-pulse 1.4s ease-in-out infinite;
+/* Muted state: VolumeX icon, dimmed — a quiet control, not an alarm.
+   (aria-pressed=true now means "muted"; .is-muted drives the visuals.) */
+.operator-receipt-speak .speak-icon-off { display: none; }
+.operator-receipt-speak.is-muted .speak-icon-on { display: none; }
+.operator-receipt-speak.is-muted .speak-icon-off { display: inline; }
+
+.operator-receipt-speak.is-muted {
+  color: var(--color-muted-soft);
+  border-color: var(--color-border);
+  opacity: 0.75;
 }
 
 /* Artifacts panel */

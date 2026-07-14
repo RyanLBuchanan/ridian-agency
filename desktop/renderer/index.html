@@ -444,16 +444,26 @@
                 <div id="operator-receipt" class="operator-receipt hidden" role="status" aria-live="polite">
                   <div class="operator-receipt-head">
                     <div class="operator-receipt-label">Ridian</div>
+                    <!-- Mute toggle for voice replies (same preference as the
+                         Settings checkbox, synced both ways). Lucide Volume2 /
+                         VolumeX pair; .is-muted swaps them. -->
                     <button
                       id="operator-receipt-speak"
                       type="button"
                       class="operator-receipt-speak"
-                      title="Read aloud"
-                      aria-label="Read this reply aloud"
+                      title="Mute voice replies"
+                      aria-label="Mute voice replies"
                       aria-pressed="false"
                     >
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-                        <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06A7 7 0 0 1 14 18.7v2.07A9 9 0 0 0 14 3.23z"/>
+                      <svg class="speak-icon-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                      </svg>
+                      <svg class="speak-icon-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <line x1="23" y1="9" x2="17" y2="15"/>
+                        <line x1="17" y1="9" x2="23" y2="15"/>
                       </svg>
                     </button>
                   </div>
@@ -1549,8 +1559,8 @@
                 <span class="field-label">Read Ridian's replies aloud automatically</span>
               </span>
               <span class="field-hint">
-                Uses your computer's built-in voice — free, no API cost. You can
-                also click the speaker icon on any reply to hear it on demand.
+                Uses your computer's built-in voice — free, no API cost. The
+                speaker icon next to any reply mutes and unmutes this too.
               </span>
             </label>
           </fieldset>

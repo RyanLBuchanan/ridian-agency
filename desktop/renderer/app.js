@@ -4818,24 +4818,29 @@ function _opSetVoiceEnabled(on) {
   const chk = document.getElementById('settings-voice-replies');
   if (chk) chk.checked = !!on;
   if (!on) _opStopSpeaking();
+  _opSyncSpeakerIcon();
 }
 
-function _opSetSpeakPressed(on) {
+// The receipt speaker is the mute toggle for voice replies — Volume2 when
+// they auto-play, VolumeX (dimmed) when muted. Same preference as the
+// Settings checkbox; both controls stay in sync through _opSetVoiceEnabled.
+function _opSyncSpeakerIcon() {
   const btn = document.getElementById('operator-receipt-speak');
-  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if (!btn) return;
+  const muted = !_opVoiceEnabled();
+  btn.classList.toggle('is-muted', muted);
+  btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  const label = muted ? 'Voice replies muted — click to unmute' : 'Mute voice replies';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
 }
 
 function _opStopSpeaking() {
   try { window.speechSynthesis.cancel(); } catch (_) {}
-  _opSetSpeakPressed(false);
 }
 
-// force=true: the user clicked the speaker on the receipt — play regardless
-// of the auto-read preference (on-demand always works, like ChatGPT's
-// per-message "Read aloud").
-function _opSpeak(text, force) {
-  if (!text) return;
-  if (!force && !_opVoiceEnabled()) return;
+function _opSpeak(text) {
+  if (!text || !_opVoiceEnabled()) return;
   try {
     // Strip markdown-ish noise so the OS voice doesn't read asterisks.
     const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -4844,9 +4849,6 @@ function _opSpeak(text, force) {
     const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
     _applyBestVoice(utter);
     utter.rate = 1.05;
-    utter.onend = () => _opSetSpeakPressed(false);
-    utter.onerror = () => _opSetSpeakPressed(false);
-    _opSetSpeakPressed(true);
     window.speechSynthesis.speak(utter);
   } catch (_) { /* speechSynthesis unavailable — silently skip */ }
 }
@@ -5832,16 +5834,12 @@ if (OPERATOR.proposalsDismissAll) {
 const _micBtn = document.getElementById('operator-mic-btn');
 if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
 
-// Receipt speaker: play/stop THIS reply on demand (works even when the
-// auto-read preference is off — the click is the intent).
+// Receipt speaker: THE mute toggle for voice replies. Muting also stops any
+// reply currently being read (_opSetVoiceEnabled handles that).
 const _receiptSpeakBtn = document.getElementById('operator-receipt-speak');
 if (_receiptSpeakBtn) {
-  _receiptSpeakBtn.addEventListener('click', () => {
-    let speaking = false;
-    try { speaking = window.speechSynthesis.speaking; } catch (_) {}
-    if (speaking) _opStopSpeaking();
-    else if (operatorState.receipt) _opSpeak(operatorState.receipt, true);
-  });
+  _receiptSpeakBtn.addEventListener('click', () => _opSetVoiceEnabled(!_opVoiceEnabled()));
+  _opSyncSpeakerIcon();   // reflect the saved preference on load
 }
 
 // Settings → "Read replies aloud automatically" (renderer-local preference;
