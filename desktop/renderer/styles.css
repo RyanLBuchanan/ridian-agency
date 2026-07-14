@@ -1038,8 +1038,10 @@ body {
 }
 .app-shell.single-pane .workspace-view {
   width: 100%;
-  max-width: 1120px;   /* room for the context rail + a ~900px conversation */
-  margin: 0 auto;
+  /* Full-window on any display — panels/columns stretch; PROSE stays
+     readable via per-block caps (75ch on receipts, questions, bubbles,
+     step details) instead of a page-level cage. */
+  max-width: none;
 }
 
 /* v2.6: the operator view fills the window so the composer sits at the
@@ -1235,7 +1237,7 @@ body {
 /* v2.6: ChatGPT/Claude-style shell — slim context rail on the left, the
    conversation + bottom composer filling the rest. */
 .operator {
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   width: 100%;
   flex: 1;
@@ -1641,6 +1643,7 @@ body {
   background: var(--color-bg-soft);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+  max-width: 75ch;   /* reading measure — left-aligned in the full-width panel */
 }
 
 .operator-command-echo-label {
@@ -1855,10 +1858,12 @@ body {
   color: var(--color-text-strong);
 }
 .operator-step-detail {
+  display: block;    /* the span is inline by default — max-width needs a block */
   font-size: var(--fs-xs);
   color: var(--color-muted);
   margin-top: 2px;
   line-height: 1.45;
+  max-width: 75ch;   /* reading measure */
 }
 
 .operator-step-time {
@@ -1899,6 +1904,7 @@ body {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  max-width: 75ch;   /* reading measure — panel is full-width, prose isn't */
 }
 
 /* v1.7: missing-information card */
@@ -1915,6 +1921,7 @@ body {
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-warn-text);
   border-radius: var(--radius-md);
+  max-width: 75ch;   /* reading measure */
 }
 
 .operator-question-label {
@@ -2401,7 +2408,7 @@ body {
 .operator-templates {
   /* v2.6: tucked away — only summoned from the ☰ menu ("Legacy workflows"). */
   display: none;
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   width: 100%;
   border: 1px solid var(--color-border);
@@ -2469,7 +2476,7 @@ body {
 /* ---------- Dashboard (Ridian Command Center) ---------- */
 
 .dashboard {
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   width: 100%;
   display: flex;
