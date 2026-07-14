@@ -4447,18 +4447,29 @@ function _opResetComposer() {
 // Answer mode is EXPLICIT: the chip shows exactly what the next send does.
 // Armed when a live needs_input arrives; cleared on dispatch, dismissal, or
 // any navigation. Never armed for rehydrated (dead-session) questions.
+// One input, context-aware: arming also puts the question into the composer
+// placeholder; disarming restores the normal prompt and clears the options
+// row, so ALL the question furniture keys off this one state.
 function _opSetAnswerMode(mode) {
   operatorState.answerMode = mode || null;
   const chip = document.getElementById('operator-answer-chip');
   const label = document.getElementById('operator-answer-chip-text');
-  if (!chip || !label) return;
-  if (mode) {
-    const q = (mode.question || '').replace(/s+/g, ' ').trim();
-    label.textContent = 'Answering: ' + (q.length > 70 ? q.slice(0, 67) + '…' : q);
-    chip.classList.remove('hidden');
-  } else {
-    chip.classList.add('hidden');
+  const q = mode ? (mode.question || '').replace(/\s+/g, ' ').trim() : '';
+  if (chip && label) {
+    if (mode) {
+      label.textContent = 'Answering: ' + (q.length > 70 ? q.slice(0, 67) + '…' : q);
+      chip.classList.remove('hidden');
+    } else {
+      chip.classList.add('hidden');
+    }
   }
+  if (OPERATOR.command) {
+    OPERATOR.command.setAttribute(
+      'placeholder',
+      mode && q ? `Answer: ${q}` : _COMPOSER_PLACEHOLDER,
+    );
+  }
+  if (!mode) _opHideOptionsRow();
 }
 
 function _opSetStatusDot(kind) {
@@ -4498,6 +4509,12 @@ function _opClearLive() {
     const echo = OPERATOR.active.querySelector('.operator-command-echo');
     if (echo) echo.remove();
   }
+  // Loose live blocks (question messages + answer echoes) go with the turn.
+  if (OPERATOR.live) {
+    OPERATOR.live
+      .querySelectorAll(':scope > .operator-question, :scope > .operator-command-echo')
+      .forEach((n) => n.remove());
+  }
   if (OPERATOR.timeline) OPERATOR.timeline.innerHTML = '';
   if (OPERATOR.artifactsList) OPERATOR.artifactsList.innerHTML = '';
   if (OPERATOR.errors) { OPERATOR.errors.innerHTML = ''; OPERATOR.errors.classList.add('hidden'); }
@@ -4508,15 +4525,12 @@ function _opClearLive() {
   if (OPERATOR.proposalsPanel) OPERATOR.proposalsPanel.classList.add('hidden');
   if (OPERATOR.proposalsList) OPERATOR.proposalsList.innerHTML = '';
   if (OPERATOR.proposalsStatus) { OPERATOR.proposalsStatus.textContent = ''; OPERATOR.proposalsStatus.className = 'operator-actions-status'; }
-  // v1.7: receipt + needs-input + spoken reply + rendered-error dedupe set
+  // v1.7: receipt + question furniture + spoken reply + rendered-error dedupe set
   const receiptEl = document.getElementById('operator-receipt');
   if (receiptEl) receiptEl.classList.add('hidden');
   const receiptText = document.getElementById('operator-receipt-text');
   if (receiptText) receiptText.textContent = '';
-  const needsEl = document.getElementById('operator-needs-input');
-  if (needsEl) needsEl.classList.add('hidden');
-  const needsList = document.getElementById('operator-needs-input-list');
-  if (needsList) needsList.innerHTML = '';
+  _opHideOptionsRow();
   _opStopSpeaking();
   _opRenderedErrors.clear();
   _opSetStatus('');
@@ -4544,9 +4558,14 @@ function _opArchiveCurrentTurn() {
     || operatorState.finalRecord
     || (OPERATOR.timeline && OPERATOR.timeline.children.length);
   if (!hasRun) return;
+  // Loose live blocks (question messages + answer echoes appended during a
+  // paused run) belong to the turn's record — archive them in DOM order.
+  const loose = OPERATOR.live
+    ? OPERATOR.live.querySelectorAll(':scope > .operator-question, :scope > .operator-command-echo')
+    : [];
   const blocks = [
     OPERATOR.active,
-    document.getElementById('operator-needs-input'),
+    ...loose,
     OPERATOR.artifactsCard,
   ];
   const turn = document.createElement('div');
@@ -4723,7 +4742,7 @@ function _opRenderError(message) {
   _opRenderedErrors.set(message, li);
 }
 
-/* ----- v1.7: receipt + needs-input + voice ----- */
+/* ----- v1.7: receipt + open questions + voice ----- */
 
 function _opRenderReceipt(text) {
   const card = document.getElementById('operator-receipt');
@@ -4733,77 +4752,93 @@ function _opRenderReceipt(text) {
   card.classList.remove('hidden');
 }
 
-// interactive=false when replaying from history (session is gone, so option
-// buttons are inert — clicking would hit "operation no longer active").
+// The question renders as a normal Ridian message in the thread — no separate
+// banner. Answering happens in the composer itself (placeholder + answer
+// chip, armed by the caller) plus, for structured questions, the tappable
+// options row riding the composer. interactive=false when replaying from
+// history (session is gone): the question stays in the record, but no
+// options row is shown and answer mode is never armed.
 function _opRenderNeedsInput(need, interactive = true) {
-  const card = document.getElementById('operator-needs-input');
-  const list = document.getElementById('operator-needs-input-list');
-  if (!card || !list) return;
+  const host = OPERATOR.live || OPERATOR.active;
+  if (!host) return;
   // Dedupe by id on rehydrate + live double-fires.
-  if (need.id && list.querySelector(`[data-need-id="${need.id}"]`)) return;
-  const li = document.createElement('li');
-  li.className = 'operator-needs-input-item';
-  if (need.id) li.setAttribute('data-need-id', need.id);
+  if (need.id && host.querySelector(`[data-need-id="${need.id}"]`)) return;
+  const block = document.createElement('div');
+  block.className = 'operator-question';
+  if (need.id) block.setAttribute('data-need-id', need.id);
+
+  const label = document.createElement('span');
+  label.className = 'operator-question-label';
+  label.textContent = 'Ridian needs an answer';
+  block.appendChild(label);
 
   const q = document.createElement('div');
-  q.className = 'operator-needs-input-q';
+  q.className = 'operator-question-q';
   q.textContent = need.question || '';
-  li.appendChild(q);
+  block.appendChild(q);
+
   if (need.context_hint) {
     const hint = document.createElement('span');
-    hint.className = 'operator-needs-input-hint';
+    hint.className = 'operator-question-hint';
     hint.textContent = need.context_hint;
-    li.appendChild(hint);
+    block.appendChild(hint);
   }
 
+  host.appendChild(block);
+  if (interactive) _opRenderOptionsRow(need);
+}
+
+// Structured question → tappable choice buttons (the tool declared them),
+// rendered in the composer zone like suggested replies. Hidden whenever
+// answer mode disarms (dispatch, ✕ on the chip, navigation).
+function _opRenderOptionsRow(need) {
+  const row = document.getElementById('operator-options-row');
+  if (!row) return;
   const options = Array.isArray(need.options) ? need.options : [];
-  const answerBtn = document.getElementById('operator-needs-input-answer');
-
-  if (options.length) {
-    // Structured question → tappable choice buttons (the tool declared them).
-    const row = document.createElement('div');
-    row.className = 'operator-needs-input-options';
-    options.forEach((opt) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn btn-compact operator-choice-btn';
-      b.textContent = opt.label || opt.value || 'Option';
-      const action = opt.action || 'submit';
-      if (action === 'disabled' || !interactive) {
-        b.disabled = true;
-        b.classList.add('is-disabled');
-      } else if (action === 'compose') {
-        b.classList.add('btn-ghost');
-        b.addEventListener('click', () => {
-          _opScrollToBottom();
-          if (OPERATOR.command) {
-            if (opt.placeholder) OPERATOR.command.setAttribute('placeholder', opt.placeholder);
-            OPERATOR.command.focus();
-          }
-        });
-      } else if (action === 'upload') {
-        b.classList.add('btn-ghost');
-        b.addEventListener('click', () => _opAttachPdfClick());  // → uploads to this awaiting op
-      } else { // submit → resume the SAME operation with this choice
-        b.classList.add('btn-primary');
-        b.addEventListener('click', () => {
-          if (operatorState.active && operatorState.active.id) {
-            _opContinue(operatorState.active.id, opt.value || opt.label || '');
-          }
-        });
-      }
-      row.appendChild(b);
-    });
-    li.appendChild(row);
-    if (answerBtn) answerBtn.classList.add('hidden');   // buttons are the answer path
-  } else if (answerBtn) {
-    // Open-ended question → keep the free-text composer path.
-    answerBtn.classList.remove('hidden');
-    answerBtn.textContent = "Answer Ridian's question";
+  row.innerHTML = '';
+  if (!options.length) {
+    row.classList.add('hidden');
+    return;
   }
+  options.forEach((opt) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-compact operator-choice-btn';
+    b.textContent = opt.label || opt.value || 'Option';
+    const action = opt.action || 'submit';
+    if (action === 'disabled') {
+      b.disabled = true;
+      b.classList.add('is-disabled');
+    } else if (action === 'compose') {
+      b.classList.add('btn-ghost');
+      b.addEventListener('click', () => {
+        if (OPERATOR.command) {
+          if (opt.placeholder) OPERATOR.command.setAttribute('placeholder', opt.placeholder);
+          OPERATOR.command.focus();
+        }
+      });
+    } else if (action === 'upload') {
+      b.classList.add('btn-ghost');
+      b.addEventListener('click', () => _opAttachPdfClick());  // → uploads to this awaiting op
+    } else { // submit → resume the SAME operation with this choice
+      b.classList.add('btn-primary');
+      b.addEventListener('click', () => {
+        if (operatorState.active && operatorState.active.id) {
+          _opContinue(operatorState.active.id, opt.value || opt.label || '');
+        }
+      });
+    }
+    row.appendChild(b);
+  });
+  row.classList.remove('hidden');
+}
 
-  list.appendChild(li);
-  card.classList.remove('hidden');
+function _opHideOptionsRow() {
+  const row = document.getElementById('operator-options-row');
+  if (row) {
+    row.classList.add('hidden');
+    row.innerHTML = '';
+  }
 }
 
 const VOICE_REPLIES_KEY = 'ridian.voiceReplies';
@@ -4818,24 +4853,29 @@ function _opSetVoiceEnabled(on) {
   const chk = document.getElementById('settings-voice-replies');
   if (chk) chk.checked = !!on;
   if (!on) _opStopSpeaking();
+  _opSyncSpeakerIcon();
 }
 
-function _opSetSpeakPressed(on) {
+// The receipt speaker is the mute toggle for voice replies — Volume2 when
+// they auto-play, VolumeX (dimmed) when muted. Same preference as the
+// Settings checkbox; both controls stay in sync through _opSetVoiceEnabled.
+function _opSyncSpeakerIcon() {
   const btn = document.getElementById('operator-receipt-speak');
-  if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if (!btn) return;
+  const muted = !_opVoiceEnabled();
+  btn.classList.toggle('is-muted', muted);
+  btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  const label = muted ? 'Voice replies muted — click to unmute' : 'Mute voice replies';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
 }
 
 function _opStopSpeaking() {
   try { window.speechSynthesis.cancel(); } catch (_) {}
-  _opSetSpeakPressed(false);
 }
 
-// force=true: the user clicked the speaker on the receipt — play regardless
-// of the auto-read preference (on-demand always works, like ChatGPT's
-// per-message "Read aloud").
-function _opSpeak(text, force) {
-  if (!text) return;
-  if (!force && !_opVoiceEnabled()) return;
+function _opSpeak(text) {
+  if (!text || !_opVoiceEnabled()) return;
   try {
     // Strip markdown-ish noise so the OS voice doesn't read asterisks.
     const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -4844,9 +4884,6 @@ function _opSpeak(text, force) {
     const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
     _applyBestVoice(utter);
     utter.rate = 1.05;
-    utter.onend = () => _opSetSpeakPressed(false);
-    utter.onerror = () => _opSetSpeakPressed(false);
-    _opSetSpeakPressed(true);
     window.speechSynthesis.speak(utter);
   } catch (_) { /* speechSynthesis unavailable — silently skip */ }
 }
@@ -5223,12 +5260,9 @@ async function _opContinue(opId, answer) {
   if (operatorState.running) return;
   if (OPERATOR.command) OPERATOR.command.value = '';
   _opAppendUserMessage(answer);
-  _opSetAnswerMode(null);   // dispatched; re-armed if Ridian asks again
-  // The question has been answered — hide its card.
-  const needsEl = document.getElementById('operator-needs-input');
-  if (needsEl) needsEl.classList.add('hidden');
-  const needsList = document.getElementById('operator-needs-input-list');
-  if (needsList) needsList.innerHTML = '';
+  // Dispatched: disarming also clears the question furniture (placeholder +
+  // options row). Re-armed if Ridian asks again.
+  _opSetAnswerMode(null);
   operatorState.finalRecord = null;   // no longer awaiting; reset on next complete
   _opSetRunning(true);
   _opSetStatusDot('running');
@@ -5302,10 +5336,7 @@ async function _opStageSourcePdf(file) {
 async function _opUploadPdfToOperation(opId, file) {
   if (operatorState.running) return;
   _opAppendUserMessage(`📎 Uploaded ${file.name}`);
-  const needsEl = document.getElementById('operator-needs-input');
-  if (needsEl) needsEl.classList.add('hidden');
-  const needsList = document.getElementById('operator-needs-input-list');
-  if (needsList) needsList.innerHTML = '';
+  _opHideOptionsRow();   // the upload IS the answer; the question is settled
   operatorState.finalRecord = null;
   _opSetRunning(true);
   _opSetStatusDot('running');
@@ -5832,16 +5863,12 @@ if (OPERATOR.proposalsDismissAll) {
 const _micBtn = document.getElementById('operator-mic-btn');
 if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
 
-// Receipt speaker: play/stop THIS reply on demand (works even when the
-// auto-read preference is off — the click is the intent).
+// Receipt speaker: THE mute toggle for voice replies. Muting also stops any
+// reply currently being read (_opSetVoiceEnabled handles that).
 const _receiptSpeakBtn = document.getElementById('operator-receipt-speak');
 if (_receiptSpeakBtn) {
-  _receiptSpeakBtn.addEventListener('click', () => {
-    let speaking = false;
-    try { speaking = window.speechSynthesis.speaking; } catch (_) {}
-    if (speaking) _opStopSpeaking();
-    else if (operatorState.receipt) _opSpeak(operatorState.receipt, true);
-  });
+  _receiptSpeakBtn.addEventListener('click', () => _opSetVoiceEnabled(!_opVoiceEnabled()));
+  _opSyncSpeakerIcon();   // reflect the saved preference on load
 }
 
 // Settings → "Read replies aloud automatically" (renderer-local preference;
@@ -5851,15 +5878,6 @@ if (_voiceChk) {
   _voiceChk.checked = _opVoiceEnabled();
   _voiceChk.addEventListener('change', () => _opSetVoiceEnabled(_voiceChk.checked));
 }
-const _needsAnswerBtn = document.getElementById('operator-needs-input-answer');
-if (_needsAnswerBtn) {
-  _needsAnswerBtn.addEventListener('click', () => {
-    // The answer goes in the always-present composer at the bottom of the thread.
-    _opScrollToBottom();
-    if (OPERATOR.command) OPERATOR.command.focus();
-  });
-}
-
 // v2.3: attach a PDF as the grounding source (composer button + hidden picker).
 // v2.4: single "+" add-source menu. Extensible surface — to add a future input
 // type (image, other file), add a menu item with a new data-add-action in the
@@ -5946,7 +5964,7 @@ const _answerChipClear = document.getElementById('operator-answer-chip-clear');
 if (_answerChipClear) {
   _answerChipClear.addEventListener('click', () => {
     _opSetAnswerMode(null);
-    _opSetStatus("Next message starts a new command. Use the question's buttons above to answer it later.", 'ok');
+    _opSetStatus('Next message starts a new command.', 'ok');
   });
 }
 

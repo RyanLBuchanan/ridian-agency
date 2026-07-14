@@ -404,10 +404,14 @@
                   <span id="operator-project-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-project-chip-clear" type="button" class="operator-source-chip-clear" title="Stop filing runs under this project" aria-label="Clear active project">✕</button>
                 </div>
+                <!-- Structured-question options (Claude-style suggested
+                     replies): tappable choices ride the composer while a
+                     question is live; hidden once answered or dismissed. -->
+                <div id="operator-options-row" class="operator-options-row hidden"></div>
                 <!-- Answer-mode chip: visible whenever the composer will send an
                      ANSWER to the open question instead of a new command. ✕
-                     switches the composer back to new-command mode (the
-                     question's own buttons remain the way to answer it). -->
+                     switches the composer back to new-command mode and clears
+                     the question furniture (placeholder + options row). -->
                 <div id="operator-answer-chip" class="operator-source-chip operator-answer-chip hidden">
                   <span id="operator-answer-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-answer-chip-clear" type="button" class="operator-source-chip-clear" title="Start a new command instead" aria-label="Exit answer mode">✕</button>
@@ -444,33 +448,31 @@
                 <div id="operator-receipt" class="operator-receipt hidden" role="status" aria-live="polite">
                   <div class="operator-receipt-head">
                     <div class="operator-receipt-label">Ridian</div>
+                    <!-- Mute toggle for voice replies (same preference as the
+                         Settings checkbox, synced both ways). Lucide Volume2 /
+                         VolumeX pair; .is-muted swaps them. -->
                     <button
                       id="operator-receipt-speak"
                       type="button"
                       class="operator-receipt-speak"
-                      title="Read aloud"
-                      aria-label="Read this reply aloud"
+                      title="Mute voice replies"
+                      aria-label="Mute voice replies"
                       aria-pressed="false"
                     >
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-                        <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06A7 7 0 0 1 14 18.7v2.07A9 9 0 0 0 14 3.23z"/>
+                      <svg class="speak-icon-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                      </svg>
+                      <svg class="speak-icon-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                        <line x1="23" y1="9" x2="17" y2="15"/>
+                        <line x1="17" y1="9" x2="23" y2="15"/>
                       </svg>
                     </button>
                   </div>
                   <div id="operator-receipt-text" class="operator-receipt-text"></div>
                 </div>
-              </div>
-
-              <!-- v1.7: missing-information card. Amber, prominent, one click
-                   to answer in the command box. -->
-              <div id="operator-needs-input" class="operator-needs-input hidden" role="alert">
-                <div class="operator-needs-input-title">Ridian needs one answer from you</div>
-                <ul id="operator-needs-input-list" class="operator-needs-input-list"></ul>
-                <button
-                  id="operator-needs-input-answer"
-                  type="button"
-                  class="btn btn-primary btn-compact"
-                >Answer below ↓</button>
               </div>
 
               <!-- Artifacts panel (live as artifacts land) -->
@@ -1549,8 +1551,8 @@
                 <span class="field-label">Read Ridian's replies aloud automatically</span>
               </span>
               <span class="field-hint">
-                Uses your computer's built-in voice — free, no API cost. You can
-                also click the speaker icon on any reply to hear it on demand.
+                Uses your computer's built-in voice — free, no API cost. The
+                speaker icon next to any reply mutes and unmutes this too.
               </span>
             </label>
           </fieldset>
