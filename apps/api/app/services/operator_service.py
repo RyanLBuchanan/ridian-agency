@@ -406,6 +406,12 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
             tools=PLANNER_TOOLS,
             messages=messages,
             max_iterations=_MAX_PLANNER_TURNS,
+            # EXPERIMENT (A/B vs thinking-off): adaptive thinking on the gate
+            # brain — Opus 4.8 omits = off, so this is the deliberate ON arm.
+            # Thinking blocks enter the mirrored history and replay on resume
+            # unchanged (same model), which the resume leg of the A/B verifies.
+            thinking={"type": "adaptive"},
+            output_config={"effort": "medium"},
         )
         last = None
         async for message in runner:
