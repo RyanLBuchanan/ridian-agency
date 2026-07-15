@@ -37,7 +37,7 @@ from anthropic import beta_async_tool
 
 import re as _re
 
-from ..agents import load_prompt, research_model
+from ..agents import load_prompt, model_supports_effort, research_model, script_model
 from . import (
     browser_service,
     gmail_service,
@@ -387,6 +387,31 @@ def _effective_research_model(operator: OperatorContext) -> str:
     return operator.record.get("research_model_override") or research_model()
 
 
+def _effective_script_model(operator: OperatorContext) -> str:
+    """Per-run Script selector override, else the Settings/env default
+    (which itself falls back to the planner model, preserving the script
+    writer's historical behavior)."""
+    return operator.record.get("script_model_override") or script_model()
+
+
+def _effective_effort(operator: OperatorContext) -> str:
+    """Per-run effort override for SUB-AGENT calls only ("" = API default,
+    which is 'high'). The planner's effort is deliberately not per-run
+    switchable. run_text_agent omits it for models that reject it (Haiku)."""
+    return operator.record.get("effort_override") or ""
+
+
+def _effort_note(operator: OperatorContext, model: str) -> str:
+    """Human-readable effort description for plan/step lines — names what
+    will ACTUALLY be sent, including the Haiku omission."""
+    eff = _effective_effort(operator)
+    if not eff:
+        return "effort: default"
+    if not model_supports_effort(model):
+        return f"effort: default ({eff} requested — n/a on Haiku, omitted)"
+    return f"effort: {eff}"
+
+
 # ---------------------------------------------------------------------------
 # Research plan gate — approve BEFORE any search spend (v3 governed research)
 # ---------------------------------------------------------------------------
@@ -472,13 +497,14 @@ async def _research_plan_gate(
         rec["research_plan_asked"] = True
         max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
         search_fees = f"${max_uses * _SEARCH_COST_USD:.2f}"
+        plan_model = _effective_research_model(operator)
         await operator.emit_needs_input(
             question=(
                 f"Research plan — approve before I spend anything. "
                 f"Topic: {topic}. Window: {time_window}. "
                 f"Up to {max_uses} live web searches ({search_fees} in search fees) "
-                f"on {_effective_research_model(operator)}, {_RESEARCH_TIME_ESTIMATE}, "
-                f"≈{_RESEARCH_COST_ESTIMATE} total. Proceed?"
+                f"on {plan_model} ({_effort_note(operator, plan_model)}), "
+                f"{_RESEARCH_TIME_ESTIMATE}, ≈{_RESEARCH_COST_ESTIMATE} total. Proceed?"
             ),
             context_hint="research plan approval — no spend until you answer",
             options=[
@@ -569,7 +595,7 @@ async def web_research(
         res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
-            on_progress=_progress,
+            on_progress=_progress, effort=_effective_effort(operator) or None,
         )
         sources_md = res.text.strip()
     except Exception as exc:
@@ -709,7 +735,7 @@ async def build_research_packet(
         res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
-            on_progress=_progress,
+            on_progress=_progress, effort=_effective_effort(operator) or None,
         )
         body = res.text.strip()
     except Exception as exc:  # noqa: BLE001
@@ -884,6 +910,8 @@ async def write_audiobook_script(
     try:
         script_md = (await run_text_agent(
             load_prompt(_SCRIPT_PROMPT), prompt,
+            model=_effective_script_model(operator),
+            effort=_effective_effort(operator) or None,
         )).strip()
     except Exception as exc:
         await operator.emit_step(name="script", status="failed",
