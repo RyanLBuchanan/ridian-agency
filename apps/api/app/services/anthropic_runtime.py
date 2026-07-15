@@ -23,7 +23,7 @@ from datetime import datetime
 
 from anthropic import AsyncAnthropic
 
-from ..agents import default_model
+from ..agents import default_model, model_supports_effort
 
 log = logging.getLogger("ridian.anthropic")
 
@@ -133,6 +133,7 @@ async def run_text_agent(
     return_stats: bool = False,
     model: str | None = None,
     on_progress=None,
+    effort: str | None = None,
 ):
     """One-shot agent: system prompt + user input → final text.
 
@@ -159,12 +160,18 @@ async def run_text_agent(
     independent of byte flow, which the per-read request timeout is not.
     """
     client = get_client()
+    effective_model = model or default_model()
     kwargs: dict = {
-        "model": model or default_model(),
+        "model": effective_model,
         "max_tokens": max_tokens,
         "system": f"{date_line()}\n\n{system}",
         "messages": [{"role": "user", "content": user_input}],
     }
+    # output_config.effort is a real GA request param (no token budgets exist
+    # behind the levels on current models — the API takes the level verbatim).
+    # Haiku 4.5 rejects it, so it's omitted there rather than 400ing the run.
+    if effort and model_supports_effort(effective_model):
+        kwargs["output_config"] = {"effort": effort}
     search_cap: int | None = None
     if use_web_search:
         kwargs["tools"] = [dict(WEB_SEARCH_TOOL)]   # copy — max_uses shrinks on resume

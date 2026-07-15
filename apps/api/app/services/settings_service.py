@@ -38,6 +38,7 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "anthropic_api_key",
     "anthropic_model",
     "anthropic_research_model",
+    "anthropic_script_model",
     "openai_api_key",
     "openai_model",
     "smtp_host",
@@ -65,6 +66,7 @@ _SDK_ENV_MAP: dict[str, str] = {
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "anthropic_model": "ANTHROPIC_MODEL",
     "anthropic_research_model": "ANTHROPIC_RESEARCH_MODEL",
+    "anthropic_script_model": "ANTHROPIC_SCRIPT_MODEL",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_model": "OPENAI_MODEL",
 }

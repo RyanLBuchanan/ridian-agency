@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from ..agents import ALLOWED_RESEARCH_MODELS, default_model
+from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_model
 from ..agents.planner_agent import build_planner_system
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .anthropic_runtime import date_line, get_client
@@ -599,15 +599,23 @@ def _apply_research_answer(operator: OperatorContext, answer: str) -> str:
 
 
 def _sanitize_research_model(value: str) -> str:
-    """Allowlist the composer's per-run research-model pick. Anything not on
-    the curated list — junk, a planner model smuggled in, an empty string —
-    resolves to "" (use the Settings/env default)."""
+    """Allowlist the composer's per-run sub-agent model pick (Research and
+    Script share the curated list). Anything not on it — junk, an unknown
+    model, an empty string — resolves to "" (use the Settings/env default)."""
     v = (value or "").strip()
     return v if v in ALLOWED_RESEARCH_MODELS else ""
 
 
+def _sanitize_effort(value: str) -> str:
+    """Allowlist the composer's per-run effort pick (sub-agents only — the
+    planner's effort is deliberately not per-run switchable)."""
+    v = (value or "").strip().lower()
+    return v if v in ALLOWED_EFFORT_LEVELS else ""
+
+
 async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
-                        research_model: str = "") -> dict:
+                        research_model: str = "", script_model: str = "",
+                        effort: str = "") -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
     if not get_effective_value("ANTHROPIC_API_KEY"):
@@ -643,10 +651,12 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     record["project_id"] = (
         project_id if operation_log_service.project_exists(project_id) else ""
     )
-    # v3: per-run research-model override from the composer selector. The
-    # research tools read this via _effective_research_model(); the PLANNER
-    # model is deliberately not per-run switchable (Settings only).
+    # v3: per-run sub-agent overrides from the composer selectors. The tools
+    # read these via _effective_*(); the PLANNER model and effort are
+    # deliberately not per-run switchable (Settings only, warning attached).
     record["research_model_override"] = _sanitize_research_model(research_model)
+    record["script_model_override"] = _sanitize_research_model(script_model)
+    record["effort_override"] = _sanitize_effort(effort)
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 

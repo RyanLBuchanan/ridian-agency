@@ -877,6 +877,8 @@ class OperationRunRequest(BaseModel):
     command: str = Field(..., min_length=4, description="Natural-language command for Ridian to execute.")
     project_id: str = Field("", description="Optional operator project to file this run under.")
     research_model: str = Field("", description="Optional per-run research-model override (allowlisted server-side).")
+    script_model: str = Field("", description="Optional per-run script-writer model override (allowlisted server-side).")
+    effort: str = Field("", description="Optional per-run sub-agent effort level: low|medium|high (allowlisted server-side).")
 
 
 # Comment-line heartbeat cadence for operation SSE streams. Long tool calls
@@ -949,7 +951,8 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
     """
     return _operation_sse(lambda emit: operator_service.run_operation(
         command=payload.command, emit=emit, project_id=payload.project_id,
-        research_model=payload.research_model,
+        research_model=payload.research_model, script_model=payload.script_model,
+        effort=payload.effort,
     ))
 
 

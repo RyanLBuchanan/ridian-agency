@@ -196,7 +196,7 @@ const SOCIAL_FIELD_MAP = {
 
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
-  'anthropic_model', 'anthropic_research_model',
+  'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
   'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'appearance',
@@ -5212,6 +5212,8 @@ async function _opSubmit(e) {
 
   try {
     const researchModelEl = document.getElementById('operator-research-model');
+    const scriptModelEl = document.getElementById('operator-script-model');
+    const effortEl = document.getElementById('operator-effort');
     const res = await fetch(`${BACKEND}/operations/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
@@ -5219,6 +5221,8 @@ async function _opSubmit(e) {
         command,
         project_id: _activeProjectId || '',
         research_model: (researchModelEl && researchModelEl.value) || '',
+        script_model: (scriptModelEl && scriptModelEl.value) || '',
+        effort: (effortEl && effortEl.value) || '',
       }),
       signal: operatorState.abortController.signal,
     });
