@@ -117,7 +117,7 @@ def _text(t):
 
 
 def _search():
-    return SimpleNamespace(type="server_tool_use")
+    return SimpleNamespace(type="server_tool_use", name="web_search")
 
 
 def _search_result():

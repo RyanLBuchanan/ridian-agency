@@ -45,7 +45,8 @@ def _fake_agent(text, searches):
 
 def test_build_research_packet_flags_zero_search(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "run_text_agent", _fake_agent(_PACKET_BODY, searches=0))
-    op = _ctx(tmp_path, {"deliverable_intent": True})
+    op = _ctx(tmp_path, {"deliverable_intent": True,
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(
         _tool("build_research_packet").call({"topic": "agentic AI"})
@@ -63,7 +64,8 @@ def test_build_research_packet_flags_zero_search(tmp_path, monkeypatch):
 
 def test_build_research_packet_clean_when_searches_ran(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "run_text_agent", _fake_agent(_PACKET_BODY, searches=6))
-    op = _ctx(tmp_path, {"deliverable_intent": True})
+    op = _ctx(tmp_path, {"deliverable_intent": True,
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(
         _tool("build_research_packet").call({"topic": "agentic AI"})
@@ -80,7 +82,8 @@ def test_build_research_packet_clean_when_searches_ran(tmp_path, monkeypatch):
 
 def test_web_research_flags_zero_search(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "run_text_agent", _fake_agent(_SOURCES_BODY, searches=0))
-    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": ""})
+    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": "",
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("web_research").call({"topic": "x"})))
     assert payload["ungrounded"] is True
@@ -94,7 +97,8 @@ def test_web_research_flags_zero_search(tmp_path, monkeypatch):
 
 def test_web_research_clean_when_searches_ran(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "run_text_agent", _fake_agent(_SOURCES_BODY, searches=3))
-    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": ""})
+    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": "",
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("web_research").call({"topic": "x"})))
     assert payload["ungrounded"] is False

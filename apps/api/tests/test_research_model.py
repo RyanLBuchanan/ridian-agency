@@ -73,7 +73,8 @@ def test_research_tools_pass_research_model(tmp_path, monkeypatch):
     seen: list = []
     monkeypatch.setattr(t, "run_text_agent", _capture_agent(
         "### Source One\n- URL: https://real.example/a\n", seen))
-    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": ""})
+    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": "",
+                         "research_plan_asked": True, "research_approved": True})
     set_current_operator(op)
     json.loads(asyncio.run(_tool("web_research").call({"topic": "x"})))
     json.loads(asyncio.run(_tool("build_research_packet").call({"topic": "x"})))
