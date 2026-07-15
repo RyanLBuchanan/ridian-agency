@@ -24,6 +24,25 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# Write-path provenance. Every memory record is stamped at write time with
+# HOW it got written — the 2026-07-15 audit had to forensically reconstruct
+# this from operation logs; now it's a required, self-describing field.
+# "unknown" appears only on records that predate the stamp (one-time backfill,
+# 2026-07-15) — new code must never write it.
+WRITTEN_BY_VALUES = ("commit", "save_memory", "manual", "unknown")
+
+
+def _stamp(entry: dict, written_by: str, source_op: str) -> dict:
+    """Attach provenance to a new record. ``written_by`` is REQUIRED at every
+    call site (no default) so a future write path can't silently claim a
+    plausible label — forgetting it is a loud TypeError, not quiet ambiguity."""
+    if written_by not in WRITTEN_BY_VALUES or written_by == "unknown":
+        raise ValueError(f"invalid written_by {written_by!r}")
+    entry["written_by"] = written_by
+    entry["source_op"] = str(source_op or "")
+    return entry
+
+
 def _empty_brand_section() -> dict:
     return {"voice": "", "audience": "", "do": [], "avoid": [], "notes": ""}
 
@@ -47,12 +66,13 @@ def list_contacts() -> list[dict]:
     return state_store.load_list("contacts")
 
 
-def add_contact(data: dict) -> dict:
+def add_contact(data: dict, *, written_by: str, source_op: str = "") -> dict:
     now = _now_iso()
     entry = {f: str(data.get(f, "") or "") for f in CONTACT_FIELDS}
     entry["id"] = _new_id()
     entry["created_iso"] = now
     entry["updated_iso"] = now
+    _stamp(entry, written_by, source_op)
     items = list_contacts()
     items.insert(0, entry)
     state_store.save("contacts", items)
@@ -93,10 +113,11 @@ def list_facts() -> list[dict]:
     return state_store.load_list("facts")
 
 
-def add_fact(data: dict) -> dict:
+def add_fact(data: dict, *, written_by: str, source_op: str = "") -> dict:
     entry = {f: str(data.get(f, "") or "") for f in FACT_FIELDS}
     entry["id"] = _new_id()
     entry["created_iso"] = _now_iso()
+    _stamp(entry, written_by, source_op)
     items = list_facts()
     items.insert(0, entry)
     state_store.save("facts", items)
@@ -128,7 +149,7 @@ def list_open_follow_ups() -> list[dict]:
     return [f for f in list_follow_ups() if f.get("status") != "done"]
 
 
-def add_follow_up(data: dict) -> dict:
+def add_follow_up(data: dict, *, written_by: str, source_op: str = "") -> dict:
     now = _now_iso()
     entry = {f: str(data.get(f, "") or "") for f in FOLLOW_UP_FIELDS}
     if entry["status"] not in ALLOWED_FOLLOW_UP_STATUSES:
@@ -136,6 +157,7 @@ def add_follow_up(data: dict) -> dict:
     entry["id"] = _new_id()
     entry["created_iso"] = now
     entry["updated_iso"] = now
+    _stamp(entry, written_by, source_op)
     items = list_follow_ups()
     items.insert(0, entry)
     state_store.save("follow_ups", items)
@@ -179,11 +201,13 @@ def list_decisions() -> list[dict]:
     return state_store.load_list("decisions")
 
 
-def add_decision(data: dict) -> dict:
+def add_decision(data: dict, *, written_by: str, source_op: str = "") -> dict:
     entry = {f: str(data.get(f, "") or "") for f in DECISION_FIELDS}
     if not entry["date_iso"]:
         entry["date_iso"] = _now_iso()
     entry["id"] = _new_id()
+    entry["created_iso"] = _now_iso()
+    _stamp(entry, written_by, source_op)
     items = list_decisions()
     items.insert(0, entry)
     state_store.save("decisions", items)

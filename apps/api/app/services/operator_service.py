@@ -39,6 +39,7 @@ from .operator_tools import (
     RESEARCH_PLAN_CANCEL,
     RESEARCH_PLAN_PROCEED,
     detect_deliverable_intent,
+    detect_save_intent,
     detect_source_lock,
     extract_emails,
 )
@@ -638,6 +639,10 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     # tools refuse (operator_tools._deliverable_gate) unless the command
     # actually asked for a deliverable.
     record["deliverable_intent"] = detect_deliverable_intent(command)
+    # v3.1: save_memory's direct-write gate. True only when the OPERATOR's own
+    # words command a save ("remember that…", "add a contact…"); the planner's
+    # inferred learnings must go through propose_memory_update.
+    record["save_intent"] = detect_save_intent(command)
     # v2.8: project grouping. Unknown ids are dropped (never fail the run over
     # organizing metadata).
     record["project_id"] = (
@@ -709,6 +714,10 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         # deck") to a run that started conversational. Never downgrades.
         if not record.get("deliverable_intent") and detect_deliverable_intent(answer):
             record["deliverable_intent"] = True
+        # v3.1: same for save intent — "yes, remember that" in a resume answer
+        # unlocks save_memory for this run. Never downgrades.
+        if not record.get("save_intent") and detect_save_intent(answer):
+            record["save_intent"] = True
 
         await emit({"event": "start", "data": {
             "id": record["id"], "command": answer, "resumed": True,

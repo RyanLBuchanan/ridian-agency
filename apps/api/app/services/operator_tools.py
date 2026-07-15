@@ -1502,6 +1502,26 @@ async def request_missing_info(
     return {"status": "awaiting_user", "id": entry["id"]}
 
 
+# Save-verb detector for the save_memory gate. Keys off the OPERATOR'S OWN
+# text (command or resume answer) — never the planner's judgment. Same
+# pattern as detect_deliverable_intent: a deterministic regex sets a record
+# flag at intake; the tool checks the flag in code.
+_SAVE_INTENT_RE = _re.compile(
+    r"\b(remember\s+(that|this|me|my)\b|add\s+(a\s+)?(contact|fact|follow[\s-]?up|note)\b|"
+    r"save\s+(this|that|it|a\s+|the\s+)?(contact|fact|follow[\s-]?up|note|memory|to\s+memory)?\b|"
+    r"note\s+(that|this|it)?\s*down\b|log\s+(this|that|it)\b|keep\s+track\s+of\b)",
+    _re.IGNORECASE,
+)
+
+
+def detect_save_intent(text: str) -> bool:
+    """True when the operator's OWN words explicitly command a memory save
+    ("remember that…", "add a contact…", "save this…"). Set on the record at
+    run start and upgradeable by a resume answer — save_memory refuses in
+    code without it, so planner-inferred saves can only become proposals."""
+    return bool(text and _SAVE_INTENT_RE.search(text))
+
+
 # strict_mode=False: like propose_memory_update, the payload shape depends
 # on kind, so the JSON schema can't be strict.
 @planner_tool
@@ -1512,10 +1532,12 @@ async def save_memory(
     """Save something to memory DIRECTLY — only when the user explicitly
     commanded it ("add a contact…", "remember that…", "save a follow-up…").
 
-    The user's explicit command IS the approval, so no confirmation panel.
+    That rule is enforced IN CODE, not by this description: the tool refuses
+    unless the operator's own message contained an explicit save command.
     For anything YOU noticed on your own during a run, use
     propose_memory_update instead — agent-initiated learning always needs
-    the user's sign-off.
+    the user's sign-off; do not retry save_memory after a
+    save_not_commanded refusal.
 
     Args:
         kind: "contact" | "fact" | "follow_up" | "decision".
@@ -1528,6 +1550,19 @@ async def save_memory(
     operator = current_operator()
     operator.note_tool("save_memory")
 
+    # Deterministic gate: direct writes require the OPERATOR's explicit save
+    # command (record["save_intent"], set only from their own text). Without
+    # it, the planner's judgment that something is save-worthy must go
+    # through the proposal card — never a silent write.
+    if not operator.record.get("save_intent"):
+        return {
+            "error": ("BLOCKED: the operator did not explicitly command a save "
+                      "(no 'remember that…' / 'add a contact…' / 'save this…' in "
+                      "their message). Use propose_memory_update so they can "
+                      "confirm or dismiss it — do NOT retry save_memory."),
+            "reason": "save_not_commanded",
+        }
+
     if kind not in ALLOWED_PROPOSAL_KINDS:
         return {"error": f"save_memory rejected: kind {kind!r} not in {list(ALLOWED_PROPOSAL_KINDS)}"}
     if not isinstance(payload, dict):
@@ -1537,6 +1572,8 @@ async def save_memory(
     if missing:
         return {"error": f"save_memory({kind}) missing required fields: {missing}"}
 
+    # Provenance: every direct write is stamped with its path + operation.
+    stamp = {"written_by": "save_memory", "source_op": operator.record.get("id", "")}
     try:
         if kind == "contact":
             entry = memory_service.add_contact({
@@ -1547,7 +1584,7 @@ async def save_memory(
                 "phone": str(payload.get("phone", "") or ""),
                 "notes": str(payload.get("notes", "") or ""),
                 "last_contact_iso": str(payload.get("last_contact_iso", "") or ""),
-            })
+            }, **stamp)
             summary = entry.get("name", "")
         elif kind == "fact":
             # User-stated facts don't need a citation — the user IS the source.
@@ -1555,7 +1592,7 @@ async def save_memory(
                 "topic": str(payload.get("topic", "") or ""),
                 "fact": str(payload.get("fact", "") or ""),
                 "source": str(payload.get("source", "") or "operator"),
-            })
+            }, **stamp)
             summary = entry.get("fact", "")[:60]
         elif kind == "follow_up":
             entry = memory_service.add_follow_up({
@@ -1564,14 +1601,14 @@ async def save_memory(
                 "due_iso": str(payload.get("due_iso", "") or ""),
                 "status": "open",
                 "source_run": str(payload.get("source_run", "") or ""),
-            })
+            }, **stamp)
             summary = entry.get("what", "")[:60]
         else:  # decision
             entry = memory_service.add_decision({
                 "decision": str(payload.get("decision", "") or ""),
                 "context": str(payload.get("context", "") or ""),
                 "date_iso": str(payload.get("date_iso", "") or ""),
-            })
+            }, **stamp)
             summary = entry.get("decision", "")[:60]
     except Exception as exc:  # noqa: BLE001
         msg = f"save_memory failed: {type(exc).__name__}: {exc}"
