@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -395,6 +396,8 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
     set_current_operator(session.operator)
     client = get_client()
     restarts = 0
+    turn_no = 0
+    turn_started = time.monotonic()
     while True:
         runner = client.beta.messages.tool_runner(
             model=default_model(),
@@ -407,6 +410,18 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
         last = None
         async for message in runner:
             last = message
+            turn_no += 1
+            # Per-turn forensics (model/thinking experiments): ms is this
+            # turn's API latency — the clock restarts after tools execute, so
+            # tool time is excluded. output_tokens includes thinking tokens.
+            u = getattr(message, "usage", None)
+            log.info(
+                "planner.turn n=%d ms=%d in=%d out=%d stop=%s",
+                turn_no, int((time.monotonic() - turn_started) * 1000),
+                int(getattr(u, "input_tokens", 0) or 0),
+                int(getattr(u, "output_tokens", 0) or 0),
+                getattr(message, "stop_reason", ""),
+            )
             # Mirror history: the assistant turn, then any tool results the
             # runner produced for it (cached — tools still execute once).
             messages.append({"role": "assistant", "content": message.content})
@@ -414,6 +429,7 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
             if tool_response is not None:
                 messages.append(tool_response)
             await _surface_planner_message(session.operator, message)
+            turn_started = time.monotonic()
         if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
             break
         restarts += 1
