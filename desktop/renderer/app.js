@@ -196,6 +196,7 @@ const SOCIAL_FIELD_MAP = {
 
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
+  'anthropic_model', 'anthropic_research_model',
   'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'appearance',
@@ -5210,10 +5211,15 @@ async function _opSubmit(e) {
   operatorState.abortController = new AbortController();
 
   try {
+    const researchModelEl = document.getElementById('operator-research-model');
     const res = await fetch(`${BACKEND}/operations/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-      body: JSON.stringify({ command, project_id: _activeProjectId || '' }),
+      body: JSON.stringify({
+        command,
+        project_id: _activeProjectId || '',
+        research_model: (researchModelEl && researchModelEl.value) || '',
+      }),
       signal: operatorState.abortController.signal,
     });
     if (!res.ok) {

@@ -357,14 +357,38 @@
                           </button>
                         </div>
                       </div>
+                      <!-- Per-run RESEARCH model (curated list; backend
+                           allowlists it). The planner model is a Settings-only
+                           choice on purpose — the orchestrating brain is not a
+                           per-run toggle. -->
+                      <select
+                        id="operator-research-model"
+                        class="operator-research-select"
+                        title="Model for live web research on this run"
+                        aria-label="Research model for this run"
+                      >
+                        <option value="">Research: default</option>
+                        <option value="claude-sonnet-5">Research: Sonnet 5</option>
+                        <option value="claude-opus-4-8">Research: Opus 4.8</option>
+                        <option value="claude-haiku-4-5">Research: Haiku 4.5</option>
+                        <option value="claude-fable-5">Research: Fable 5</option>
+                      </select>
                     </div>
                     <div class="operator-field-right">
                       <span id="operator-elapsed" class="operator-elapsed" aria-live="polite"></span>
+                      <!-- Standard stop glyph (filled square, matches the mic's
+                           recording-stop square). Same id + handler as before. -->
                       <button
                         id="operator-cancel-btn"
                         type="button"
-                        class="btn btn-ghost btn-compact hidden"
-                      >Stop</button>
+                        class="btn btn-ghost btn-compact operator-stop hidden"
+                        title="Stop the run"
+                        aria-label="Stop the run"
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                          <rect x="7" y="7" width="10" height="10" rx="1.5"/>
+                        </svg>
+                      </button>
                       <button
                         id="operator-mic-btn"
                         type="button"
@@ -1565,11 +1589,21 @@
               <span id="settings-anthropic-key-hint" class="field-hint"></span>
             </label>
             <label class="field">
-              <span class="field-label">Model</span>
+              <span class="field-label">Planner model</span>
               <input name="anthropic_model" type="text" autocomplete="off" placeholder="claude-opus-4-8" />
               <span class="field-hint">
-                The Claude model every agent uses. Defaults to
+                Runs the operator's planner and the non-research agents — the
+                brain that orchestrates tools and gates. Defaults to
                 <code>claude-opus-4-8</code>. Changes take effect on the next run.
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">Research model</span>
+              <input name="anthropic_research_model" type="text" autocomplete="off" placeholder="claude-sonnet-5" />
+              <span class="field-hint">
+                Runs the live web-research sub-agents only. Defaults to
+                <code>claude-sonnet-5</code>. The composer's Research selector
+                overrides this for a single run.
               </span>
             </label>
           </fieldset>

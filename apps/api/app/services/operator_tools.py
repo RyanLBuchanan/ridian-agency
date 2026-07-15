@@ -380,6 +380,13 @@ _UNGROUNDED_BANNER = (
 )
 
 
+def _effective_research_model(operator: OperatorContext) -> str:
+    """The composer's per-run override (allowlisted at intake by
+    operator_service._sanitize_research_model), else the Settings/env
+    default. Research sub-agents only — the planner never reads this."""
+    return operator.record.get("research_model_override") or research_model()
+
+
 # ---------------------------------------------------------------------------
 # Research plan gate — approve BEFORE any search spend (v3 governed research)
 # ---------------------------------------------------------------------------
@@ -470,7 +477,7 @@ async def _research_plan_gate(
                 f"Research plan — approve before I spend anything. "
                 f"Topic: {topic}. Window: {time_window}. "
                 f"Up to {max_uses} live web searches ({search_fees} in search fees) "
-                f"on {research_model()}, {_RESEARCH_TIME_ESTIMATE}, "
+                f"on {_effective_research_model(operator)}, {_RESEARCH_TIME_ESTIMATE}, "
                 f"≈{_RESEARCH_COST_ESTIMATE} total. Proceed?"
             ),
             context_hint="research plan approval — no spend until you answer",
@@ -482,7 +489,7 @@ async def _research_plan_gate(
         await operator.emit_step(
             name="research_plan", status="running",
             detail=(f"Awaiting your approval — up to {max_uses} searches on "
-                    f"{research_model()}, ≈{_RESEARCH_COST_ESTIMATE}."),
+                    f"{_effective_research_model(operator)}, ≈{_RESEARCH_COST_ESTIMATE}."),
         )
     return {
         "error": ("BLOCKED: the research plan needs the operator's approval before "
@@ -561,7 +568,8 @@ async def web_research(
     try:
         res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(), on_progress=_progress,
+            return_stats=True, model=_effective_research_model(operator),
+            on_progress=_progress,
         )
         sources_md = res.text.strip()
     except Exception as exc:
@@ -700,7 +708,8 @@ async def build_research_packet(
     try:
         res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(), on_progress=_progress,
+            return_stats=True, model=_effective_research_model(operator),
+            on_progress=_progress,
         )
         body = res.text.strip()
     except Exception as exc:  # noqa: BLE001

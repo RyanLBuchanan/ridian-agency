@@ -28,6 +28,17 @@ def research_model() -> str:
     return os.getenv("ANTHROPIC_RESEARCH_MODEL", "claude-sonnet-5")
 
 
+# Curated per-run override targets for the research sub-agents — the
+# composer's Research selector may only pick from this list; anything else
+# sent by a client is dropped at intake, never trusted.
+ALLOWED_RESEARCH_MODELS: tuple[str, ...] = (
+    "claude-sonnet-5",
+    "claude-opus-4-8",
+    "claude-haiku-4-5",
+    "claude-fable-5",
+)
+
+
 @dataclass(frozen=True)
 class PromptAgent:
     """A named system prompt. Replaces the OpenAI Agents SDK ``Agent`` object

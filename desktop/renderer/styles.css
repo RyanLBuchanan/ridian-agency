@@ -2111,6 +2111,32 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
+/* Stop button: standard filled-square glyph, centered in the ghost pill. */
+.operator-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Per-run research-model selector — a quiet chip beside the "+" button. */
+.operator-research-select {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  font-size: var(--fs-xs);
+  padding: 4px 6px;
+  cursor: pointer;
+  max-width: 190px;
+}
+
+.operator-research-select:hover,
+.operator-research-select:focus-visible {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  outline: none;
+}
+
 /* Muted state: VolumeX icon, dimmed — a quiet control, not an alarm.
    (aria-pressed=true now means "muted"; .is-muted drives the visuals.) */
 .operator-receipt-speak .speak-icon-off { display: none; }

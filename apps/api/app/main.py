@@ -876,6 +876,7 @@ async def dashboard_get() -> dict:
 class OperationRunRequest(BaseModel):
     command: str = Field(..., min_length=4, description="Natural-language command for Ridian to execute.")
     project_id: str = Field("", description="Optional operator project to file this run under.")
+    research_model: str = Field("", description="Optional per-run research-model override (allowlisted server-side).")
 
 
 # Comment-line heartbeat cadence for operation SSE streams. Long tool calls
@@ -948,6 +949,7 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
     """
     return _operation_sse(lambda emit: operator_service.run_operation(
         command=payload.command, emit=emit, project_id=payload.project_id,
+        research_model=payload.research_model,
     ))
 
 
