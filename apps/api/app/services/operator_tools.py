@@ -380,6 +380,13 @@ _UNGROUNDED_BANNER = (
 )
 
 
+def _effective_research_model(operator: OperatorContext) -> str:
+    """The composer's per-run override (allowlisted at intake by
+    operator_service._sanitize_research_model), else the Settings/env
+    default. Research sub-agents only — the planner never reads this."""
+    return operator.record.get("research_model_override") or research_model()
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -428,7 +435,7 @@ async def web_research(
     try:
         res = await run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(),
+            return_stats=True, model=_effective_research_model(operator),
         )
         sources_md = res.text.strip()
     except Exception as exc:
@@ -542,7 +549,7 @@ async def build_research_packet(
     try:
         res = await run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
-            return_stats=True, model=research_model(),
+            return_stats=True, model=_effective_research_model(operator),
         )
         body = res.text.strip()
     except Exception as exc:  # noqa: BLE001

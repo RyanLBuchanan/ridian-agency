@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.agents import default_model, research_model
-from app.services import anthropic_runtime
+from app.services import anthropic_runtime, operator_service
 from app.services import operator_tools as t
 from app.services.anthropic_runtime import TextAgentResult
 from app.services.operator_context import OperatorContext, set_current_operator
@@ -81,3 +81,37 @@ def test_research_tools_pass_research_model(tmp_path, monkeypatch):
     for kw in seen:
         assert kw["model"] == "claude-sonnet-5"
         assert kw["use_web_search"] is True
+
+
+# --------------------------------------------------------------------------
+# v3: per-run override from the composer selector
+# --------------------------------------------------------------------------
+
+def test_per_run_override_reaches_the_research_tools(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_RESEARCH_MODEL", raising=False)
+    seen: list = []
+    monkeypatch.setattr(t, "run_text_agent", _capture_agent(
+        "### Source One\n- URL: https://real.example/a\n", seen))
+    op = _ctx(tmp_path, {"deliverable_intent": True, "source_locked_url": "",
+                         "research_model_override": "claude-opus-4-8"})
+    set_current_operator(op)
+    json.loads(asyncio.run(_tool("web_research").call({"topic": "x"})))
+    json.loads(asyncio.run(_tool("build_research_packet").call({"topic": "x"})))
+    assert [kw["model"] for kw in seen] == ["claude-opus-4-8", "claude-opus-4-8"]
+
+
+def test_empty_override_falls_back_to_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_RESEARCH_MODEL", raising=False)
+    op = _ctx(tmp_path, {"research_model_override": ""})
+    assert t._effective_research_model(op) == "claude-sonnet-5"
+
+
+def test_sanitize_research_model_allowlists():
+    """The intake filter: only curated research models pass; junk, planner
+    smuggling attempts, and empties resolve to '' (Settings default)."""
+    assert operator_service._sanitize_research_model("claude-opus-4-8") == "claude-opus-4-8"
+    assert operator_service._sanitize_research_model("claude-fable-5") == "claude-fable-5"
+    assert operator_service._sanitize_research_model("  claude-sonnet-5  ") == "claude-sonnet-5"
+    assert operator_service._sanitize_research_model("gpt-999") == ""
+    assert operator_service._sanitize_research_model("") == ""
+    assert operator_service._sanitize_research_model("claude-sonnet-5; rm -rf /") == ""

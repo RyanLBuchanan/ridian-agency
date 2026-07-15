@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from ..agents import default_model
+from ..agents import ALLOWED_RESEARCH_MODELS, default_model
 from ..agents.planner_agent import build_planner_system
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
 from .anthropic_runtime import date_line, get_client
@@ -558,7 +558,16 @@ def _apply_grounding_answer(operator: OperatorContext, answer: str) -> str:
     return ""  # e.g. the operator supplied a different URL — the planner handles it
 
 
-async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> dict:
+def _sanitize_research_model(value: str) -> str:
+    """Allowlist the composer's per-run research-model pick. Anything not on
+    the curated list — junk, a planner model smuggled in, an empty string —
+    resolves to "" (use the Settings/env default)."""
+    v = (value or "").strip()
+    return v if v in ALLOWED_RESEARCH_MODELS else ""
+
+
+async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
+                        research_model: str = "") -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
     if not get_effective_value("ANTHROPIC_API_KEY"):
@@ -594,6 +603,10 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "") -> 
     record["project_id"] = (
         project_id if operation_log_service.project_exists(project_id) else ""
     )
+    # v3: per-run research-model override from the composer selector. The
+    # research tools read this via _effective_research_model(); the PLANNER
+    # model is deliberately not per-run switchable (Settings only).
+    record["research_model_override"] = _sanitize_research_model(research_model)
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
