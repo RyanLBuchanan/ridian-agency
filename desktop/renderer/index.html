@@ -1644,6 +1644,18 @@
                 selector overrides this for a single run.
               </span>
             </label>
+            <label class="field">
+              <span class="field-label">Run cost ceiling (USD)</span>
+              <input name="operator_run_cost_ceiling_usd" type="text" autocomplete="off" placeholder="1.00" />
+              <span class="field-hint">
+                Hard dollar limit per operation — planner turns, research, and
+                script writing all count. A run that reaches it is stopped
+                honestly with the partial spend stated (money already spent is
+                still billed). Empty = the <strong>$1.00 default</strong>; type
+                <code>off</code> for no ceiling. The research plan names the
+                ceiling before every approval.
+              </span>
+            </label>
           </fieldset>
 
           <fieldset class="form-group">

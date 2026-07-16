@@ -47,7 +47,13 @@ from . import (
     tts_service,
     url_fetch_service,
 )
-from .anthropic_runtime import WEB_SEARCH_TOOL, run_text_agent
+from .anthropic_runtime import (
+    SEARCH_COST_USD,
+    WEB_SEARCH_TOOL,
+    RunBudgetExceeded,
+    estimate_cost_usd,
+    run_text_agent,
+)
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -417,10 +423,10 @@ def _effort_note(operator: OperatorContext, model: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Deterministic estimate constants — no model call builds the plan (instant,
-# free, can't hallucinate the numbers). Pricing verified 2026-07-15 against
-# the Anthropic pricing docs: web search $10 per 1,000 searches; Sonnet 5
-# tokens $2/M in, $10/M out (introductory through 2026-08-31, then $3/$15);
-# dynamic-filtering code execution is free alongside web search.
+# free, can't hallucinate the numbers). Per-search and per-token rates live in
+# anthropic_runtime (SEARCH_COST_USD / estimate_cost_usd — one shared math for
+# the plan, the ceiling, the reconciliation, and failure forensics); dynamic-
+# filtering code execution is free alongside web search.
 #
 # The cost band and time band are PROVISIONAL — calibrated on ZERO
 # measured-token runs (token logging ships with this change; the 2026-07-15
@@ -428,10 +434,8 @@ def _effort_note(operator: OperatorContext, model: str) -> str:
 # were not recorded). Every run now prints a plan-vs-actual reconciliation
 # from real usage, which self-corrects the promise; recalibrate these
 # constants from the logged tokens_in/tokens_out once a few runs exist.
-_SEARCH_COST_USD = 0.01
-_SONNET_IN_PER_MTOK = 2.0
-_SONNET_OUT_PER_MTOK = 10.0
 _RESEARCH_COST_ESTIMATE = "$0.40–$0.80"
+_RESEARCH_EST_HIGH_USD = 0.80   # numeric high end of the band above — keep in step
 _RESEARCH_TIME_ESTIMATE = "typically 4–9 minutes"
 
 # Button values for the plan question. operator_service._apply_research_answer
@@ -445,16 +449,79 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
 
 
-def _reconciliation(res) -> str:
-    """Plan-vs-actual, computed from REAL usage — every research run
-    self-audits, so the operator sees exactly what the approval bought."""
-    actual_cost = (res.searches * _SEARCH_COST_USD
-                   + res.tokens_in / 1e6 * _SONNET_IN_PER_MTOK
-                   + res.tokens_out / 1e6 * _SONNET_OUT_PER_MTOK)
+def _reconciliation(res, model: str) -> str:
+    """Plan-vs-actual, computed from REAL usage at the EFFECTIVE model's dated
+    rates (the old version priced every run at Sonnet rates even when the
+    override ran Opus/Fable) — every research run self-audits, so the operator
+    sees exactly what the approval bought."""
+    actual_cost = estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                                    searches=res.searches)
     max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
     return (f"Plan: up to {max_uses} searches, est ≈{_RESEARCH_COST_ESTIMATE} — "
             f"actual: {res.searches} searches, {_fmt_elapsed(res.elapsed_seconds)}, "
             f"≈${actual_cost:.2f}")
+
+
+# ---------------------------------------------------------------------------
+# Hard per-run cost ceiling (v3.2) — layer 1 of the dollar fence
+# ---------------------------------------------------------------------------
+# record["cost_ceiling_usd"] is snapshotted at intake (operator_service) and
+# record["spend_usd"] accumulates planner turns + sub-agent calls + FAILED
+# calls' partials. Layer 1 (here): billable tools refuse to start once the run
+# is at/over the fence. Layer 2 (anthropic_runtime): the live mid-stream guard
+# aborts a call in flight the moment observed spend crosses it.
+
+
+def _cost_ceiling_gate(operator: OperatorContext) -> dict | None:
+    """Refuse to start a billable call on a run already at its dollar ceiling.
+    Returns None when spend is under the fence (or there is no fence)."""
+    rec = operator.record
+    ceiling = rec.get("cost_ceiling_usd")
+    if ceiling is None:
+        return None
+    spent = float(rec.get("spend_usd", 0.0) or 0.0)
+    if spent < ceiling:
+        return None
+    return {
+        "error": (
+            f"BLOCKED: this run has reached its cost ceiling — ≈${spent:.2f} "
+            f"spent of the ${ceiling:.2f} limit. Do NOT call billable tools "
+            "again and do NOT retry. Tell the operator the ceiling stopped "
+            "the run (it can be raised in Settings, or set to 'off')."),
+        "reason": "cost_ceiling",
+    }
+
+
+def _add_spend(operator: OperatorContext, model: str, res) -> None:
+    """Fold a completed sub-agent call into the run's dollar ledger."""
+    operator.record["spend_usd"] = round(
+        float(operator.record.get("spend_usd", 0.0) or 0.0)
+        + estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                            searches=res.searches), 4)
+
+
+def _add_partial_spend(operator: OperatorContext, exc: Exception) -> str:
+    """Fold a FAILED call's pre-death spend — attached by anthropic_runtime as
+    ``ridian_partial`` — into the run's ledger. Failed runs still bill for the
+    searches and tokens that ran; returns a sentence for the failed step so
+    that money is STATED, never silently swallowed ("" when unknown)."""
+    partial = getattr(exc, "ridian_partial", None)
+    if not isinstance(partial, dict):
+        return ""
+    cost = float(partial.get("cost_usd", 0.0) or 0.0)
+    operator.record["spend_usd"] = round(
+        float(operator.record.get("spend_usd", 0.0) or 0.0) + cost, 4)
+    return (f" Partial spend before the failure ≈${cost:.2f} "
+            f"({int(partial.get('searches', 0) or 0)} searches) — billed.")
+
+
+def _ceiling_kwargs(operator: OperatorContext) -> dict:
+    """The run's fence, passed into run_text_agent so the live mid-stream
+    guard sees prior spend too — layer 2 of the same ceiling."""
+    return {
+        "cost_ceiling": operator.record.get("cost_ceiling_usd"),
+        "spent_usd": float(operator.record.get("spend_usd", 0.0) or 0.0),
+    }
 
 
 async def _research_plan_gate(
@@ -496,15 +563,32 @@ async def _research_plan_gate(
     if not rec.get("research_plan_asked"):
         rec["research_plan_asked"] = True
         max_uses = WEB_SEARCH_TOOL.get("max_uses", 8)
-        search_fees = f"${max_uses * _SEARCH_COST_USD:.2f}"
+        search_fees = f"${max_uses * SEARCH_COST_USD:.2f}"
         plan_model = _effective_research_model(operator)
+        # Every approval names the run's dollar fence — and when the estimate
+        # band straddles it, says so BEFORE the spend: cancelling here costs
+        # nothing, discovering the ceiling mid-run costs the partial bill.
+        ceiling = rec.get("cost_ceiling_usd")
+        spent = float(rec.get("spend_usd", 0.0) or 0.0)
+        if ceiling is None:
+            ceiling_note = "Run ceiling: off."
+        else:
+            ceiling_note = (f"Run ceiling: ${ceiling:.2f} "
+                            f"(≈${spent:.2f} already spent this run).")
+            if spent + _RESEARCH_EST_HIGH_USD > ceiling:
+                ceiling_note += (
+                    " Heads-up: this research will likely hit the ceiling and "
+                    "be stopped mid-run with the partial spend billed — "
+                    "cancelling now costs nothing; the ceiling can be raised "
+                    "in Settings.")
         await operator.emit_needs_input(
             question=(
                 f"Research plan — approve before I spend anything. "
                 f"Topic: {topic}. Window: {time_window}. "
                 f"Up to {max_uses} live web searches ({search_fees} in search fees) "
                 f"on {plan_model} ({_effort_note(operator, plan_model)}), "
-                f"{_RESEARCH_TIME_ESTIMATE}, ≈{_RESEARCH_COST_ESTIMATE} total. Proceed?"
+                f"{_RESEARCH_TIME_ESTIMATE}, ≈{_RESEARCH_COST_ESTIMATE} total. "
+                f"{ceiling_note} Proceed?"
             ),
             context_hint="research plan approval — no spend until you answer",
             options=[
@@ -563,7 +647,9 @@ async def web_research(
     """
     operator = current_operator()
     operator.note_tool("web_research")
-    block = _search_lock_gate(operator)
+    # Cost gate sits BEFORE the plan gate: never ask the operator to approve
+    # a plan the dollar fence would refuse anyway.
+    block = _search_lock_gate(operator) or _cost_ceiling_gate(operator)
     if block:
         return block
     block = await _research_plan_gate(operator, topic, time_window)
@@ -596,13 +682,23 @@ async def web_research(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
+            **_ceiling_kwargs(operator),
         )
         sources_md = res.text.strip()
+        _add_spend(operator, _effective_research_model(operator), res)
     except Exception as exc:
-        await operator.emit_step(name="research", status="failed",
-                                 detail=f"Web research failed: {type(exc).__name__}: {exc}")
+        partial_note = _add_partial_spend(operator, exc)
+        await operator.emit_step(
+            name="research", status="failed",
+            detail=f"Web research failed: {type(exc).__name__}: {exc}."
+                   + partial_note)
         await operator.emit_error(f"web_research failed: {exc}")
-        return {"sources_md": "", "sources_count": 0, "error": str(exc)}
+        out = {"sources_md": "", "sources_count": 0, "error": str(exc)}
+        if isinstance(exc, RunBudgetExceeded):
+            out["reason"] = "cost_ceiling"
+            out["error"] += (" Do NOT retry any billable tool; tell the "
+                             "operator the cost ceiling stopped the run.")
+        return out
 
     # Verification: count "### " headings (one per source per prompt spec).
     import re
@@ -618,7 +714,7 @@ async def web_research(
 
     operator.sources_packet_text = sources_md
     operator.record["sources_count"] = count
-    recon = _reconciliation(res)
+    recon = _reconciliation(res, _effective_research_model(operator))
     detail = f"{count} sources gathered ({recon})."
     if ungrounded:
         detail = (f"{count} sources gathered — ⚠ UNGROUNDED (0 live web searches; "
@@ -700,7 +796,10 @@ async def build_research_packet(
     """
     operator = current_operator()
     operator.note_tool("build_research_packet")
-    block = _deliverable_gate(operator) or _search_lock_gate(operator)
+    # Cost gate before the plan gate — never ask approval for a plan the
+    # dollar fence would refuse anyway.
+    block = (_deliverable_gate(operator) or _search_lock_gate(operator)
+             or _cost_ceiling_gate(operator))
     if block:
         return block
     if not topic or not topic.strip():
@@ -736,13 +835,23 @@ async def build_research_packet(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
+            **_ceiling_kwargs(operator),
         )
         body = res.text.strip()
+        _add_spend(operator, _effective_research_model(operator), res)
     except Exception as exc:  # noqa: BLE001
-        await operator.emit_step(name="research_packet", status="failed",
-                                 detail=f"Research failed: {type(exc).__name__}: {exc}")
+        partial_note = _add_partial_spend(operator, exc)
+        await operator.emit_step(
+            name="research_packet", status="failed",
+            detail=f"Research failed: {type(exc).__name__}: {exc}."
+                   + partial_note)
         await operator.emit_error(f"build_research_packet failed: {exc}")
-        return {"path": "", "bytes": 0, "sources_count": 0, "error": str(exc)}
+        out = {"path": "", "bytes": 0, "sources_count": 0, "error": str(exc)}
+        if isinstance(exc, RunBudgetExceeded):
+            out["reason"] = "cost_ceiling"
+            out["error"] += (" Do NOT retry any billable tool; tell the "
+                             "operator the cost ceiling stopped the run.")
+        return out
 
     if not body:
         await operator.emit_step(name="research_packet", status="failed",
@@ -782,7 +891,7 @@ async def build_research_packet(
     # email/sheet/deck runs still auto-file to Drive normally.
     operator.record["skip_drive_upload"] = True
     await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
-    recon = _reconciliation(res)
+    recon = _reconciliation(res, _effective_research_model(operator))
     detail = (f"Packet ready — {count} sources ({recon}). Paste research_packet.md "
               f"into NotebookLM as one source, then generate the Audio Overview.")
     if ungrounded:
@@ -895,6 +1004,11 @@ async def write_audiobook_script(
     """
     operator = current_operator()
     operator.note_tool("write_audiobook_script")
+    # The script sub-agent is a billable model call — the run's dollar fence
+    # covers it like every other spend.
+    block = _cost_ceiling_gate(operator)
+    if block:
+        return block
     if not sources_md or not sources_md.strip():
         await operator.emit_error("write_audiobook_script called without sources; skipping.")
         return {"path": "", "bytes": 0, "estimated_seconds": 0, "error": "no sources"}
@@ -908,14 +1022,20 @@ async def write_audiobook_script(
         "Produce the audiobook script now."
     )
     try:
-        script_md = (await run_text_agent(
+        res = await run_text_agent(
             load_prompt(_SCRIPT_PROMPT), prompt,
             model=_effective_script_model(operator),
             effort=_effective_effort(operator) or None,
-        )).strip()
+            return_stats=True, **_ceiling_kwargs(operator),
+        )
+        script_md = res.text.strip()
+        _add_spend(operator, _effective_script_model(operator), res)
     except Exception as exc:
-        await operator.emit_step(name="script", status="failed",
-                                 detail=f"Script generation failed: {type(exc).__name__}: {exc}")
+        partial_note = _add_partial_spend(operator, exc)
+        await operator.emit_step(
+            name="script", status="failed",
+            detail=f"Script generation failed: {type(exc).__name__}: {exc}."
+                   + partial_note)
         await operator.emit_error(f"write_audiobook_script failed: {exc}")
         return {"path": "", "bytes": 0, "estimated_seconds": 0, "error": str(exc)}
 
