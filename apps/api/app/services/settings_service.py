@@ -48,6 +48,11 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "smtp_from_email",
     "google_drive_root_folder_id",
     "operator_auto_upload_drive",
+    # v3.2: hard per-run dollar ceiling. Blank = the $1.00 default (an
+    # untouched field is blank, so this is the only way a default can apply);
+    # "off" = no ceiling, deliberately. Parsed by
+    # operator_service.resolve_cost_ceiling at operation intake.
+    "operator_run_cost_ceiling_usd",
     "appearance",
 )
 

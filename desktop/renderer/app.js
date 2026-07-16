@@ -199,6 +199,7 @@ const SETTINGS_FIELDS = [
   'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
   'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
+  'operator_run_cost_ceiling_usd',
   'appearance',
 ];
 const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password'];

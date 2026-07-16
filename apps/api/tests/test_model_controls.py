@@ -48,7 +48,10 @@ def test_script_override_reaches_the_real_tool(tmp_path, monkeypatch):
 
     async def fake(system, prompt, **kw):
         seen.update(kw)
-        return "**Host A**: hello\n**Host B**: hi\n"
+        # the script tool now asks for stats (return_stats=True) so its spend
+        # can be folded into the run's dollar ledger
+        return TextAgentResult(text="**Host A**: hello\n**Host B**: hi\n",
+                               searches=0, restarts=0)
 
     monkeypatch.setattr(t, "run_text_agent", fake)
     op = _ctx(tmp_path, {"script_model_override": "claude-fable-5"})
@@ -69,7 +72,7 @@ def test_script_default_preserves_historical_behavior(tmp_path, monkeypatch):
 
     async def fake(system, prompt, **kw):
         seen.update(kw)
-        return "**Host A**: hello\n"
+        return TextAgentResult(text="**Host A**: hello\n", searches=0, restarts=0)
 
     monkeypatch.setattr(t, "run_text_agent", fake)
     op = _ctx(tmp_path, {})

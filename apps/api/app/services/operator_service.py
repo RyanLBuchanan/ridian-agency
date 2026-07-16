@@ -31,7 +31,7 @@ from typing import Awaitable, Callable
 from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_model
 from ..agents.planner_agent import build_planner_system
 from . import gmail_service, google_drive_service, memory_service, operation_log_service
-from .anthropic_runtime import date_line, get_client
+from .anthropic_runtime import date_line, estimate_cost_usd, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
@@ -42,7 +42,12 @@ from .operator_tools import (
     detect_source_lock,
     extract_emails,
 )
-from .settings_service import apply_to_environment, get_bool_setting, get_effective_value
+from .settings_service import (
+    apply_to_environment,
+    get_bool_setting,
+    get_effective_value,
+    load_settings,
+)
 
 log = logging.getLogger("ridian.operator")
 
@@ -109,6 +114,11 @@ def _finalized_view(record: dict) -> dict:
         "audio_duration_seconds": record["audio_duration_seconds"],
         "artifacts": record["artifacts"],
         "errors": record["errors"],
+        # v3.2: the run's dollar ledger — accumulated planner turns, sub-agent
+        # calls, AND failed calls' partials, against the ceiling snapshotted
+        # at intake. Persisted so every run's true cost survives in history.
+        "spend_usd": round(float(record.get("spend_usd", 0.0) or 0.0), 4),
+        "cost_ceiling_usd": record.get("cost_ceiling_usd"),
         # v1.2: memory proposals from this operation. Each carries its own
         # status ("proposed" | "committed" | "dismissed") so reloaded runs
         # don't re-prompt for items the operator already decided on.
@@ -414,6 +424,11 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
             if tool_response is not None:
                 messages.append(tool_response)
             await _surface_planner_message(session.operator, message)
+            # v3.2: the run's dollar fence covers planner turns too. Checked
+            # AFTER mirroring so the history stays consistent for a /continue.
+            if await _absorb_planner_spend(session.operator, message):
+                session.input_list = messages
+                return
         if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
             break
         restarts += 1
@@ -598,6 +613,72 @@ def _apply_research_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Hard per-run cost ceiling (v3.2) — the dollar fence around the WHOLE run
+# ---------------------------------------------------------------------------
+# The whole operation is fenced, planner turns included — the planner's tokens
+# are real money and a ceiling that excluded them wouldn't be honest. Blank /
+# absent resolves to the DEFAULT so the fence is on out of the box (an
+# untouched Settings field is blank — "blank = default" is the only way the
+# default can ever apply); the deliberate no-ceiling switch is typing "off".
+
+_DEFAULT_COST_CEILING_USD = 1.00
+_CEILING_OFF_VALUES = frozenset({"off", "none", "no ceiling", "unlimited"})
+
+
+def resolve_cost_ceiling() -> float | None:
+    """The operator's per-run dollar ceiling from Settings: a float, or None
+    for no ceiling. Unparseable input falls back to the DEFAULT — the safe
+    failure direction for a spend fence is fenced, never silently open."""
+    raw = (load_settings().get("operator_run_cost_ceiling_usd") or "").strip().lower()
+    if not raw:
+        return _DEFAULT_COST_CEILING_USD
+    if raw in _CEILING_OFF_VALUES:
+        return None
+    try:
+        value = float(raw.lstrip("$"))
+    except ValueError:
+        log.warning("cost_ceiling.unparseable value=%r — using the $%.2f default",
+                    raw, _DEFAULT_COST_CEILING_USD)
+        return _DEFAULT_COST_CEILING_USD
+    if value <= 0:
+        return None   # an explicit zero reads as "no fence", same as "off"
+    return round(value, 2)
+
+
+async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
+    """Fold one planner turn's token cost into the run's spend and enforce the
+    ceiling at the turn boundary. Returns True when the run must STOP.
+
+    The billable tools gate themselves (operator_tools._cost_ceiling_gate +
+    the runtime's live guard), so this trips only when planner turns alone
+    push the run over the fence — the runaway-loop case. A turn that just
+    ENDED (end_turn with nothing pending) is let through: stopping then would
+    burn the receipt the money already paid for.
+    """
+    rec = operator.record
+    u = getattr(message, "usage", None)
+    turn_cost = estimate_cost_usd(
+        default_model(),
+        int(getattr(u, "input_tokens", 0) or 0),
+        int(getattr(u, "output_tokens", 0) or 0),
+    )
+    rec["spend_usd"] = round(
+        float(rec.get("spend_usd", 0.0) or 0.0) + turn_cost, 4)
+    ceiling = rec.get("cost_ceiling_usd")
+    if ceiling is None or rec["spend_usd"] <= ceiling:
+        return False
+    if getattr(message, "stop_reason", "") == "end_turn":
+        return False
+    msg = (f"Run stopped at the cost ceiling — ≈${rec['spend_usd']:.2f} spent "
+           f"of the ${ceiling:.2f} limit. Raise it in Settings (or set it to "
+           f"'off') and run again.")
+    rec["errors"].append(msg)
+    await operator.emit_step(name="cost_ceiling", status="failed", detail=msg)
+    await operator.emit_error(msg)
+    return True
+
+
 def _sanitize_research_model(value: str) -> str:
     """Allowlist the composer's per-run sub-agent model pick (Research and
     Script share the curated list). Anything not on it — junk, an unknown
@@ -657,6 +738,11 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     record["research_model_override"] = _sanitize_research_model(research_model)
     record["script_model_override"] = _sanitize_research_model(script_model)
     record["effort_override"] = _sanitize_effort(effort)
+    # v3.2: hard per-run cost fence — the WHOLE operation, planner turns
+    # included. Snapshotted at intake so a mid-run Settings edit can't move a
+    # fence the operator already saw named in the plan line.
+    record["cost_ceiling_usd"] = resolve_cost_ceiling()
+    record["spend_usd"] = 0.0
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
