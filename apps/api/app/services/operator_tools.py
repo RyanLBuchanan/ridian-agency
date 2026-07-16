@@ -703,6 +703,12 @@ async def web_research(
     # Verification: count "### " headings (one per source per prompt spec).
     import re
     count = len(re.findall(r"^###\s+\S", sources_md, flags=re.MULTILINE))
+    # v3.3: the review email lists what the run covered without opening the
+    # artifact — persist the source titles (capped; they ride the snapshot).
+    operator.record["source_titles"] = [
+        t.strip() for t in
+        re.findall(r"^###\s+(.+)$", sources_md, flags=re.MULTILINE)
+    ][:20]
 
     # Zero live searches means every "source" came from model memory — the
     # packet must say so, in the artifact and to the planner, not present
@@ -715,6 +721,9 @@ async def web_research(
     operator.sources_packet_text = sources_md
     operator.record["sources_count"] = count
     recon = _reconciliation(res, _effective_research_model(operator))
+    # Persisted for the review email's cost detail line — the step detail
+    # below also carries it, but parsing step strings client-side is fragile.
+    operator.record["reconciliation"] = recon
     detail = f"{count} sources gathered ({recon})."
     if ungrounded:
         detail = (f"{count} sources gathered — ⚠ UNGROUNDED (0 live web searches; "
@@ -863,6 +872,11 @@ async def build_research_packet(
     import re
     from datetime import datetime
     count = len(re.findall(r"^##\s+\S", body, flags=re.MULTILINE))
+    # v3.3: the review email lists what the packet covered without opening
+    # it — persist the source titles (capped; they ride the snapshot).
+    operator.record["source_titles"] = [
+        t.strip() for t in re.findall(r"^##\s+(.+)$", body, flags=re.MULTILINE)
+    ][:20]
 
     # Stamp the title + date deterministically (never trust the LLM for "today").
     title = topic.strip().rstrip(".")
@@ -892,6 +906,9 @@ async def build_research_packet(
     operator.record["skip_drive_upload"] = True
     await operator.emit_artifact(name="research_packet.md", path=str(path), kind="markdown")
     recon = _reconciliation(res, _effective_research_model(operator))
+    # Persisted for the review email's cost detail line — the step detail
+    # below also carries it, but parsing step strings client-side is fragile.
+    operator.record["reconciliation"] = recon
     detail = (f"Packet ready — {count} sources ({recon}). Paste research_packet.md "
               f"into NotebookLM as one source, then generate the Audio Overview.")
     if ungrounded:
