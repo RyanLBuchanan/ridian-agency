@@ -1001,10 +1001,15 @@ async def sources_stage_text(payload: SourceTextRequest) -> dict:
 
 class ProjectCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=60, description="Project name.")
+    # v3.4: sub-folders. The depth cap (one level, enforced in
+    # operation_log_service.create_project) surfaces here as a 400.
+    parent_id: str = Field(
+        "", description="Parent project id — creates a sub-folder (one level max).")
 
 
 class ProjectAssignRequest(BaseModel):
-    project_id: str = Field("", description="Project id, or empty to unfile the run.")
+    project_id: str = Field(
+        "", description="Project or sub-folder id, or empty to unfile the run.")
 
 
 @app.get("/operator/projects")
@@ -1015,7 +1020,8 @@ async def operator_projects_list() -> dict:
 @app.post("/operator/projects")
 async def operator_projects_create(payload: ProjectCreateRequest) -> dict:
     try:
-        return operation_log_service.create_project(payload.name)
+        return operation_log_service.create_project(
+            payload.name, parent_id=payload.parent_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

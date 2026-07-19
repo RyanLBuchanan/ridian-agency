@@ -6198,9 +6198,17 @@ function _railRenderThreads() {
   const list = document.getElementById('rail-threads');
   if (!list) return;
   const q = ((document.getElementById('rail-search') || {}).value || '').trim().toLowerCase();
-  let ops = _activeProjectId
-    ? _railOps.filter((op) => (op.project_id || '') === _activeProjectId)
-    : _railOps;
+  let ops = _railOps;
+  if (_activeProjectId) {
+    // A selected PROJECT shows all descendants: its own chats plus its
+    // sub-folders' chats (exactly one level deep, capped in the backend).
+    // A selected SUB-FOLDER has no children, so this narrows to it alone.
+    const ids = new Set([_activeProjectId]);
+    _railProjects.forEach((p) => {
+      if ((p.parent_id || '') === _activeProjectId) ids.add(p.id);
+    });
+    ops = _railOps.filter((op) => ids.has(op.project_id || ''));
+  }
   if (q) ops = ops.filter((op) => (op.command || '').toLowerCase().includes(q));
   list.innerHTML = '';
   if (!ops.length) {
@@ -6238,8 +6246,96 @@ function _railRenderThreads() {
       }
     });
     li.appendChild(btn);
+    // v3.4: move-chat menu (hover "⋯") — files this chat into a project or
+    // sub-folder via the existing assign endpoint. Never touches folders.
+    if (op.id) {
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.className = 'rail-thread-move';
+      move.title = 'Move to project / sub-folder';
+      move.setAttribute('aria-label', 'Move chat to a project or sub-folder');
+      move.textContent = '⋯';
+      move.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _railShowMoveMenu(op, li);
+      });
+      li.appendChild(move);
+    }
     list.appendChild(li);
   });
+}
+
+/* v3.4: move-chat destination menu — "(No project)", each project, and its
+   sub-folders indented as "Parent / Child". One menu at a time; closes on
+   outside click or Escape. */
+let _railMoveMenuEl = null;
+
+function _railCloseMoveMenu() {
+  if (_railMoveMenuEl) { _railMoveMenuEl.remove(); _railMoveMenuEl = null; }
+  document.removeEventListener('click', _railCloseMoveMenu);
+  document.removeEventListener('keydown', _railMoveMenuKeydown);
+}
+
+function _railMoveMenuKeydown(e) {
+  if (e.key === 'Escape') _railCloseMoveMenu();
+}
+
+function _railShowMoveMenu(op, anchorLi) {
+  _railCloseMoveMenu();
+  const menu = document.createElement('div');
+  menu.className = 'rail-move-menu';
+  const dests = [{ id: '', label: '(No project)' }];
+  _railProjects.filter((p) => !(p.parent_id || '')).forEach((t) => {
+    dests.push({ id: t.id, label: t.name });
+    _railProjects.forEach((c) => {
+      if ((c.parent_id || '') === t.id) {
+        dests.push({ id: c.id, label: `${t.name} / ${c.name}`, sub: true });
+      }
+    });
+  });
+  const current = op.project_id || '';
+  dests.forEach((d) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'rail-move-menu-item' + (d.sub ? ' is-sub' : '');
+    item.textContent = d.id === current ? `✓ ${d.label}` : d.label;
+    if (d.id === current) {
+      item.classList.add('is-current');
+      item.disabled = true;
+    } else {
+      item.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        _railCloseMoveMenu();
+        await _railMoveChat(op, d.id, d.label);
+      });
+    }
+    menu.appendChild(item);
+  });
+  anchorLi.appendChild(menu);
+  _railMoveMenuEl = menu;
+  // Deferred so the opening click doesn't immediately close the menu.
+  setTimeout(() => {
+    document.addEventListener('click', _railCloseMoveMenu);
+    document.addEventListener('keydown', _railMoveMenuKeydown);
+  }, 0);
+}
+
+async function _railMoveChat(op, projectId, destLabel) {
+  try {
+    const res = await fetch(`${BACKEND}/operations/${encodeURIComponent(op.id)}/project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    }
+    await _railThreadsFill();   // re-fetch ops → threads + counts re-render
+    _opSetStatus(projectId ? `Moved to ${destLabel}.` : 'Removed from its project.', 'ok');
+  } catch (err) {
+    _opSetStatus(`Couldn't move chat: ${err && err.message ? err.message : err}`, 'err');
+  }
 }
 
 async function _railThreadsFill() {
@@ -6275,7 +6371,11 @@ function _opProjectChipUpdate() {
   if (!chip || !label) return;
   const active = _railProjects.find((p) => p.id === _activeProjectId);
   if (active) {
-    label.textContent = `Filing new runs under: ${active.name}`;
+    // v3.4: a sub-folder shows its full path — "Parent / Sub-folder".
+    const parent = (active.parent_id || '')
+      ? _railProjects.find((p) => p.id === active.parent_id) : null;
+    const path = parent ? `${parent.name} / ${active.name}` : active.name;
+    label.textContent = `Filing new runs under: ${path}`;
     chip.classList.remove('hidden');
   } else {
     chip.classList.add('hidden');
@@ -6306,25 +6406,97 @@ function _railRenderProjects() {
   all.appendChild(allBtn);
   list.appendChild(all);
 
-  _railProjects.forEach((p) => {
+  /* v3.4: one level of sub-folders. Top-level projects always render; a
+     project's sub-folders render indented beneath it while it (or one of its
+     sub-folders) is selected. Parent counts roll up their children. */
+  const chatCount = (pid) => _railOps.filter((op) => (op.project_id || '') === pid).length;
+  const childrenOf = (pid) => _railProjects.filter((p) => (p.parent_id || '') === pid);
+  const activeProj = _railProjects.find((p) => p.id === _activeProjectId) || null;
+  // The top-level project whose sub-tree is open: the selection itself, or
+  // the selection's parent when a sub-folder is active.
+  const openTopId = activeProj ? ((activeProj.parent_id || '') || activeProj.id) : '';
+
+  const mkRow = (proj, { sub = false, count, meta }) => {
     const li = document.createElement('li');
-    li.className = 'rail-thread' + (p.id === _activeProjectId ? ' is-active' : '');
-    const count = _railOps.filter((op) => (op.project_id || '') === p.id).length;
+    li.className = 'rail-thread' + (sub ? ' rail-subfolder' : '')
+      + (proj.id === _activeProjectId ? ' is-active' : '');
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'rail-thread-btn';
-    btn.title = p.name;
+    btn.title = proj.name;
     const label = document.createElement('span');
     label.className = 'rail-thread-cmd';
-    label.textContent = p.name;
-    const meta = document.createElement('span');
-    meta.className = 'rail-thread-when';
-    meta.textContent = count === 1 ? '1 chat' : `${count} chats`;
+    label.textContent = proj.name;
+    const metaEl = document.createElement('span');
+    metaEl.className = 'rail-thread-when';
+    metaEl.textContent = meta !== undefined ? meta
+      : (count === 1 ? '1 chat' : `${count} chats`);
     btn.appendChild(label);
-    btn.appendChild(meta);
-    btn.addEventListener('click', () => _railSelectProject(p.id));
+    btn.appendChild(metaEl);
+    btn.addEventListener('click', () => _railSelectProject(proj.id));
     li.appendChild(btn);
+    return li;
+  };
+
+  _railProjects.filter((p) => !(p.parent_id || '')).forEach((p) => {
+    const kids = childrenOf(p.id);
+    const total = chatCount(p.id) + kids.reduce((n, k) => n + chatCount(k.id), 0);
+    const li = mkRow(p, { count: total });
+    // "+ sub-folder" appears ONLY on the selected top-level row — the header
+    // "+" keeps creating top-level projects, so nesting is always explicit.
+    if (p.id === _activeProjectId) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'rail-subfolder-add';
+      add.title = `New sub-folder in ${p.name}`;
+      add.setAttribute('aria-label', `New sub-folder in ${p.name}`);
+      add.textContent = '+';
+      add.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _railShowSubfolderInput(p, li);
+      });
+      li.appendChild(add);
+    }
     list.appendChild(li);
+    if (p.id === openTopId) {
+      kids.forEach((k) => list.appendChild(mkRow(k, { sub: true, count: chatCount(k.id) })));
+    }
+  });
+}
+
+/* v3.4: inline sub-folder creation under the selected project row — same
+   Enter-creates / Escape-cancels pattern as the top-level project input. */
+function _railShowSubfolderInput(parent, afterLi) {
+  const existing = document.getElementById('rail-subfolder-name');
+  if (existing) existing.closest('li').remove();
+  const li = document.createElement('li');
+  li.className = 'rail-subfolder-input-row';
+  const input = document.createElement('input');
+  input.id = 'rail-subfolder-name';
+  input.className = 'rail-search';
+  input.type = 'text';
+  input.placeholder = `Sub-folder in ${parent.name}… (Enter)`;
+  input.maxLength = 60;
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  li.appendChild(input);
+  afterLi.after(li);
+  input.focus();
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') { li.remove(); return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await _railCreateProject(name, parent.id);
+      li.remove();
+    } catch (err) {
+      _opSetStatus(`Couldn't create sub-folder: ${err && err.message ? err.message : err}`, 'err');
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (!input.value.trim()) li.remove();
   });
 }
 
@@ -6344,11 +6516,11 @@ async function _railProjectsFill() {
   } catch (_) { /* backend not up yet */ }
 }
 
-async function _railCreateProject(name) {
+async function _railCreateProject(name, parentId = '') {
   const res = await fetch(`${BACKEND}/operator/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, parent_id: parentId }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);

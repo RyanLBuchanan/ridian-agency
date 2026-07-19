@@ -60,42 +60,63 @@ def append_operation(record: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Projects — lightweight grouping for operations (v2.8)
+# Projects — lightweight grouping for operations (v2.8; sub-folders v3.4)
 # ---------------------------------------------------------------------------
-# A project is just {id, name, created_at} in state/projects.json; operations
-# carry a project_id. Assignment happens at run time (the operator picks a
-# project in the sidebar before running) or retroactively via
-# assign_operation_project. No nesting, no per-project settings — organizing
-# only.
+# A project is {id, name, created_at, parent_id} in state/projects.json;
+# operations carry a project_id that may point at either level. parent_id ""
+# — or absent, on pre-v3.4 records — means top-level; no migration needed.
+# EXACTLY ONE level of nesting: create_project is the only folder-creation
+# path and rejects a parent that itself has a parent, so depth <= 2 is an
+# invariant by construction — no other code defends against deeper trees
+# (moving a CHAT can never nest folders). Name dedup is scoped to
+# (parent, name) so "Gulf Shores" can exist under two different projects.
 
 _PROJECTS_NAME = "projects"
 _PROJECT_NAME_MAX = 60
+
+DEPTH_CAP_MESSAGE = "Sub-folders can't contain sub-folders — one level only."
 
 
 def list_projects() -> list[dict]:
     return state_store.load_list(_PROJECTS_NAME)
 
 
-def create_project(name: str) -> dict:
-    """Create a project (or return the existing one with the same name,
-    case-insensitively — organizing shouldn't spawn near-duplicates)."""
+def create_project(name: str, parent_id: str = "") -> dict:
+    """Create a project or sub-folder (or return the existing one with the
+    same name under the same parent, case-insensitively — organizing
+    shouldn't spawn near-duplicates).
+
+    ``parent_id`` nests the new folder under an existing project. The DEPTH
+    CAP lives here, on the only folder-creation path: the parent must itself
+    be top-level, so a sub-folder can never contain another sub-folder.
+    """
     clean = (name or "").strip()
     if not clean:
         raise ValueError("Project name is required.")
     if len(clean) > _PROJECT_NAME_MAX:
         clean = clean[:_PROJECT_NAME_MAX].rstrip()
+    parent_id = (parent_id or "").strip()
     items = state_store.load_list(_PROJECTS_NAME)
+    if parent_id:
+        parent = next((p for p in items if p.get("id") == parent_id), None)
+        if parent is None:
+            raise ValueError("Unknown parent project.")
+        if (parent.get("parent_id") or "").strip():
+            raise ValueError(DEPTH_CAP_MESSAGE)
     for p in items:
-        if (p.get("name") or "").strip().lower() == clean.lower():
+        if ((p.get("name") or "").strip().lower() == clean.lower()
+                and (p.get("parent_id") or "") == parent_id):
             return p
     project = {
         "id": "proj_" + uuid.uuid4().hex[:10],
         "name": clean,
         "created_at": _now_iso(),
+        "parent_id": parent_id,
     }
     items.insert(0, project)
     state_store.save(_PROJECTS_NAME, items)
-    log.info("project.created id=%s name=%s", project["id"], clean)
+    log.info("project.created id=%s name=%s parent=%s",
+             project["id"], clean, parent_id or "-")
     return project
 
 
