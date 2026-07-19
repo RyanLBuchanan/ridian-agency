@@ -5164,6 +5164,7 @@ function _opHandleEvent(evt) {
       operatorState.finalRecord = evt.data || null;
       if (!(evt.data && evt.data.awaiting_input)) _opSetAnswerMode(null);
       _opSetStatusDot(((evt.data && evt.data.status) || 'completed'));
+      _folderArtifactsRefresh();   // v3.5: a finished run may add artifacts
       // v1.7: speak the receipt aloud if voice replies are on.
       if (operatorState.receipt) _opSpeak(operatorState.receipt);
       break;
@@ -6332,9 +6333,162 @@ async function _railMoveChat(op, projectId, destLabel) {
       throw new Error((data && data.detail) || `HTTP ${res.status}`);
     }
     await _railThreadsFill();   // re-fetch ops → threads + counts re-render
+    _folderArtifactsRefresh();  // filing changed → the folder view did too
     _opSetStatus(projectId ? `Moved to ${destLabel}.` : 'Removed from its project.', 'ok');
   } catch (err) {
     _opSetStatus(`Couldn't move chat: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+/* v3.5: read-only folder-artifact view — every artifact from every run filed
+   under the selected folder, grouped by run, open/reveal only. The card
+   lives and dies with _activeProjectId (the same selection that filters
+   chats), and a parent rolls up its sub-folders by the same rule. */
+
+async function _folderArtifactsRefresh() {
+  const card = document.getElementById('folder-artifacts-card');
+  if (!card) return;
+  if (!_activeProjectId) { card.classList.add('hidden'); return; }
+  let data = null;
+  try {
+    const res = await fetch(
+      `${BACKEND}/operator/projects/${encodeURIComponent(_activeProjectId)}/artifacts`);
+    if (res.ok) data = await res.json();
+  } catch (_) { /* backend not up yet — leave as-is */ }
+  // Guard against a slow response landing after the selection changed.
+  if (!data || data.project_id !== _activeProjectId) {
+    if (!_activeProjectId) card.classList.add('hidden');
+    return;
+  }
+  _folderArtifactsRender(card, data);
+}
+
+function _folderArtifactsRender(card, data) {
+  const title = document.getElementById('folder-artifacts-title');
+  const body = document.getElementById('folder-artifacts-body');
+  if (!title || !body) return;
+  const active = _railProjects.find((p) => p.id === _activeProjectId);
+  const parent = active && (active.parent_id || '')
+    ? _railProjects.find((p) => p.id === active.parent_id) : null;
+  const path = active ? (parent ? `${parent.name} / ${active.name}` : active.name) : 'this folder';
+  const n = data.artifacts || 0;
+  const c = data.chats || 0;
+  title.textContent = `Artifacts in ${path} — `
+    + (n === 1 ? '1 artifact' : `${n} artifacts`)
+    + ` from ${c === 1 ? '1 chat' : `${c} chats`}`;
+  body.innerHTML = '';
+  if (!data.runs || !data.runs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'folder-artifacts-empty';
+    empty.textContent = 'No artifacts yet in this folder.';
+    body.appendChild(empty);
+    card.classList.remove('hidden');
+    return;
+  }
+  data.runs.forEach((run) => {
+    const group = document.createElement('div');
+    group.className = 'folder-artifacts-group';
+    const head = document.createElement('div');
+    head.className = 'folder-artifacts-group-head';
+    const cmd = (run.command || '(no command)').split(/\r?\n/)[0];
+    const label = document.createElement('span');
+    label.className = 'folder-artifacts-group-cmd';
+    label.textContent = cmd;
+    label.title = run.command || '';
+    const meta = document.createElement('span');
+    meta.className = 'folder-artifacts-group-meta';
+    meta.textContent = _fmtRelativeShort(run.completed_at)
+      + (run.sub_folder_name ? ` · ${run.sub_folder_name}` : '');
+    const openFolder = document.createElement('button');
+    openFolder.type = 'button';
+    openFolder.className = 'operator-artifact-open';
+    openFolder.textContent = 'Open folder';
+    openFolder.addEventListener('click', () => _folderArtifactsOpenFolder(run));
+    head.appendChild(label);
+    head.appendChild(meta);
+    head.appendChild(openFolder);
+    group.appendChild(head);
+    const ul = document.createElement('ul');
+    ul.className = 'operator-artifacts-list folder-artifacts-list';
+    run.artifacts.forEach((art) => ul.appendChild(_folderArtifactRow(run, art)));
+    group.appendChild(ul);
+    body.appendChild(group);
+  });
+  card.classList.remove('hidden');
+}
+
+function _folderArtifactRow(run, art) {
+  const li = document.createElement('li');
+  li.className = 'operator-artifact-item';
+  const extKind = OPERATOR_EXTERNAL_KINDS[art.kind];
+  const metaLine = extKind ? extKind.meta : art.kind;
+  li.innerHTML = `
+    <span class="operator-artifact-icon" aria-hidden="true">${escapeHtml(_opIconForKind(art.kind))}</span>
+    <span>
+      <span class="operator-artifact-name">${escapeHtml(art.name)}</span>
+      <span class="operator-artifact-meta">${escapeHtml(metaLine)}</span>
+    </span>
+  `;
+  if (art.missing) {
+    const chip = document.createElement('span');
+    chip.className = 'folder-artifact-missing';
+    chip.textContent = 'missing';
+    chip.title = 'This file is no longer on disk.';
+    li.appendChild(chip);
+  } else if (extKind && art.path && art.path.startsWith('http')) {
+    const a = document.createElement('a');
+    a.className = 'operator-artifact-open';
+    a.textContent = extKind.label;
+    a.href = art.path;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    li.appendChild(a);
+  } else {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'operator-artifact-open';
+    btn.textContent = 'Open';
+    btn.addEventListener('click', () => _folderArtifactOpenFile(run, art));
+    li.appendChild(btn);
+  }
+  return li;
+}
+
+async function _folderArtifactOpenFile(run, art) {
+  // JSON logs and any file the open-file allowlist rejects fall back to
+  // revealing the run folder — the button never dead-ends.
+  if ((art.name || '').toLowerCase().endsWith('.json')) {
+    return _folderArtifactsOpenFolder(run);
+  }
+  try {
+    const res = await fetch(`${BACKEND}/artifacts/open-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder, filename: art.name }),
+    });
+    if (res.status === 400) return _folderArtifactsOpenFolder(run);
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error((d && d.detail) || `HTTP ${res.status}`);
+    }
+  } catch (err) {
+    _opSetStatus(`Couldn't open ${art.name}: ${err && err.message ? err.message : err}`, 'err');
+  }
+}
+
+async function _folderArtifactsOpenFolder(run) {
+  try {
+    const res = await fetch(`${BACKEND}/artifacts/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifact_folder: run.artifact_folder }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error((d && d.detail) || `HTTP ${res.status}`);
+    }
+  } catch (err) {
+    _opSetStatus(`Couldn't open folder: ${err && err.message ? err.message : err}`, 'err');
   }
 }
 
@@ -6389,6 +6543,7 @@ function _railSelectProject(projectId) {
   _railRenderProjects();
   _railRenderThreads();
   _opProjectChipUpdate();
+  _folderArtifactsRefresh();   // v3.5: the folder view follows the selection
 }
 
 function _railRenderProjects() {
@@ -6513,6 +6668,7 @@ async function _railProjectsFill() {
     }
     _railRenderProjects();
     _opProjectChipUpdate();
+    _folderArtifactsRefresh();   // v3.5: restore the folder view on boot
   } catch (_) { /* backend not up yet */ }
 }
 

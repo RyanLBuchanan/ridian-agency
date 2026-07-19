@@ -66,6 +66,10 @@ ALLOWED_OPEN_FILENAMES: frozenset[str] = frozenset(
         "research_packet.md",
         # General prose deliverable written via write_file (title is the H1).
         "document.md",
+        # Other write_file allowlist names (brief/summary) — planner-written
+        # markdown; omitting them made the Open button 400 on those runs.
+        "brief.md",
+        "summary.md",
         # Fetched-source provenance written by read_url.
         "source.md",
     }

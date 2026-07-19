@@ -479,6 +479,18 @@
                    #operator-thread; the current run renders live in
                    #operator-live (always the last block before the composer). -->
               <div id="operator-scroll" class="operator-scroll">
+                <!-- v3.5: read-only folder-artifact view. Appears while a
+                     Project / sub-folder is selected: every artifact from
+                     every run filed under it (a parent rolls up its
+                     sub-folders — same rule as the chat filter), grouped by
+                     run, with open/reveal links to where the files ALREADY
+                     live. Nothing here moves, copies, or re-files anything. -->
+                <section id="folder-artifacts-card" class="folder-artifacts hidden" aria-label="Folder artifacts">
+                  <div class="folder-artifacts-head">
+                    <h3 id="folder-artifacts-title" class="folder-artifacts-title">Artifacts</h3>
+                  </div>
+                  <div id="folder-artifacts-body" class="folder-artifacts-body"></div>
+                </section>
                 <div id="operator-thread" class="operator-thread"></div>
                 <div id="operator-live" class="operator-live">
               <!-- Live execution timeline -->
