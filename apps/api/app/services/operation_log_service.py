@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from . import state_store
@@ -141,6 +142,68 @@ def assign_operation_project(operation_id: str, project_id: str) -> Optional[dic
         log.info("operation.project_assigned id=%s project=%s", operation_id, project_id)
         return item
     return None
+
+
+def collect_project_artifacts(project_id: str) -> Optional[dict]:
+    """READ-ONLY walk for the v3.5 folder-artifact view.
+
+    Gathers every artifact from every run filed under ``project_id`` — a
+    project rolls up its sub-folders (one hop, complete by construction
+    thanks to the depth cap; same rule as the sidebar's chat filter), a
+    sub-folder isolates to itself. Files are never moved, copied, or
+    re-filed: local paths get a disk-existence check so deleted files render
+    as "missing" instead of dead links, and that is the only filesystem
+    access. Returns None for an unknown project id.
+
+    Runs are grouped newest-first; a run with no artifacts still counts in
+    ``chats`` but contributes no group (the view is about artifacts).
+    ``sub_folder_name`` is "" for runs filed directly in the selected folder,
+    else the name of the one-level-down sub-folder they rolled up from.
+    """
+    if not project_id:
+        return None
+    projects = state_store.load_list(_PROJECTS_NAME)
+    if not any(p.get("id") == project_id for p in projects):
+        return None
+    names = {p.get("id"): (p.get("name") or "") for p in projects}
+    ids = {project_id}
+    for p in projects:
+        if (p.get("parent_id") or "") == project_id:
+            ids.add(p.get("id"))
+
+    runs: list[dict] = []
+    chats = 0
+    total = 0
+    for op in state_store.load_list(_OPS_NAME):   # newest first by construction
+        pid = op.get("project_id") or ""
+        if pid not in ids:
+            continue
+        chats += 1
+        artifacts = []
+        for a in op.get("artifacts", []):
+            if not isinstance(a, dict):
+                continue
+            path = str(a.get("path") or "")
+            is_local = bool(path) and not path.lower().startswith(("http://", "https://"))
+            artifacts.append({
+                "name": a.get("name") or "(unnamed)",
+                "path": path,
+                "kind": a.get("kind") or "",
+                "missing": is_local and not Path(path).exists(),
+            })
+        if not artifacts:
+            continue
+        total += len(artifacts)
+        runs.append({
+            "id": op.get("id") or "",
+            "command": op.get("command") or "",
+            "completed_at": op.get("completed_at") or "",
+            "artifact_folder": op.get("artifact_folder") or "",
+            "sub_folder_name": names.get(pid, "") if pid != project_id else "",
+            "artifacts": artifacts,
+        })
+    return {"project_id": project_id, "runs": runs,
+            "chats": chats, "artifacts": total}
 
 
 def upsert_operation(record: dict) -> dict:

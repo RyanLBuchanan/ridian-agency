@@ -1041,6 +1041,16 @@ async def operator_projects_create(payload: ProjectCreateRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.get("/operator/projects/{project_id}/artifacts")
+async def operator_project_artifacts(project_id: str) -> dict:
+    """v3.5 read-only folder-artifact view — gathers and lists, never moves.
+    The walk (parent rolls up sub-folders) lives in operation_log_service."""
+    data = operation_log_service.collect_project_artifacts(project_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Unknown project id.")
+    return data
+
+
 @app.post("/operations/{operation_id}/project")
 async def operations_assign_project(operation_id: str, payload: ProjectAssignRequest) -> dict:
     if payload.project_id and not operation_log_service.project_exists(payload.project_id):
