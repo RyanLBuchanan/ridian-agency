@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ridian Operator</title>
+    <!-- SUNRISE-WAVES emblem (the Ridian identity — same set as the website
+         + Open Gulf). Electron uses main.js's BrowserWindow icon for the
+         window; these cover any in-browser rendering of this page. -->
+    <link rel="icon" href="../assets/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32x32.png" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -13,7 +18,9 @@
       <!-- ============================================================ -->
       <aside class="sidebar" aria-label="Workspace navigation">
         <header class="sidebar-brand">
-          <span class="brand-mark" aria-hidden="true"></span>
+          <!-- SUNRISE-WAVES emblem (dark-corrected) — replaces the old CSS
+               gradient square; the retired blue "RA" badge never ships. -->
+          <img class="brand-mark" src="../assets/favicon-32x32.png" alt="" aria-hidden="true" />
           <span class="brand-text">
             <span class="brand-name">Ridian Operator</span>
             <span class="brand-sub">Legacy workflows</span>

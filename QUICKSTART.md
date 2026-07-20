@@ -184,10 +184,11 @@ icon. To pin it to the Windows taskbar — **order matters**:
 Going forward, clicking the pinned icon launches both the FastAPI
 backend and the desktop window in one click.
 
-The icon files are at `desktop/assets/icon.png` (window chrome) and
-`desktop/assets/icon.ico` (Windows shortcut). They're placeholders —
-replace either with your own brand asset whenever you're ready; Electron
-and the shortcut script will pick up the new icon automatically.
+The app icon is the SUNRISE-WAVES emblem at `desktop/assets/favicon.ico`,
+used by both the Electron window and the Windows shortcut. (The old
+`icon.png` / `icon.ico` "RA" placeholders were deleted — see README.)
+Windows caches shortcut icons: if you change the icon, re-run the shortcut
+script and re-pin the taskbar tile to see it.
 
 ## 9. Stopping the app
 

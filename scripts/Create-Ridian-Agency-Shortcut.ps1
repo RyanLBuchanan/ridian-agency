@@ -1,7 +1,7 @@
 # Create a "Ridian Agency" shortcut on the user's Desktop.
 #
 # Targets Start-Ridian-Agency.bat at the repo root. Uses the bundled
-# icon at desktop/assets/icon.ico if present. Tags the shortcut with the
+# icon at desktop/assets/favicon.ico (sunrise-waves) if present. Tags the shortcut with the
 # same Windows AppUserModelID (AUMID) that Electron's main process sets,
 # so when the user pins the running app to the taskbar Windows correctly
 # associates the pinned icon with the shortcut and relaunches via the
@@ -23,7 +23,9 @@ $AppUserModelId = 'com.ridiantechnologies.ridianagency'
 # Repo root = parent of the scripts/ folder this file lives in.
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Launcher = Join-Path $RepoRoot 'Start-Ridian-Agency.bat'
-$IconPath = Join-Path $RepoRoot 'desktop\assets\icon.ico'
+# SUNRISE-WAVES emblem (the Ridian identity) — never icon.ico, which was the
+# retired blue "RA" badge (file deleted; the name is a tooling-default trap).
+$IconPath = Join-Path $RepoRoot 'desktop\assets\favicon.ico'
 
 if (-not (Test-Path $Launcher)) {
   Write-Host "X  Could not find $Launcher" -ForegroundColor Red
@@ -191,9 +193,9 @@ try {
 if (Test-Path $IconPath) {
   Write-Host "OK Using icon at $IconPath" -ForegroundColor Green
 } else {
-  Write-Host "!  No icon.ico found at $IconPath" -ForegroundColor Yellow
+  Write-Host "!  No favicon.ico (sunrise-waves emblem) found at $IconPath" -ForegroundColor Yellow
   Write-Host "   The shortcut will use the .bat file's default icon." -ForegroundColor DarkGray
-  Write-Host "   To generate one: .\.venv\Scripts\python.exe desktop\assets\generate_icon.py" -ForegroundColor DarkGray
+  Write-Host "   Restore desktop\assets\favicon.ico from the repo (git checkout -- desktop/assets)." -ForegroundColor DarkGray
 }
 
 # Verify the AUMID actually persisted to the .lnk.

@@ -9,9 +9,12 @@ const path = require('node:path');
 
 const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
 
-// Use the bundled icon if it exists; otherwise Electron picks a default.
-// generate_icon.py produces both icon.png (BrowserWindow) and icon.ico (Windows shortcut).
-const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
+// Window/taskbar icon: the SUNRISE-WAVES emblem (favicon.ico, multi-size) —
+// the Ridian identity shared with the website + Open Gulf. Deliberately NOT
+// a file named icon.ico/icon.png: those names carried the retired blue "RA"
+// badge and are the Electron-tooling default, so they were deleted to keep
+// any future packaging config from silently shipping the wrong identity.
+const ICON_PATH = path.join(__dirname, 'assets', 'favicon.ico');
 const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
 
 // Stable AppUserModelID so Windows groups our taskbar entries and applies

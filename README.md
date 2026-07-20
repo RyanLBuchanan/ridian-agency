@@ -100,15 +100,15 @@ Unpin and re-pin using step 2 above.
 From then on, clicking the pinned icon launches both the backend and the
 desktop window.
 
-The icon files live at `desktop/assets/icon.png` (BrowserWindow) and
-`desktop/assets/icon.ico` (Windows shortcut). Replace either with your
-own brand asset whenever you're ready — Electron and the shortcut script
-will pick up the new icon automatically. Re-generate the placeholder
-with:
-
-```powershell
-.\.venv\Scripts\python.exe desktop\assets\generate_icon.py
-```
+The app icon is the SUNRISE-WAVES emblem at `desktop/assets/favicon.ico`
+(multi-size; the same identity set as the website and Open Gulf) — used by
+both the Electron window (`desktop/main.js`) and the Windows shortcut
+(`scripts/Create-Ridian-Agency-Shortcut.ps1`). The old placeholder files
+`icon.png` / `icon.ico` (blue "RA" badge) and their `generate_icon.py`
+generator were deleted deliberately: `icon.ico` is the filename Electron
+packaging tools default to, and keeping the wrong identity under that name
+was a silent landmine. Windows caches shortcut icons — after changing the
+icon, re-run the shortcut script and re-pin the taskbar tile.
 
 ## Two workflow modes
 

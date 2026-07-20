@@ -261,13 +261,15 @@ body {
   border-bottom: 1px solid var(--color-sidebar-border);
 }
 
+/* The sunrise-waves emblem image (was a CSS gradient square pre-branding).
+   Size/radius/flex kept so the header layout is unchanged; the emblem is
+   circular so the 9px radius never shows. */
 .brand-mark {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: var(--gradient-primary);
-  box-shadow: var(--shadow-cta);
   flex-shrink: 0;
+  object-fit: contain;
 }
 
 .brand-text {
