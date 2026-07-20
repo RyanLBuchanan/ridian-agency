@@ -9,9 +9,12 @@ const path = require('node:path');
 
 const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
 
-// Use the bundled icon if it exists; otherwise Electron picks a default.
-// generate_icon.py produces both icon.png (BrowserWindow) and icon.ico (Windows shortcut).
-const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
+// Window/taskbar icon: the SUNRISE-WAVES emblem (favicon.ico, multi-size) —
+// the Ridian identity shared with the website + Open Gulf. Deliberately NOT
+// a file named icon.ico/icon.png: those names carried the retired blue "RA"
+// badge and are the Electron-tooling default, so they were deleted to keep
+// any future packaging config from silently shipping the wrong identity.
+const ICON_PATH = path.join(__dirname, 'assets', 'favicon.ico');
 const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
 
 // Stable AppUserModelID so Windows groups our taskbar entries and applies
@@ -22,6 +25,10 @@ const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.ridiantechnologies.ridianagency');
 }
+
+// The double-click launcher at the repo root — starts the backend AND the
+// window. This is what a taskbar pin must relaunch (never bare electron.exe).
+const LAUNCHER_PATH = path.join(__dirname, '..', 'Start-Ridian-Agency.bat');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -41,6 +48,22 @@ function createWindow() {
       sandbox: true,
     },
   });
+
+  // Windows relaunch identity for THIS window. In dev mode the process is
+  // node_modules' electron.exe, so "pin the running app" would otherwise pin
+  // generic Electron (wrong icon, and clicking it opens Electron's default
+  // app, not Ridian). These AppUserModel window properties tell the taskbar:
+  // group under our AUMID, show the sunrise-waves emblem, and relaunch via
+  // the .bat that starts backend + app. Set before show.
+  if (process.platform === 'win32' && fs.existsSync(LAUNCHER_PATH)) {
+    win.setAppDetails({
+      appId: 'com.ridiantechnologies.ridianagency',   // must match the .lnk + setAppUserModelId
+      appIconPath: ICON_PATH,                          // assets/favicon.ico — sunrise-waves
+      appIconIndex: 0,
+      relaunchCommand: `"${LAUNCHER_PATH}"`,
+      relaunchDisplayName: 'Ridian Agency',
+    });
+  }
 
   win.once('ready-to-show', () => win.show());
 
