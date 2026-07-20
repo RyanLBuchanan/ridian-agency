@@ -36,9 +36,18 @@ if (-not (Test-Path $Launcher)) {
 $DesktopDir = [Environment]::GetFolderPath('Desktop')
 $ShortcutPath = Join-Path $DesktopDir 'Ridian Agency.lnk'
 
+# Start Menu\Programs copy — THE one that makes "pin the running app" work.
+# When you pin a live window, Windows searches Start Menu shortcuts for one
+# whose AppUserModelID matches the window's AUMID and pins THAT (icon +
+# launch command). With only a Desktop .lnk it finds nothing and falls back
+# to pinning electron.exe: generic Electron icon, bare-Electron launch.
+$StartMenuDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs'
+$StartMenuShortcutPath = Join-Path $StartMenuDir 'Ridian Agency.lnk'
+
 Write-Host ''
-Write-Host '  Creating Ridian Agency desktop shortcut' -ForegroundColor White
+Write-Host '  Creating Ridian Agency shortcuts (Desktop + Start Menu)' -ForegroundColor White
 Write-Host "  -> $ShortcutPath" -ForegroundColor DarkGray
+Write-Host "  -> $StartMenuShortcutPath" -ForegroundColor DarkGray
 Write-Host ''
 
 # We build the .lnk entirely via IShellLinkW so the AUMID can be set on
@@ -185,6 +194,14 @@ try {
     $iconArg,
     $AppUserModelId
   )
+  [RidianShortcut]::CreateShortcut(
+    $StartMenuShortcutPath,
+    $Launcher,
+    $RepoRoot,
+    'Ridian Agency -- local desktop console',
+    $iconArg,
+    $AppUserModelId
+  )
 } catch {
   Write-Host "X  Failed to create shortcut: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
@@ -212,18 +229,17 @@ if ($stamped -eq $AppUserModelId) {
 }
 
 Write-Host ''
-Write-Host 'OK Shortcut created.' -ForegroundColor Green
+Write-Host 'OK Shortcuts created (Desktop + Start Menu).' -ForegroundColor Green
 Write-Host ''
 Write-Host '  Next steps -- pin in the right order:' -ForegroundColor White
-Write-Host '    1. If a Ridian Agency icon is already pinned to your taskbar,' -ForegroundColor DarkGray
-Write-Host '       right-click it -> "Unpin from taskbar" first.' -ForegroundColor DarkGray
-Write-Host '    2. RECOMMENDED: drag the Desktop "Ridian Agency" shortcut directly' -ForegroundColor DarkGray
-Write-Host '       onto your taskbar (Windows pins the .lnk -- clicking always runs the .bat).' -ForegroundColor DarkGray
-Write-Host '    3. ALTERNATIVE: double-click the Desktop shortcut to launch, then' -ForegroundColor DarkGray
-Write-Host '       right-click the running Ridian Agency icon in the taskbar -> "Pin to taskbar".' -ForegroundColor DarkGray
+Write-Host '    1. If any Ridian/Electron icon is already pinned to your taskbar,' -ForegroundColor DarkGray
+Write-Host '       right-click it -> "Unpin from taskbar" first (old pins point at electron.exe).' -ForegroundColor DarkGray
+Write-Host '    2. EASIEST: press Start, type "Ridian Agency", right-click the entry' -ForegroundColor DarkGray
+Write-Host '       -> "Pin to taskbar". (Start Menu pins always carry the waves icon + .bat launch.)' -ForegroundColor DarkGray
+Write-Host '    3. Or launch it, then right-click the running taskbar icon -> "Pin to taskbar" --' -ForegroundColor DarkGray
+Write-Host '       with the Start Menu shortcut + the window relaunch properties set by main.js,' -ForegroundColor DarkGray
+Write-Host '       Windows now resolves that pin to Ridian, not generic Electron.' -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '  Why this matters:' -ForegroundColor White
-Write-Host '    Pinning a running app pins the live process, not the .lnk. The matching' -ForegroundColor DarkGray
-Write-Host '    AppUserModelID is supposed to unify the two, but Windows .lnk property-store' -ForegroundColor DarkGray
-Write-Host '    handling is inconsistent. Pinning the shortcut directly is always reliable.' -ForegroundColor DarkGray
+Write-Host '  If the icon still looks stale, Windows cached the old one: unpin,' -ForegroundColor White
+Write-Host '  re-run this script, sign out/in (or restart Explorer), and re-pin.' -ForegroundColor DarkGray
 Write-Host ''
