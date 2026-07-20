@@ -4419,6 +4419,9 @@ function _opSetRunning(running) {
     OPERATOR.runBtn.setAttribute('aria-label', running ? 'Running…' : 'Send');
   }
   if (OPERATOR.cancelBtn) OPERATOR.cancelBtn.classList.toggle('hidden', !running);
+  // v3.6: "Continue in background" rides only while a run is in flight.
+  const bgBtn = document.getElementById('operator-background-btn');
+  if (bgBtn) bgBtn.classList.toggle('hidden', !running);
   _opUpdateSendEnabled();
 }
 
@@ -5117,6 +5120,12 @@ function _opHandleEvent(evt) {
     case 'start':
       operatorState.active = evt.data || {};
       if (OPERATOR.folder) OPERATOR.folder.textContent = evt.data.artifact_folder || '';
+      // v3.6: a run launched with the background toggle is watched for
+      // done/parked notifications from its first event.
+      if (operatorState.pendingBackground && evt.data && evt.data.id && !evt.data.resumed) {
+        _bgRegister(evt.data.id);
+        operatorState.pendingBackground = false;
+      }
       _opSetStatusDot('running');
       break;
     case 'step':
@@ -5215,6 +5224,10 @@ async function _opSubmit(e) {
     const researchModelEl = document.getElementById('operator-research-model');
     const scriptModelEl = document.getElementById('operator-script-model');
     const effortEl = document.getElementById('operator-effort');
+    // v3.6: fire-and-forget flag. The run is ALWAYS detached server-side;
+    // this marks it safe-only (save_memory parks) + registers notifications.
+    const bgToggle = document.getElementById('operator-background-toggle');
+    operatorState.pendingBackground = !!(bgToggle && bgToggle.checked);
     const res = await fetch(`${BACKEND}/operations/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
@@ -5224,6 +5237,7 @@ async function _opSubmit(e) {
         research_model: (researchModelEl && researchModelEl.value) || '',
         script_model: (scriptModelEl && scriptModelEl.value) || '',
         effort: (effortEl && effortEl.value) || '',
+        background: operatorState.pendingBackground,
       }),
       signal: operatorState.abortController.signal,
     });
@@ -5857,6 +5871,8 @@ if (OPERATOR.cancelBtn) {
 if (OPERATOR.openFolderBtn) OPERATOR.openFolderBtn.addEventListener('click', _opOpenArtifactFolder);
 if (OPERATOR.uploadDriveBtn) OPERATOR.uploadDriveBtn.addEventListener('click', _opUploadDrive);
 if (OPERATOR.emailMeBtn) OPERATOR.emailMeBtn.addEventListener('click', _opEmailMe);
+const _opBackgroundBtn = document.getElementById('operator-background-btn');
+if (_opBackgroundBtn) _opBackgroundBtn.addEventListener('click', _opContinueInBackground);
 if (OPERATOR.proposalsConfirmAll) {
   OPERATOR.proposalsConfirmAll.addEventListener('click', () => {
     const ids = _opPendingProposalIds();
@@ -6194,6 +6210,102 @@ function _railActiveFolder() {
   return (operatorState.active && operatorState.active.artifact_folder) || '';
 }
 
+/* v3.6: background-run registry + notifications. Every run is detached
+   server-side already; this watches the ones the operator explicitly
+   backgrounded and notifies on the two contract outcomes — done (green) or
+   needs attention (amber: parked at a gate, or failed). Registry persists in
+   localStorage so badges survive view switches and app restarts. */
+const _BG_RUNS_KEY = 'ridian.bgRuns';
+let _bgRuns = (() => {
+  try { return JSON.parse(window.localStorage.getItem(_BG_RUNS_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+})();
+// shape: { [operationId]: 'running' | 'done' | 'attn' } — 'done'/'attn' are
+// unseen badges, cleared when the run is opened.
+
+function _bgSave() {
+  try { window.localStorage.setItem(_BG_RUNS_KEY, JSON.stringify(_bgRuns)); } catch (_) {}
+}
+
+function _bgRegister(id) {
+  if (!id || _bgRuns[id]) return;
+  _bgRuns[id] = 'running';
+  _bgSave();
+}
+
+function _bgClearSeen(id) {
+  if (!id || !_bgRuns[id] || _bgRuns[id] === 'running') return;
+  delete _bgRuns[id];
+  _bgSave();
+}
+
+// Terminal statuses → badge flavor. awaiting_input = parked at a gate
+// ("needs attention — paused at approval"); failed/partial need eyes too.
+const _BG_TERMINAL = { completed: 'done', partial: 'attn', failed: 'attn', awaiting_input: 'attn' };
+
+function _bgNotify(op, outcome) {
+  const cmd = (op.command || '(run)').split(/\r?\n/)[0].slice(0, 70);
+  const body = outcome === 'done'
+    ? `Done: ${cmd} — artifacts are ready.`
+    : (op.status === 'awaiting_input'
+      ? `Needs attention: ${cmd} — paused at an approval. Open it to answer.`
+      : `Needs attention: ${cmd} — ${op.status}.`);
+  _opSetStatus(body, outcome === 'done' ? 'ok' : 'err');
+  // OS-level toast (Electron supports the HTML5 Notification API) — reaches
+  // the operator even with the app minimized. Failures fall back silently to
+  // the in-app status + badge, which were already delivered above.
+  try {
+    if (typeof Notification !== 'undefined') {
+      if (Notification.permission === 'granted') {
+        new Notification('Ridian Operator', { body });
+      } else if (Notification.permission === 'default') {
+        Notification.requestPermission().then((p) => {
+          if (p === 'granted') new Notification('Ridian Operator', { body });
+        });
+      }
+    }
+  } catch (_) { /* in-app toast + badge already shown */ }
+}
+
+async function _bgPollTick() {
+  const watching = Object.keys(_bgRuns).filter((id) => _bgRuns[id] === 'running');
+  if (!watching.length) return;
+  let ops = [];
+  try {
+    const res = await fetch(`${BACKEND}/operations/recent?limit=50`);
+    if (!res.ok) return;
+    ops = ((await res.json()) || {}).operations || [];
+  } catch (_) { return; }
+  let changed = false;
+  watching.forEach((id) => {
+    const op = ops.find((o) => o.id === id);
+    if (!op) return;
+    const outcome = _BG_TERMINAL[op.status];
+    if (!outcome) return;
+    _bgRuns[id] = outcome;
+    changed = true;
+    _bgNotify(op, outcome);
+  });
+  if (changed) {
+    _bgSave();
+    _railThreadsFill();   // refresh rows so badges + labels appear
+  }
+}
+setInterval(_bgPollTick, 10000);
+
+// "Continue in background": detach the VIEW (the backend task already is),
+// flag the run so save_memory parks instead of writing, and watch it.
+async function _opContinueInBackground() {
+  const id = operatorState.active && operatorState.active.id;
+  if (!id) return;
+  try {
+    await fetch(`${BACKEND}/operations/${encodeURIComponent(id)}/background`, { method: 'POST' });
+  } catch (_) { /* flag is best-effort; the watch below still works */ }
+  _bgRegister(id);
+  _opNewChat();
+  _opSetStatus("Running in background — you'll be notified when it finishes or needs you.", 'ok');
+}
+
 function _railRenderThreads() {
   const list = document.getElementById('rail-threads');
   if (!list) return;
@@ -6236,10 +6348,26 @@ function _railRenderThreads() {
     const when = document.createElement('span');
     when.className = 'rail-thread-when';
     when.textContent = _fmtRelativeShort(op.completed_at);
+    // v3.6: a parked run says so instead of a timestamp — background or not.
+    if (op.status === 'awaiting_input') {
+      when.textContent = 'needs attention';
+      when.classList.add('rail-thread-attn');
+    }
     btn.appendChild(label);
     btn.appendChild(when);
+    // v3.6: unseen background outcome → dot badge (green done, amber attn).
+    const bgState = _bgRuns[op.id];
+    if (bgState === 'done' || bgState === 'attn') {
+      const dot = document.createElement('span');
+      dot.className = 'rail-badge ' + (bgState === 'done' ? 'rail-badge-done' : 'rail-badge-attn');
+      dot.title = bgState === 'done'
+        ? 'Background run finished — artifacts ready'
+        : 'Background run needs your attention';
+      btn.appendChild(dot);
+    }
     btn.addEventListener('click', () => {
       if (op.artifact_folder) {
+        _bgClearSeen(op.id);   // opening the run consumes its badge
         loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd });
         list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
         li.classList.add('is-active');

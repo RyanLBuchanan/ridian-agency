@@ -876,6 +876,10 @@ async def dashboard_get() -> dict:
 class OperationRunRequest(BaseModel):
     command: str = Field(..., min_length=4, description="Natural-language command for Ridian to execute.")
     project_id: str = Field("", description="Optional operator project to file this run under.")
+    # v3.6: background (fire-and-forget) run. SAFE-ONLY contract: the flag
+    # never bypasses a gate — it only ADDS one (save_memory refuses unattended
+    # writes) and registers the run for completion/parked notifications.
+    background: bool = Field(False, description="Run detached: safe work only; parks at any approval gate.")
     research_model: str = Field("", description="Optional per-run research-model override (allowlisted server-side).")
     script_model: str = Field("", description="Optional per-run script-writer model override (allowlisted server-side).")
     effort: str = Field("", description="Optional per-run sub-agent effort level: low|medium|high (allowlisted server-side).")
@@ -952,8 +956,19 @@ async def operations_run(payload: OperationRunRequest) -> StreamingResponse:
     return _operation_sse(lambda emit: operator_service.run_operation(
         command=payload.command, emit=emit, project_id=payload.project_id,
         research_model=payload.research_model, script_model=payload.script_model,
-        effort=payload.effort,
+        effort=payload.effort, background=payload.background,
     ))
+
+
+@app.post("/operations/{operation_id}/background")
+async def operations_background(operation_id: str) -> dict:
+    """v3.6: flip an IN-FLIGHT run to background mode ("Continue in
+    background"). From that moment save_memory refuses unattended writes and
+    the renderer watches it for done/parked notifications. Session-scoped —
+    a finished run has nothing left to flag and 404s."""
+    if not operator_service.mark_background(operation_id):
+        raise HTTPException(status_code=404, detail="That operation is not active.")
+    return {"ok": True, "id": operation_id, "background": True}
 
 
 class OperationContinueRequest(BaseModel):

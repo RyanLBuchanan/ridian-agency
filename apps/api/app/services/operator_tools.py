@@ -1676,6 +1676,21 @@ async def save_memory(
     operator = current_operator()
     operator.note_tool("save_memory")
 
+    # v3.6 background-run contract: memory is NEVER written unattended, even
+    # when the command itself contains a save verb. Same park-don't-act
+    # pattern as every other gate — deterministic code, not a prompt rule.
+    # The write is routed to the reviewable proposal queue instead, so the
+    # run still completes and the operator confirms the save afterward.
+    if operator.record.get("background"):
+        return {
+            "error": (
+                "BLOCKED: this run is executing in the BACKGROUND, and memory "
+                "is never written unattended. Call propose_memory_update with "
+                "this exact kind and payload instead — the operator will "
+                "review and confirm it when they return."),
+            "reason": "background_run",
+        }
+
     if kind not in ALLOWED_PROPOSAL_KINDS:
         return {"error": f"save_memory rejected: kind {kind!r} not in {list(ALLOWED_PROPOSAL_KINDS)}"}
     if not isinstance(payload, dict):

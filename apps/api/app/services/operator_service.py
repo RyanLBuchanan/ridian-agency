@@ -132,6 +132,9 @@ def _finalized_view(record: dict) -> dict:
         "awaiting_input": bool(record.get("awaiting_input")),
         # v2.8: project grouping (sidebar Projects section).
         "project_id": record.get("project_id", ""),
+        # v3.6: background run — the renderer's notification registry keys
+        # off this + status to badge done / needs-attention runs.
+        "background": bool(record.get("background")),
     }
 
 
@@ -716,9 +719,23 @@ def _sanitize_effort(value: str) -> str:
     return v if v in ALLOWED_EFFORT_LEVELS else ""
 
 
+def mark_background(operation_id: str) -> bool:
+    """Flip a LIVE session's record to background mode ("Continue in
+    background"). Deterministic and additive-only: the flag never opens a
+    gate — operator_tools.save_memory READS it to refuse unattended memory
+    writes. Returns False when the session is gone (a finished run has
+    nothing to flag)."""
+    session = _SESSIONS.get(operation_id)
+    if session is None:
+        return False
+    session.operator.record["background"] = True
+    log.info("operation.backgrounded id=%s", operation_id)
+    return True
+
+
 async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
                         research_model: str = "", script_model: str = "",
-                        effort: str = "") -> dict:
+                        effort: str = "", background: bool = False) -> dict:
     """Run an operator command end to end via the planner agent (first turn)."""
     apply_to_environment()
     if not get_effective_value("ANTHROPIC_API_KEY"):
@@ -765,6 +782,10 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     # fence the operator already saw named in the plan line.
     record["cost_ceiling_usd"] = resolve_cost_ceiling()
     record["spend_usd"] = 0.0
+    # v3.6: background (fire-and-forget) run. SAFE-ONLY by construction —
+    # every gate still parks the run; this flag only makes save_memory refuse
+    # unattended direct writes (route to the proposal queue instead).
+    record["background"] = bool(background)
     record["awaiting_input"] = False
     await _emit_start(emit, record, command, folder)
 
