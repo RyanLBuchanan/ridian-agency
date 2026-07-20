@@ -399,6 +399,17 @@
                         <option value="medium">Effort: medium</option>
                         <option value="high">Effort: high</option>
                       </select>
+                      <!-- v3.6: fire-and-forget. SAFE-ONLY: a background run
+                           parks at every approval gate (recipient, research
+                           plan, cost ceiling) and refuses unattended memory
+                           writes — it notifies instead of acting. -->
+                      <label
+                        class="operator-bg-toggle"
+                        title="Safe work only: a background run parks at any approval gate and notifies you — it never acts through one."
+                      >
+                        <input type="checkbox" id="operator-background-toggle" />
+                        <span>Run in background</span>
+                      </label>
                     </div>
                     <div class="operator-field-right">
                       <span id="operator-elapsed" class="operator-elapsed" aria-live="polite"></span>
@@ -488,6 +499,15 @@
                     <span id="operator-active-status-dot" class="operator-status-dot is-running" aria-hidden="true"></span>
                     <span id="operator-active-status-label">Running…</span>
                   </div>
+                  <!-- v3.6: detach the VIEW from an in-flight run (the backend
+                       task is already detached); flags the run background so
+                       memory writes park, and registers it for notifications. -->
+                  <button
+                    id="operator-background-btn"
+                    type="button"
+                    class="btn btn-ghost btn-compact hidden"
+                    title="Keep this run going without watching it — you'll be notified when it finishes or needs you."
+                  >Continue in background</button>
                   <!-- Local path intentionally not shown — "Open output folder"
                        on the artifacts card is the affordance for finding files. -->
                 </div>

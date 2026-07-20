@@ -5023,3 +5023,35 @@ body {
 .rail-move-menu-item.is-sub { padding-left: 18px; }
 .rail-move-menu-item:hover { background: var(--color-bg-soft); }
 .rail-move-menu-item.is-current { color: var(--color-muted); cursor: default; }
+
+/* v3.6: background runs — badges, needs-attention label, composer toggle -- */
+.rail-badge {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  align-self: center;
+  margin-top: 2px;
+}
+.rail-badge-done {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-soft);
+}
+.rail-badge-attn {
+  background: var(--color-warn-text);
+  box-shadow: 0 0 0 3px var(--color-warn-bg);
+}
+.rail-thread-attn { color: var(--color-warn-text); font-weight: 600; }
+
+.operator-bg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.operator-bg-toggle input { accent-color: var(--color-accent); margin: 0; }
+.operator-bg-toggle:hover { color: var(--color-text-strong); }
