@@ -121,6 +121,16 @@ def _finalized_view(record: dict) -> dict:
         # at intake. Persisted so every run's true cost survives in history.
         "spend_usd": round(float(record.get("spend_usd", 0.0) or 0.0), 4),
         "cost_ceiling_usd": record.get("cost_ceiling_usd"),
+        # v3.3: review-email fields. "command" above is the ORIGINAL initiating
+        # request (set once at intake; a /continue never overwrites it — resume
+        # answers only ride the start EVENT payload). These carry the research
+        # self-audit and coverage so the email shows what a run cost and
+        # covered without re-opening artifacts, plus the plan-approval flags
+        # so "you approved it" comes from data, not inference.
+        "reconciliation": record.get("reconciliation", ""),
+        "source_titles": record.get("source_titles", []),
+        "research_approved": bool(record.get("research_approved")),
+        "research_declined": bool(record.get("research_declined")),
         # v1.2: memory proposals from this operation. Each carries its own
         # status ("proposed" | "committed" | "dismissed") so reloaded runs
         # don't re-prompt for items the operator already decided on.

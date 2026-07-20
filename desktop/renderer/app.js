@@ -5534,7 +5534,11 @@ function _opBuildEmailSummary() {
   const active = operatorState.active || {};
   const drive = operatorState.drive || null;
 
-  const command = (active.command || '').trim() || '(no command captured)';
+  // The ORIGINAL initiating command lives on the final record (set once at
+  // intake; a /continue never overwrites it). operatorState.active.command is
+  // whatever the LAST start event carried — on a resumed run that's the
+  // operator's answer ("Proceed with the research plan"), not the ask.
+  const command = ((rec.command || active.command || '') + '').trim() || '(no command captured)';
   const folder = active.artifact_folder || '(unknown local folder)';
   const status = rec.status || 'unknown';
   const sourcesCount = rec.sources_count || 0;
@@ -5587,14 +5591,33 @@ function _opBuildEmailSummary() {
       }).join('\n')
     : '  (no artifacts were recorded for this run)';
 
+  // Packet coverage — the source titles the research tools persisted, so the
+  // reader knows what the packet covered without opening it. Absent on runs
+  // that predate the field (falls back to the Sources-gathered count line).
+  const sourceTitles = Array.isArray(rec.source_titles)
+    ? rec.source_titles.filter(Boolean) : [];
+
+  // Cost, total first: the whole-run ledger is the headline ("what did this
+  // actually cost me"), the research reconciliation is the breakdown under it.
+  const spend = (typeof rec.spend_usd === 'number') ? rec.spend_usd : null;
+  const ceiling = (typeof rec.cost_ceiling_usd === 'number') ? rec.cost_ceiling_usd : null;
+  const runCostLine = (spend !== null)
+    ? `  Run cost:   ≈$${spend.toFixed(2)}${ceiling !== null ? ` of $${ceiling.toFixed(2)} ceiling` : ' (no ceiling set)'}`
+    : null;
+
   const lines = [
     'Here is the package from your latest Ridian Operator run.',
     '',
     'What I asked Ridian to do',
     `  "${command}"`,
+    rec.research_approved ? '  Mid-run approval: you approved the research plan.' : null,
+    rec.research_declined ? '  Mid-run answer: you declined the research plan.' : null,
     '',
     `What Ridian produced${summaryPhrase ? ` — ${summaryPhrase}` : ''}`,
     artifactLines,
+    ...(sourceTitles.length
+      ? ['', 'What the packet covers', ...sourceTitles.map((t) => `  - ${t}`)]
+      : []),
     '',
     'Where the files live',
     `  Local:  ${folder}`,
@@ -5602,6 +5625,8 @@ function _opBuildEmailSummary() {
     '',
     'Run details',
     `  Status:     ${status}`,
+    runCostLine,
+    rec.reconciliation ? `    Research: ${rec.reconciliation}` : null,
     sourcesCount > 0 ? `  Sources gathered: ${sourcesCount}` : null,
     tools.length ? `  Tools used: ${tools.join(', ')}` : null,
     rec.started_at ? `  Started:    ${rec.started_at}` : null,
