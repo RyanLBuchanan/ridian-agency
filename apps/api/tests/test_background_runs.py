@@ -77,15 +77,20 @@ def test_background_save_memory_refuses_and_routes_to_proposals(tmp_path, monkey
 
 
 def test_foreground_save_memory_still_writes(tmp_path, monkeypatch):
-    """Control: the background check changes NOTHING for attended runs."""
+    """Control: the background check changes NOTHING for attended runs.
+    Post-merge with governance/memory-provenance, an attended direct write
+    also requires the operator's explicit save command (save_intent) and
+    carries the written_by provenance stamp."""
     seen = {}
 
-    def fake_add_contact(data):
+    def fake_add_contact(data, *, written_by, source_op=""):
         seen.update(data)
+        seen["written_by"] = written_by
         return {"id": "c_1", "name": data.get("name", "")}
 
     monkeypatch.setattr(t.memory_service, "add_contact", fake_add_contact)
-    op = _ctx(tmp_path, {})   # no background flag — attended run
+    # Attended run whose command contained a save verb — both gates open.
+    op = _ctx(tmp_path, {"save_intent": True})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("save_memory").call({
         "kind": "contact",
@@ -93,6 +98,21 @@ def test_foreground_save_memory_still_writes(tmp_path, monkeypatch):
     })))
     assert payload["status"] == "saved"
     assert seen["name"] == "Sarah Chen"
+    assert seen["written_by"] == "save_memory"
+
+
+def test_background_refusal_wins_even_with_save_intent(tmp_path, monkeypatch):
+    """Gate order pinned: a background run with an explicit save verb in the
+    command (save_intent True) still refuses as background_run — unattended
+    beats commanded, matching the SAFE-ONLY contract."""
+    _bomb_memory_writes(monkeypatch)
+    op = _ctx(tmp_path, {"background": True, "save_intent": True})
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("save_memory").call({
+        "kind": "contact",
+        "payload": {"name": "Sarah Chen"},
+    })))
+    assert payload["reason"] == "background_run"
 
 
 def test_background_refusal_covers_every_kind(tmp_path, monkeypatch):

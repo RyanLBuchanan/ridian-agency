@@ -752,7 +752,7 @@ async def memory_contacts_list() -> dict:
 async def memory_contacts_create(payload: ContactPayload) -> dict:
     if not payload.name.strip() and not payload.email.strip():
         raise HTTPException(status_code=400, detail="name or email required")
-    return memory_service.add_contact(payload.model_dump())
+    return memory_service.add_contact(payload.model_dump(), written_by="manual")
 
 
 @app.put("/memory/contacts/{contact_id}")
@@ -777,7 +777,7 @@ async def memory_facts_list() -> dict:
 
 @app.post("/memory/facts")
 async def memory_facts_create(payload: FactPayload) -> dict:
-    return memory_service.add_fact(payload.model_dump())
+    return memory_service.add_fact(payload.model_dump(), written_by="manual")
 
 
 @app.delete("/memory/facts/{fact_id}")
@@ -794,7 +794,7 @@ async def memory_follow_ups_list() -> dict:
 
 @app.post("/memory/follow-ups")
 async def memory_follow_ups_create(payload: FollowUpPayload) -> dict:
-    return memory_service.add_follow_up(payload.model_dump())
+    return memory_service.add_follow_up(payload.model_dump(), written_by="manual")
 
 
 @app.put("/memory/follow-ups/{follow_up_id}")
@@ -820,7 +820,7 @@ async def memory_decisions_list() -> dict:
 
 @app.post("/memory/decisions")
 async def memory_decisions_create(payload: DecisionPayload) -> dict:
-    return memory_service.add_decision(payload.model_dump())
+    return memory_service.add_decision(payload.model_dump(), written_by="manual")
 
 
 @app.delete("/memory/decisions/{decision_id}")
@@ -1269,7 +1269,7 @@ async def operations_memory_commit(operation_id: str, payload: MemoryCommitReque
             skipped.append({"id": prop_id, "reason": f"already {prop['status']}"})
             continue
         try:
-            entry = _commit_proposal(prop)
+            entry = _commit_proposal(prop, operation_id=operation_id)
             written.append({"id": prop_id, "kind": prop["kind"], "entry_id": entry.get("id", "")})
             statuses[prop_id] = "committed"
         except HTTPException:
@@ -1297,15 +1297,17 @@ async def operations_memory_commit(operation_id: str, payload: MemoryCommitReque
     )
 
 
-def _commit_proposal(prop: dict) -> dict:
+def _commit_proposal(prop: dict, *, operation_id: str) -> dict:
     """Route a single proposal to the matching memory_service write API.
 
     Validates payload shape per kind. Anything the planner sent that doesn't
     match the kind's required fields is rejected here, before it touches
-    memory state. Returns the persisted memory entry.
+    memory state. Every write is provenance-stamped written_by="commit" with
+    the operation the proposal came from. Returns the persisted memory entry.
     """
     kind = prop.get("kind")
     payload = prop.get("payload") or {}
+    stamp = {"written_by": "commit", "source_op": operation_id}
     if kind == "fact":
         if not str(payload.get("fact", "")).strip():
             raise ValueError("fact proposal missing 'fact' text")
@@ -1313,7 +1315,7 @@ def _commit_proposal(prop: dict) -> dict:
             "topic": str(payload.get("topic", "") or ""),
             "fact": str(payload.get("fact", "") or ""),
             "source": str(payload.get("source", "") or ""),
-        })
+        }, **stamp)
     if kind == "contact":
         if not str(payload.get("name", "")).strip():
             raise ValueError("contact proposal missing 'name'")
@@ -1325,7 +1327,7 @@ def _commit_proposal(prop: dict) -> dict:
             "phone": str(payload.get("phone", "") or ""),
             "notes": str(payload.get("notes", "") or ""),
             "last_contact_iso": str(payload.get("last_contact_iso", "") or ""),
-        })
+        }, **stamp)
     if kind == "follow_up":
         if not str(payload.get("what", "")).strip():
             raise ValueError("follow_up proposal missing 'what'")
@@ -1335,7 +1337,7 @@ def _commit_proposal(prop: dict) -> dict:
             "due_iso": str(payload.get("due_iso", "") or ""),
             "status": "open",
             "source_run": str(payload.get("source_run", "") or ""),
-        })
+        }, **stamp)
     if kind == "decision":
         if not str(payload.get("decision", "")).strip():
             raise ValueError("decision proposal missing 'decision'")
@@ -1343,7 +1345,7 @@ def _commit_proposal(prop: dict) -> dict:
             "decision": str(payload.get("decision", "") or ""),
             "context": str(payload.get("context", "") or ""),
             "date_iso": str(payload.get("date_iso", "") or ""),
-        })
+        }, **stamp)
     raise ValueError(f"unknown proposal kind: {kind!r}")
 
 
