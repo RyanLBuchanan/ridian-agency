@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +44,7 @@ from .services import operation_log_service  # noqa: E402
 from .services import operator_service  # noqa: E402
 from .services import pdf_service  # noqa: E402
 from .services import project_service  # noqa: E402
+from .services import speech_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
     ALLOWED_OUTPUT_DEPTHS as AGENTIC_DEPTHS,
@@ -1122,6 +1123,26 @@ async def operations_transcribe(payload: TranscribeRequest) -> dict:
     except transcription_service.TranscriptionError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
     return {"text": text}
+
+
+class TTSSpeakRequest(BaseModel):
+    """Read-aloud text from the renderer. Server-capped at
+    speech_service.MAX_TTS_CHARS regardless of what arrives."""
+    text: str = Field("", description="Text to speak.")
+
+
+@app.post("/tts/speak")
+async def tts_speak(payload: TTSSpeakRequest) -> Response:
+    """v3.7: Ridian's reply read-aloud via OpenAI TTS — the key stays
+    server-side (same OPENAI_API_KEY as Whisper). Voice + model come from
+    Settings at CALL time, so an audition needs no restart. Errors map to
+    400 (config) / 502 (upstream), never 500 — the renderer degrades to
+    browser speechSynthesis and the text display is never affected."""
+    try:
+        audio = await asyncio.to_thread(speech_service.synthesize_speech, payload.text)
+    except speech_service.SpeechError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 # IMPORTANT: register fixed-path routes (/operations/load, /operations/audio,

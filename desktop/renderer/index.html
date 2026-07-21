@@ -1698,7 +1698,7 @@
           </fieldset>
 
           <fieldset class="form-group">
-            <legend>Voice input (OpenAI Whisper)</legend>
+            <legend>Voice — OpenAI (mic input + read-aloud)</legend>
             <label class="field">
               <span class="field-label">OpenAI API key</span>
               <input name="openai_api_key" type="password" autocomplete="new-password" />
@@ -1710,6 +1710,36 @@
               <span class="field-hint">
                 Only used for microphone transcription (Whisper). Leave blank to
                 disable voice input — everything else runs on Claude.
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">Read-aloud voice (TTS)</span>
+              <select name="openai_tts_voice">
+                <option value="">nova (default)</option>
+                <option value="alloy">alloy</option>
+                <option value="echo">echo</option>
+                <option value="fable">fable</option>
+                <option value="onyx">onyx</option>
+                <option value="nova">nova</option>
+                <option value="shimmer">shimmer</option>
+              </select>
+              <span class="field-hint">
+                OpenAI voice for reading Ridian's replies aloud — same API key
+                as voice input. Takes effect on the <strong>next</strong> reply
+                (no restart): change it, trigger a response, audition. If the
+                TTS call fails, the app falls back to the browser voice.
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">Read-aloud quality</span>
+              <select name="openai_tts_model">
+                <option value="">tts-1 — fast (default)</option>
+                <option value="tts-1">tts-1 — fast</option>
+                <option value="tts-1-hd">tts-1-hd — higher quality, 2× cost</option>
+              </select>
+              <span class="field-hint">
+                Read-aloud speaks the reply's first ~600 characters (to a
+                sentence boundary) — about 1¢ per reply on tts-1.
               </span>
             </label>
           </fieldset>
