@@ -4853,12 +4853,24 @@ function _opHideOptionsRow() {
    RESETS on a new chat / new run). Effective voice = master ON and not
    session-muted. The old design conflated both into one persisted flag, so
    a single speaker tap left every future session mysteriously silent. */
+const VOICE_MASTER_KEY = 'ridian.voiceMaster';
+// Legacy pre-v3.8 key: written by SPEAKER taps under the old one-flag
+// design, so a stored 'false' is a stale mute — NOT a deliberate master-off
+// choice (that semantic didn't exist yet). Reading it as the master left
+// the app defaulting to muted with a dead button. Migration: ignore its
+// value entirely and delete it; the master defaults ON under its own key,
+// written only by the new writers below.
 const VOICE_REPLIES_KEY = 'ridian.voiceReplies';
+try {
+  if (window.localStorage.getItem(VOICE_REPLIES_KEY) !== null) {
+    window.localStorage.removeItem(VOICE_REPLIES_KEY);
+  }
+} catch (_) { /* storage unavailable — defaults still apply */ }
 
 let _voiceSessionMuted = false;   // never persisted, by design
 
 function _opVoiceMasterOn() {
-  try { return window.localStorage.getItem(VOICE_REPLIES_KEY) !== 'false'; }
+  try { return window.localStorage.getItem(VOICE_MASTER_KEY) !== 'false'; }
   catch (_) { return true; }
 }
 
@@ -4866,9 +4878,12 @@ function _opVoiceEnabled() {
   return _opVoiceMasterOn() && !_voiceSessionMuted;
 }
 
-// Settings checkbox — the ONLY writer of the persistent master.
+// Writers of the persistent master: the Settings checkbox (on/off), and the
+// receipt speaker in ONE direction only — a tap on a dead-muted speaker
+// turns the master back ON (an explicit tap IS explicit intent; the speaker
+// never turns the master OFF).
 function _opSetVoiceMaster(on) {
-  try { window.localStorage.setItem(VOICE_REPLIES_KEY, on ? 'true' : 'false'); } catch (_) {}
+  try { window.localStorage.setItem(VOICE_MASTER_KEY, on ? 'true' : 'false'); } catch (_) {}
   const chk = document.getElementById('settings-voice-replies');
   if (chk) chk.checked = !!on;
   if (!on) _opStopSpeaking();
@@ -4898,7 +4913,7 @@ function _opSyncSpeakerIcon() {
   btn.classList.toggle('is-muted', muted);
   btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
   const label = masterOff
-    ? 'Voice disabled in Settings ("Read replies aloud")'
+    ? 'Voice off (Settings master) — click to turn back on'
     : (muted ? 'Voice muted for this chat — click to unmute'
              : 'Mute voice for this chat');
   btn.title = label;
@@ -6034,10 +6049,17 @@ if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
 const _receiptSpeakBtn = document.getElementById('operator-receipt-speak');
 if (_receiptSpeakBtn) {
   _receiptSpeakBtn.addEventListener('click', () => {
-    // Master off? The speaker never secretly flips the persistent
-    // preference — Settings is its only writer (two-writer separation).
-    if (!_opVoiceMasterOn()) return;
-    _opSetSessionMuted(!_voiceSessionMuted);
+    // NO dead states: if voice is effectively off for ANY reason (session
+    // mute or the Settings master), one click brings it back — including
+    // re-enabling the master, because an explicit tap on the speaker IS
+    // explicit intent (the old silent no-op here made the button feel
+    // broken). When voice is on, a click session-mutes as before.
+    if (!_opVoiceEnabled()) {
+      if (!_opVoiceMasterOn()) _opSetVoiceMaster(true);
+      _opSetSessionMuted(false);
+    } else {
+      _opSetSessionMuted(true);
+    }
   });
   _opSyncSpeakerIcon();   // reflect the effective state on load
 }
