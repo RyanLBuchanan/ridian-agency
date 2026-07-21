@@ -44,6 +44,7 @@ from .services import operation_log_service  # noqa: E402
 from .services import operator_service  # noqa: E402
 from .services import pdf_service  # noqa: E402
 from .services import project_service  # noqa: E402
+from .services import quickbooks_service  # noqa: E402
 from .services import speech_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
@@ -1517,6 +1518,31 @@ async def google_connect() -> GoogleStatusResponse:
 @app.post("/google/disconnect", response_model=GoogleStatusResponse)
 async def google_disconnect() -> GoogleStatusResponse:
     return GoogleStatusResponse(**google_drive_service.disconnect())
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online (v4.0) — reads + create-unsent-invoice only. No send/
+# email/delete endpoint exists anywhere in the app, by construction.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/quickbooks/status")
+async def quickbooks_status() -> dict:
+    return quickbooks_service.get_status()
+
+
+@app.post("/quickbooks/connect")
+async def quickbooks_connect() -> dict:
+    """Browser OAuth consent (blocks this request only; runs in a thread)."""
+    try:
+        return await asyncio.to_thread(quickbooks_service.run_oauth_flow)
+    except quickbooks_service.QuickBooksError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@app.post("/quickbooks/disconnect")
+async def quickbooks_disconnect() -> dict:
+    return quickbooks_service.disconnect()
 
 
 @app.post("/google/upload-artifacts", response_model=GoogleUploadResponse)

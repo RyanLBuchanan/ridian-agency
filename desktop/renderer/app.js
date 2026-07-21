@@ -201,9 +201,11 @@ const SETTINGS_FIELDS = [
   'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
+  'quickbooks_client_id',
   'appearance',
 ];
-const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password'];
+const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password',
+  'quickbooks_client_secret'];
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
@@ -4650,6 +4652,8 @@ const OPERATOR_EXTERNAL_KINDS = {
   spreadsheet:  { label: 'Open in Sheets', meta: 'Live Google Sheet (in your Drive)' },
   slides:       { label: 'Open in Slides', meta: 'Live Google Slides deck (in your Drive)' },
   browser:      { label: 'Open again',     meta: 'Opened in your browser' },
+  quickbooks_invoice: { label: 'Review in QuickBooks',
+                        meta: 'UNSENT invoice — review and send in QuickBooks' },
 };
 
 function _opIconForKind(kind) {
@@ -6066,6 +6070,39 @@ if (_receiptSpeakBtn) {
 
 // Settings → "Read replies aloud automatically" (renderer-local preference;
 // not part of the backend settings payload).
+/* v4.0: QuickBooks connect/disconnect (Settings). Status-only UI — the
+   OAuth consent happens in the system browser via the backend. */
+const _qbStatusEl = document.getElementById('settings-qb-status');
+function _qbSetStatus(text) { if (_qbStatusEl) _qbStatusEl.textContent = text; }
+async function _qbRefreshStatus() {
+  try {
+    const s = await fetch(`${BACKEND}/quickbooks/status`).then((r) => (r.ok ? r.json() : null));
+    if (s) _qbSetStatus(s.connected ? `Connected (company ${s.realm_id}).` : 'Not connected.');
+  } catch (_) { /* backend not up */ }
+}
+const _qbConnectBtn = document.getElementById('settings-qb-connect');
+if (_qbConnectBtn) {
+  _qbConnectBtn.addEventListener('click', async () => {
+    _qbSetStatus('Complete the consent in your browser…');
+    try {
+      const res = await fetch(`${BACKEND}/quickbooks/connect`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+      _qbSetStatus(data.connected ? `Connected (company ${data.realm_id}).` : 'Not connected.');
+    } catch (err) {
+      _qbSetStatus(`Connect failed: ${err && err.message ? err.message : err}`);
+    }
+  });
+  _qbRefreshStatus();
+}
+const _qbDisconnectBtn = document.getElementById('settings-qb-disconnect');
+if (_qbDisconnectBtn) {
+  _qbDisconnectBtn.addEventListener('click', async () => {
+    try { await fetch(`${BACKEND}/quickbooks/disconnect`, { method: 'POST' }); } catch (_) {}
+    _qbRefreshStatus();
+  });
+}
+
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {
   _voiceChk.checked = _opVoiceMasterOn();

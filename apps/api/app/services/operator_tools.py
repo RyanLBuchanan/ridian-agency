@@ -44,6 +44,7 @@ from . import (
     google_drive_service,
     google_workspace_service,
     memory_service,
+    quickbooks_service,
     tts_service,
     url_fetch_service,
 )
@@ -1855,6 +1856,203 @@ async def open_browser(
     return result
 
 
+# ---------------------------------------------------------------------------
+# QuickBooks Online (v4.0) — reads + ONE gated write (create UNSENT invoice)
+# ---------------------------------------------------------------------------
+# QBO has no draft state: a created invoice is a real, numbered, unsent
+# record in the production company file. Compensating controls, all in code:
+# the ONLY write reachable is create_invoice (no send/email/delete exists in
+# quickbooks_service); the customer and any item refs must resolve against
+# REAL fetched records; and creation pauses behind a preview-approval gate —
+# record["invoice_approved"] is written ONLY by operator_service from the
+# operator's own answer, and the approved payload is signature-matched so a
+# changed payload re-asks instead of riding an old approval.
+
+INVOICE_PROCEED = "Create the invoice as previewed"
+INVOICE_CANCEL = "Cancel the invoice"
+
+
+def _invoice_sig(customer_id: str, lines: list) -> str:
+    return json.dumps({"c": customer_id, "l": lines}, sort_keys=True, default=str)
+
+
+async def _invoice_approval_gate(operator, customer_id, customer_name, lines, total) -> dict | None:
+    rec = operator.record
+    sig = _invoice_sig(customer_id, lines)
+    if rec.get("invoice_approved") and rec.get("invoice_preview_sig") == sig:
+        return None
+    if rec.get("invoice_declined"):
+        return {"error": ("The operator DECLINED the invoice. Do NOT create it or "
+                          "retry; acknowledge briefly in your receipt."),
+                "reason": "invoice_declined"}
+    # Not asked yet, or the payload changed since the approval — (re)ask.
+    rec["invoice_preview_sig"] = sig
+    rec["invoice_approved"] = False
+    rec["invoice_plan_asked"] = True
+    line_txt = "; ".join(
+        f"{ln.get('description') or ln.get('item_name') or 'line'} — ${float(ln.get('_amount', 0)):.2f}"
+        for ln in lines)
+    await operator.emit_needs_input(
+        question=(f"Invoice preview — approve before anything is created in "
+                  f"QuickBooks (it will be a REAL unsent invoice). Customer: "
+                  f"{customer_name}. Lines: {line_txt}. Total: ${total:.2f}. "
+                  f"Create it?"),
+        context_hint="QuickBooks invoice approval — nothing created until you answer",
+        options=[{"label": "Create it", "action": "submit", "value": INVOICE_PROCEED},
+                 {"label": "Cancel", "action": "submit", "value": INVOICE_CANCEL}],
+    )
+    await operator.emit_step(name="quickbooks_invoice", status="running",
+                             detail=f"Awaiting your approval — {customer_name}, ${total:.2f}.")
+    return {"error": ("BLOCKED: the invoice needs the operator's approval. A "
+                      "needs-input question has been raised; WAIT for the answer. "
+                      "Do NOT retry or create it another way."),
+            "reason": "invoice_plan_pending"}
+
+
+@planner_tool
+async def list_quickbooks_customers() -> dict:
+    """List active QuickBooks customers (id, name, email). READ-ONLY."""
+    operator = current_operator()
+    operator.note_tool("list_quickbooks_customers")
+    try:
+        return {"customers": await asyncio.to_thread(quickbooks_service.list_customers)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@planner_tool
+async def list_quickbooks_items() -> dict:
+    """List active QuickBooks products/services (id, name, unit_price). READ-ONLY."""
+    operator = current_operator()
+    operator.note_tool("list_quickbooks_items")
+    try:
+        return {"items": await asyncio.to_thread(quickbooks_service.list_items)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@planner_tool
+async def list_quickbooks_invoices(limit: int = 20) -> dict:
+    """List recent QuickBooks invoices (doc number, customer, total, balance,
+    email status). READ-ONLY."""
+    operator = current_operator()
+    operator.note_tool("list_quickbooks_invoices")
+    try:
+        return {"invoices": await asyncio.to_thread(quickbooks_service.list_invoices, limit)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@planner_tool
+async def create_quickbooks_invoice(
+    customer: str,
+    lines: list,
+    txn_date: str = "",
+    due_date: str = "",
+) -> dict:
+    """Create an UNSENT invoice in QuickBooks — the operator reviews and
+    sends it in QuickBooks themselves; this app cannot send, email, or
+    delete invoices (those operations do not exist in its code).
+
+    RULES, enforced in code: ``customer`` must match a REAL QuickBooks
+    customer (exact name or id — ambiguity asks the operator). Line items
+    with ``item_name`` must match real products/services. Amounts come from
+    retrieved item prices or values the operator stated — NEVER invented.
+    The FIRST call pauses for the operator's preview approval; on
+    {"reason": "invoice_plan_pending"} WAIT; on "invoice_declined" stop.
+
+    Args:
+        customer: QuickBooks customer display name or id.
+        lines: [{"description": str, "amount": number} or
+                {"item_name": str, "qty": number, "unit_price": number,
+                 optional "description"}].
+        txn_date: Optional YYYY-MM-DD invoice date (omit = today).
+        due_date: Optional YYYY-MM-DD due date.
+
+    Returns:
+        {"id", "doc_number", "customer", "total", "email_status", "link"}
+        on success; {"error", "reason"} when gated or failed.
+    """
+    operator = current_operator()
+    operator.note_tool("create_quickbooks_invoice")
+    if not customer or not isinstance(lines, list) or not lines:
+        return {"error": "customer and at least one line are required.", "reason": "bad_args"}
+    try:
+        customers = await asyncio.to_thread(quickbooks_service.list_customers)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"QuickBooks unavailable: {exc}", "reason": "not_connected"}
+    want = customer.strip().lower()
+    matches = [c for c in customers if c["id"] == customer or c["name"].strip().lower() == want]
+    if len(matches) != 1:
+        await operator.emit_needs_input(
+            question=(f'Which QuickBooks customer is "{customer}"? I only invoice '
+                      "customers that exist in QuickBooks — tell me the exact name."),
+            context_hint="QuickBooks customer not uniquely matched",
+        )
+        return {"error": (f"BLOCKED: '{customer}' matched {len(matches)} QuickBooks "
+                          "customers. A needs-input question was raised; wait."),
+                "reason": "customer_unresolved"}
+    cust = matches[0]
+
+    items = None
+    norm_lines: list[dict] = []
+    for ln in lines:
+        if not isinstance(ln, dict):
+            return {"error": "each line must be an object", "reason": "bad_args"}
+        ln = dict(ln)
+        if ln.get("item_name"):
+            if items is None:
+                items = await asyncio.to_thread(quickbooks_service.list_items)
+            im = [i for i in items if i["name"].strip().lower() == str(ln["item_name"]).strip().lower()]
+            if len(im) != 1:
+                await operator.emit_needs_input(
+                    question=(f'Which product/service is "{ln["item_name"]}"? It must '
+                              "match a real QuickBooks item."),
+                    context_hint="QuickBooks item not uniquely matched",
+                )
+                return {"error": f"BLOCKED: item '{ln['item_name']}' not uniquely matched; wait.",
+                        "reason": "item_unresolved"}
+            ln["item_id"] = im[0]["id"]
+            if ln.get("unit_price") is None:
+                ln["unit_price"] = im[0]["unit_price"]
+            if ln.get("qty") is None:
+                ln["qty"] = 1
+        if ln.get("qty") is not None and ln.get("unit_price") is not None:
+            ln["_amount"] = round(float(ln["qty"]) * float(ln["unit_price"]), 2)
+        else:
+            ln["_amount"] = float(ln.get("amount", 0) or 0)
+        if ln["_amount"] <= 0:
+            return {"error": "every line needs a positive amount (from a real item "
+                             "price or an operator-stated value — ask if missing).",
+                    "reason": "bad_args"}
+        norm_lines.append(ln)
+    total = round(sum(ln["_amount"] for ln in norm_lines), 2)
+
+    block = await _invoice_approval_gate(operator, cust["id"], cust["name"], norm_lines, total)
+    if block:
+        return block
+
+    await operator.emit_step(name="quickbooks_invoice", status="running",
+                             detail=f"Creating unsent invoice — {cust['name']}, ${total:.2f}.")
+    try:
+        clean = [{k: v for k, v in ln.items() if k != "_amount"} for ln in norm_lines]
+        result = await asyncio.to_thread(
+            quickbooks_service.create_invoice, cust["id"], clean, txn_date, due_date)
+    except Exception as exc:  # noqa: BLE001
+        await operator.emit_step(name="quickbooks_invoice", status="failed",
+                                 detail=f"Invoice create failed: {exc}")
+        await operator.emit_error(f"create_quickbooks_invoice failed: {exc}")
+        return {"error": str(exc)}
+    await operator.emit_artifact(name=f"qb_invoice_{result['doc_number'] or result['id']}",
+                                 path=result["link"], kind="quickbooks_invoice")
+    await operator.emit_step(
+        name="quickbooks_invoice", status="completed",
+        detail=(f"Invoice {result['doc_number']} created for {result['customer']} — "
+                f"${result['total']:.2f}, status {result['email_status']} (UNSENT). "
+                "Review and send it in QuickBooks."))
+    return result
+
+
 PLANNER_TOOLS = [
     web_research,
     read_url,
@@ -1869,6 +2067,10 @@ PLANNER_TOOLS = [
     create_spreadsheet,
     create_slide_deck,
     open_browser,
+    list_quickbooks_customers,
+    list_quickbooks_items,
+    list_quickbooks_invoices,
+    create_quickbooks_invoice,
 ]
 
 

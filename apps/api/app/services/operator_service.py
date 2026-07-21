@@ -36,6 +36,8 @@ from .anthropic_runtime import date_line, estimate_cost_usd, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
+    INVOICE_CANCEL,
+    INVOICE_PROCEED,
     PLANNER_TOOLS,
     RESEARCH_PLAN_CANCEL,
     RESEARCH_PLAN_PROCEED,
@@ -715,6 +717,28 @@ async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
     return True
 
 
+def _apply_invoice_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending QuickBooks invoice preview from the operator's
+    resume answer — the ONLY writer of record["invoice_approved"] /
+    ["invoice_declined"] (operator_tools._invoice_approval_gate checks the
+    flags plus a payload signature in code; the planner can't set them)."""
+    rec = operator.record
+    if (not rec.get("invoice_plan_asked")
+            or rec.get("invoice_approved") or rec.get("invoice_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == INVOICE_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["invoice_approved"] = True
+        return ("The operator APPROVED the previewed invoice. Call "
+                "create_quickbooks_invoice again with the SAME arguments.")
+    if a == INVOICE_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["invoice_declined"] = True
+        return ("The operator DECLINED the invoice. Do not create it; "
+                "acknowledge briefly in your receipt.")
+    rec["invoice_plan_asked"] = False   # unrecognized → re-present on next call
+    return ""
+
+
 def _sanitize_research_model(value: str) -> str:
     """Allowlist the composer's per-run sub-agent model pick (Research and
     Script share the curated list). Anything not on it — junk, an unknown
@@ -880,6 +904,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
             n for n in (
                 _apply_grounding_answer(operator, answer),
                 _apply_research_answer(operator, answer),
+                _apply_invoice_answer(operator, answer),
             ) if n
         ]
         note = "\n\n".join(notes)

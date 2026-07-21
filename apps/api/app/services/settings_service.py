@@ -52,6 +52,10 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "smtp_from_email",
     "google_drive_root_folder_id",
     "operator_auto_upload_drive",
+    # v4.0: QuickBooks Online OAuth app credentials (production). The secret
+    # joins SECRET_KEYS below — never returned by the public view.
+    "quickbooks_client_id",
+    "quickbooks_client_secret",
     # v3.2: hard per-run dollar ceiling. Blank = the $1.00 default (an
     # untouched field is blank, so this is the only way a default can apply);
     # "off" = no ceiling, deliberately. Parsed by
@@ -64,6 +68,7 @@ SETTABLE_KEYS: tuple[str, ...] = (
 # the GUI submits an empty field (so the renderer never round-trips them).
 SECRET_KEYS: frozenset[str] = frozenset({
     "smtp_password", "openai_api_key", "anthropic_api_key",
+    "quickbooks_client_secret",
 })
 
 PUBLIC_KEYS: tuple[str, ...] = tuple(k for k in SETTABLE_KEYS if k not in SECRET_KEYS)

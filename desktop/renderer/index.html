@@ -1751,6 +1751,31 @@
           </fieldset>
 
           <fieldset class="form-group">
+            <legend>QuickBooks Online (Ridian Technologies)</legend>
+            <label class="field">
+              <span class="field-label">Client ID</span>
+              <input name="quickbooks_client_id" type="text" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">Client Secret</span>
+              <input name="quickbooks_client_secret" type="password" autocomplete="new-password" />
+              <span class="field-hint">
+                Production keys from developer.intuit.com. Register redirect URI
+                <code>http://localhost:8123/callback</code> in the Intuit app.
+                Ridian can READ customers/items/invoices and CREATE unsent
+                invoices only — it cannot send, email, or delete them (those
+                operations don't exist in its code). You review and send in
+                QuickBooks.
+              </span>
+            </label>
+            <div class="field">
+              <button id="settings-qb-connect" type="button" class="btn btn-ghost btn-compact">Connect QuickBooks</button>
+              <button id="settings-qb-disconnect" type="button" class="btn btn-ghost btn-compact">Disconnect</button>
+              <span id="settings-qb-status" class="field-hint" role="status" aria-live="polite"></span>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-group">
             <legend>Operator profile</legend>
             <label class="field">
               <span class="field-label">Operator name</span>

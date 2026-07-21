@@ -39,3 +39,5 @@ desktop/out/
 .vscode/
 .idea/
 .DS_Store
+
+apps/api/quickbooks_token.json
