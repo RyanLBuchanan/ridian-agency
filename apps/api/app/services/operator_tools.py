@@ -45,6 +45,7 @@ from . import (
     google_workspace_service,
     memory_service,
     quickbooks_service,
+    settings_service,
     tts_service,
     url_fetch_service,
 )
@@ -1425,6 +1426,22 @@ async def auto_upload_drive(
     """
     operator = current_operator()
     operator.note_tool("auto_upload_drive")
+
+    # v4.1 DETERMINISTIC GATE (closes the last prompt-only setting): when the
+    # operator turned auto-upload OFF in Settings, this tool refuses IN CODE
+    # before any Drive write — the upload-state prompt line still informs the
+    # planner, but is no longer the enforcement. Hard-refuse (quiet skip),
+    # not park: OFF is a standing instruction the operator already gave;
+    # asking again would nag against it. The manual Upload button (a
+    # different endpoint, explicit human click) remains the intended path.
+    if not settings_service.get_bool_setting("operator_auto_upload_drive", default=True):
+        msg = ("Auto-upload to Drive is OFF in Settings — artifacts stay "
+               "local. The operator can use the manual Upload button.")
+        await operator.emit_step(name="drive_upload", status="skipped", detail=msg)
+        return {"skipped": True, "reason": "auto_upload_disabled",
+                "error": ("Auto-upload is disabled in Settings (enforced in "
+                          "code). Do NOT retry; mention the manual Upload "
+                          "button in your receipt if relevant.")}
 
     # Some runs produce LOCAL-only deliverables (e.g. build_research_packet's
     # NotebookLM packet) that set this flag. Skip Drive cleanly — a skip, not a
