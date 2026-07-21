@@ -18,7 +18,13 @@ from __future__ import annotations
 
 import logging
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    AuthenticationError,
+    OpenAI,
+    RateLimitError,
+)
 
 from .settings_service import get_effective_value, load_settings
 
@@ -64,17 +70,37 @@ def synthesize_speech(text: str) -> bytes:
         raise SpeechError("text is required.", 400)
     key = get_effective_value("OPENAI_API_KEY")
     if not key:
+        log.warning("speech.tts_failed reason=missing_key")
         raise SpeechError(
             "OPENAI_API_KEY is not set. Open Settings to add your key.", 400)
     clean = clean[:MAX_TTS_CHARS]
     voice = effective_voice()
     model = effective_model()
+    # Precise failure mapping: every fallback the renderer takes must have a
+    # NAMED reason in backend.log — a silent degrade taught us nothing.
     try:
         client = OpenAI(api_key=key)
         resp = client.audio.speech.create(model=model, voice=voice, input=clean)
         audio = resp.content
-    except Exception as exc:  # noqa: BLE001 — network/quota/key all land here
-        log.warning("speech.tts_failed type=%s", type(exc).__name__)
+    except AuthenticationError as exc:
+        log.warning("speech.tts_failed reason=invalid_key status=401")
+        raise SpeechError(
+            "OpenAI rejected the API key (401 Unauthorized) — check the key "
+            "in Settings.", 502) from exc
+    except RateLimitError as exc:
+        log.warning("speech.tts_failed reason=rate_limit_or_quota status=429")
+        raise SpeechError(
+            "OpenAI rate limit or quota exceeded (429) — check your OpenAI "
+            "usage/billing.", 502) from exc
+    except APIConnectionError as exc:
+        log.warning("speech.tts_failed reason=network type=%s", type(exc).__name__)
+        raise SpeechError("Could not reach OpenAI (network error).", 502) from exc
+    except APIStatusError as exc:
+        status = getattr(exc, "status_code", "?")
+        log.warning("speech.tts_failed reason=api_status status=%s", status)
+        raise SpeechError(f"OpenAI TTS failed (HTTP {status}).", 502) from exc
+    except Exception as exc:  # noqa: BLE001 — anything else, still named
+        log.warning("speech.tts_failed reason=unexpected type=%s", type(exc).__name__)
         raise SpeechError(
             f"Text-to-speech failed ({type(exc).__name__}). "
             "Check your OpenAI key/quota.",

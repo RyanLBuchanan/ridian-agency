@@ -4933,7 +4933,12 @@ function _opSpeak(text) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: spoken }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Carry the backend's named reason (missing key / 401 / 429 / …)
+        // into the failure path instead of a bare status code.
+        const d = await res.json().catch(() => ({}));
+        throw new Error(`HTTP ${res.status}${d && d.detail ? ` — ${d.detail}` : ''}`);
+      }
       const blob = await res.blob();
       // Muted or superseded while the audio was generating? Drop it.
       if (token !== _ttsToken || !_opVoiceEnabled()) return;
@@ -4944,9 +4949,27 @@ function _opSpeak(text) {
         if (_ttsAudio === audio) _ttsAudio = null;
       });
       await audio.play();
-    } catch (_) {
-      // OpenAI TTS unavailable (key/quota/network) — robotic but reliable.
-      if (token === _ttsToken && _opVoiceEnabled()) _opSpeakBrowser(spoken);
+    } catch (err) {
+      // OpenAI TTS unavailable or playback refused — degrade to the browser
+      // voice, but NEVER silently: the reason goes to backend.log via
+      // /tts/report, and (TEMPORARY, v3.7.1 debug) to the status line so a
+      // degraded read-aloud is visible instead of guessable. Playback
+      // errors carry the DOM name (NotSupportedError = blocked source,
+      // NotAllowedError = autoplay policy) — exactly what we need to see.
+      const reason = err && err.message
+        ? `${err.name && err.name !== 'Error' ? err.name + ': ' : ''}${err.message}`
+        : String(err);
+      try {
+        fetch(`${BACKEND}/tts/report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        }).catch(() => {});
+      } catch (_) { /* reporting must never break the fallback */ }
+      if (token === _ttsToken && _opVoiceEnabled()) {
+        _opSetStatus(`Voice: using browser fallback — OpenAI TTS failed (${reason})`, 'err');
+        _opSpeakBrowser(spoken);
+      }
     }
   })();
 }

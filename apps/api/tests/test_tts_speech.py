@@ -7,6 +7,10 @@ from Settings ON EVERY CALL (auditioning voices needs no restart), junk
 settings sanitize to defaults, and the server hard-caps the billed
 character count no matter what a caller sends.
 """
+import logging
+
+import httpx
+import openai
 import pytest
 from fastapi.testclient import TestClient
 
@@ -82,6 +86,68 @@ def test_upstream_failure_is_502_not_500(monkeypatch):
     detail = res.json()["detail"]
     assert "key/quota" in detail
     assert "sk-" not in detail              # never leak the key
+
+
+# --------------------------------------------------------------------------
+# v3.7.1: NAMED failure reasons — silent degrades taught us nothing
+# --------------------------------------------------------------------------
+
+def _patch_raising(monkeypatch, exc):
+    monkeypatch.setattr(speech_service, "get_effective_value",
+                        lambda name: "sk-test" if name == "OPENAI_API_KEY" else None)
+    monkeypatch.setattr(speech_service, "load_settings", lambda: {})
+
+    class _Raising:
+        def create(self, **kwargs):
+            raise exc
+
+    class _FakeClient:
+        def __init__(self, api_key):
+            self.audio = type("A", (), {"speech": _Raising()})()
+
+    monkeypatch.setattr(speech_service, "OpenAI", _FakeClient)
+
+
+def _status_exc(cls, status):
+    req = httpx.Request("POST", "https://api.openai.com/v1/audio/speech")
+    return cls("boom", response=httpx.Response(status, request=req), body=None)
+
+
+def test_invalid_key_names_401(monkeypatch, caplog):
+    _patch_raising(monkeypatch, _status_exc(openai.AuthenticationError, 401))
+    with caplog.at_level(logging.WARNING, logger="ridian.speech"):
+        res = client.post("/tts/speak", json={"text": "hi"})
+    assert res.status_code == 502
+    assert "401" in res.json()["detail"]
+    assert any("reason=invalid_key" in r.message for r in caplog.records)
+
+
+def test_quota_names_429(monkeypatch, caplog):
+    _patch_raising(monkeypatch, _status_exc(openai.RateLimitError, 429))
+    with caplog.at_level(logging.WARNING, logger="ridian.speech"):
+        res = client.post("/tts/speak", json={"text": "hi"})
+    assert res.status_code == 502
+    assert "429" in res.json()["detail"]
+    assert any("reason=rate_limit_or_quota" in r.message for r in caplog.records)
+
+
+def test_network_error_named(monkeypatch, caplog):
+    req = httpx.Request("POST", "https://api.openai.com/v1/audio/speech")
+    _patch_raising(monkeypatch, openai.APIConnectionError(request=req))
+    with caplog.at_level(logging.WARNING, logger="ridian.speech"):
+        res = client.post("/tts/speak", json={"text": "hi"})
+    assert res.status_code == 502
+    assert "network" in res.json()["detail"].lower()
+    assert any("reason=network" in r.message for r in caplog.records)
+
+
+def test_renderer_fallback_report_lands_in_log(caplog):
+    with caplog.at_level(logging.WARNING, logger="ridian.api"):
+        res = client.post("/tts/report",
+                          json={"reason": "NotSupportedError: blob refused"})
+    assert res.status_code == 200
+    assert any("speech.tts_renderer_fallback" in r.message
+               and "NotSupportedError" in r.message for r in caplog.records)
 
 
 def test_empty_and_whitespace_text_400(monkeypatch):

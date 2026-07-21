@@ -1145,6 +1145,20 @@ async def tts_speak(payload: TTSSpeakRequest) -> Response:
     return Response(content=audio, media_type="audio/mpeg")
 
 
+class TTSReportRequest(BaseModel):
+    reason: str = Field("", max_length=500, description="Why read-aloud degraded.")
+
+
+@app.post("/tts/report")
+async def tts_report(payload: TTSReportRequest) -> dict:
+    """v3.7.1 TEMPORARY debug surface: the renderer reports WHY read-aloud
+    fell back to the browser voice (fetch error vs playback error), so the
+    reason lands in backend.log instead of dying in a silent catch. Remove
+    (or keep — it's one warning line) once the fallback is quiet again."""
+    log.warning("speech.tts_renderer_fallback reason=%s", (payload.reason or "")[:500])
+    return {"ok": True}
+
+
 # IMPORTANT: register fixed-path routes (/operations/load, /operations/audio,
 # /operations/recent) BEFORE the dynamic /operations/{operation_id} route, or
 # FastAPI's first-match ordering will swallow them as if "load"/"audio" were
