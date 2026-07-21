@@ -5119,3 +5119,75 @@ body {
 }
 .operator-bg-toggle input { accent-color: var(--color-accent); margin: 0; }
 .operator-bg-toggle:hover { color: var(--color-text-strong); }
+
+/* ======================================================================= */
+/* v3.9 UI polish — one design system pass (COSMETIC ONLY, both themes)    */
+/* ======================================================================= */
+
+/* 1. Slim, theme-aware scrollbars. The native Chrome scrollbars read as
+      foreign chrome — especially glaring light-on-dark. Tokens keep them
+      correct in both themes. */
+* { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted-soft); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 2. The chats rail never scrolls sideways — long commands already
+      ellipsize; the stray horizontal scrollbar under the list was noise. */
+.rail-threads { overflow-x: hidden; }
+
+/* 3. Composer per-run selects (Research / Script / Effort) join the pill
+      family: same height, radius, border, and type as the Try suggestion
+      pills, with a token-colored chevron replacing the OS widget arrow. */
+.operator-research-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 28px;
+  padding: 0 26px 0 12px;
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888f9b' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.operator-research-select:hover { background-color: var(--color-bg-soft); }
+
+/* 4. "Run in background" joins the same pill family instead of a bare
+      OS checkbox floating in the row. */
+.operator-bg-toggle {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+.operator-bg-toggle:hover { background: var(--color-bg-soft); color: var(--color-text-strong); }
+.operator-bg-toggle input { width: 12px; height: 12px; }
+
+/* 5. Status treatment: the done / needs-attention dot anchors to the
+      row's top-right corner — it was wrapping onto its own line below
+      the label in the flex-column button. */
+.rail-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin-top: 0;
+}
+
+/* 5b. Rows reserve right-edge room so the badge dot (and hover actions)
+      never sit on top of the ellipsized text. border-box matters: these
+      buttons are width:100% + padding, which otherwise overflows the rail
+      (the source of the old stray horizontal scrollbar). */
+.rail-thread .rail-thread-btn {
+  box-sizing: border-box;
+  padding-right: 24px;
+}
+.rail-badge { top: 10px; right: 7px; }
+
+/* 5c. The actual truncation fix: the cmd span sized to its CONTENT (345px
+      in a 229px row) because nothing clamped the flex item, so its own
+      overflow:hidden never engaged — text painted past the button, under
+      the badge, and once caused the rail's horizontal scrollbar. */
+.rail-thread-cmd { max-width: 100%; }
