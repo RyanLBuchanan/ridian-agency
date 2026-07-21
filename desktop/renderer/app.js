@@ -4847,14 +4847,27 @@ function _opHideOptionsRow() {
   }
 }
 
+/* v3.8: two-writer voice state. A PERSISTENT master (localStorage; the
+   Settings checkbox is its ONLY writer — the "in a meeting" switch) and a
+   SESSION mute (in-memory; the receipt speaker is its ONLY writer, and it
+   RESETS on a new chat / new run). Effective voice = master ON and not
+   session-muted. The old design conflated both into one persisted flag, so
+   a single speaker tap left every future session mysteriously silent. */
 const VOICE_REPLIES_KEY = 'ridian.voiceReplies';
 
-function _opVoiceEnabled() {
+let _voiceSessionMuted = false;   // never persisted, by design
+
+function _opVoiceMasterOn() {
   try { return window.localStorage.getItem(VOICE_REPLIES_KEY) !== 'false'; }
   catch (_) { return true; }
 }
 
-function _opSetVoiceEnabled(on) {
+function _opVoiceEnabled() {
+  return _opVoiceMasterOn() && !_voiceSessionMuted;
+}
+
+// Settings checkbox — the ONLY writer of the persistent master.
+function _opSetVoiceMaster(on) {
   try { window.localStorage.setItem(VOICE_REPLIES_KEY, on ? 'true' : 'false'); } catch (_) {}
   const chk = document.getElementById('settings-voice-replies');
   if (chk) chk.checked = !!on;
@@ -4862,16 +4875,32 @@ function _opSetVoiceEnabled(on) {
   _opSyncSpeakerIcon();
 }
 
-// The receipt speaker is the mute toggle for voice replies — Volume2 when
-// they auto-play, VolumeX (dimmed) when muted. Same preference as the
-// Settings checkbox; both controls stay in sync through _opSetVoiceEnabled.
+// Receipt speaker — the ONLY writer of the session mute.
+function _opSetSessionMuted(muted) {
+  _voiceSessionMuted = !!muted;
+  if (muted) _opStopSpeaking();   // muting stops the current read instantly
+  _opSyncSpeakerIcon();
+}
+
+// Fresh start (new chat / new run): voice returns by default.
+function _opResetSessionMute() {
+  _voiceSessionMuted = false;
+  _opSyncSpeakerIcon();
+}
+
+// The receipt speaker reflects the EFFECTIVE state — dimmed when the session
+// is muted OR the Settings master is off (its tooltip says which).
 function _opSyncSpeakerIcon() {
   const btn = document.getElementById('operator-receipt-speak');
   if (!btn) return;
-  const muted = !_opVoiceEnabled();
+  const masterOff = !_opVoiceMasterOn();
+  const muted = masterOff || _voiceSessionMuted;
   btn.classList.toggle('is-muted', muted);
   btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
-  const label = muted ? 'Voice replies muted — click to unmute' : 'Mute voice replies';
+  const label = masterOff
+    ? 'Voice disabled in Settings ("Read replies aloud")'
+    : (muted ? 'Voice muted for this chat — click to unmute'
+             : 'Mute voice for this chat');
   btn.title = label;
   btn.setAttribute('aria-label', label);
 }
@@ -4981,6 +5010,9 @@ async function _opMicToggle() {
     _micState.recorder.stop();
     return;
   }
+  // v3.8 barge-in: reaching for the mic yields the floor — stop the current
+  // read before recording starts. Not a mute; the next reply speaks.
+  _opStopSpeaking();
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -5286,6 +5318,10 @@ async function _opSubmit(e) {
   // Conversation flow: archive the finished turn into the thread instead of
   // wiping it, then start a fresh live turn. Clear the composer so it's always
   // empty and ready at the bottom.
+  // v3.8: a genuinely NEW run gets voice back — the session mute is
+  // per-conversation, never a lingering global state. (The answer-mode
+  // branch above resumes the SAME run and deliberately keeps the mute.)
+  _opResetSessionMute();
   _opArchiveCurrentTurn();
   _opClearLive();
   if (OPERATOR.command) OPERATOR.command.value = '';
@@ -5993,20 +6029,25 @@ if (OPERATOR.proposalsDismissAll) {
 const _micBtn = document.getElementById('operator-mic-btn');
 if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
 
-// Receipt speaker: THE mute toggle for voice replies. Muting also stops any
-// reply currently being read (_opSetVoiceEnabled handles that).
+// Receipt speaker: the SESSION mute (per-chat; resets on new chat/run).
+// Muting also stops any reply currently being read.
 const _receiptSpeakBtn = document.getElementById('operator-receipt-speak');
 if (_receiptSpeakBtn) {
-  _receiptSpeakBtn.addEventListener('click', () => _opSetVoiceEnabled(!_opVoiceEnabled()));
-  _opSyncSpeakerIcon();   // reflect the saved preference on load
+  _receiptSpeakBtn.addEventListener('click', () => {
+    // Master off? The speaker never secretly flips the persistent
+    // preference — Settings is its only writer (two-writer separation).
+    if (!_opVoiceMasterOn()) return;
+    _opSetSessionMuted(!_voiceSessionMuted);
+  });
+  _opSyncSpeakerIcon();   // reflect the effective state on load
 }
 
 // Settings → "Read replies aloud automatically" (renderer-local preference;
 // not part of the backend settings payload).
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {
-  _voiceChk.checked = _opVoiceEnabled();
-  _voiceChk.addEventListener('change', () => _opSetVoiceEnabled(_voiceChk.checked));
+  _voiceChk.checked = _opVoiceMasterOn();
+  _voiceChk.addEventListener('change', () => _opSetVoiceMaster(_voiceChk.checked));
 }
 // v2.3: attach a PDF as the grounding source (composer button + hidden picker).
 // v2.4: single "+" add-source menu. Extensible surface — to add a future input
@@ -6099,7 +6140,15 @@ if (_answerChipClear) {
 }
 
 // Send arrow: greyed until the field has text (and no run in flight).
-if (OPERATOR.command) OPERATOR.command.addEventListener('input', _opUpdateSendEnabled);
+if (OPERATOR.command) {
+  OPERATOR.command.addEventListener('input', () => {
+    // v3.8 barge-in: the first character typed (new command OR answer mode —
+    // same composer) yields the floor. Stops the current read only; the
+    // next run's voice starts fresh. Not a mute.
+    _opStopSpeaking();
+    _opUpdateSendEnabled();
+  });
+}
 _opUpdateSendEnabled();
 
 // Example chips populate the textarea.
@@ -6738,6 +6787,7 @@ function _opNewChat() {
   if (operatorState.abortController) {
     try { operatorState.abortController.abort(); } catch (_) {}
   }
+  _opResetSessionMute();   // v3.8: fresh chat, voice back on by default
   _opResetUI();
   operatorState.active = null;
   operatorState.finalRecord = null;
