@@ -4,10 +4,68 @@
 // over plain fetch — no IPC needed.
 
 const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 
 const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
+const BACKEND_PORT = 8000;
+
+/* v4.1 packaged mode: main.js is the backend SUPERVISOR — it spawns uvicorn
+   as a hidden background process (windowsHide: no console window ever
+   exists) and kills the process tree on quit. Dev mode (npm start / the
+   .bat) is untouched: the backend is started externally and this block
+   no-ops because the port is already serving. */
+let _backendChild = null;
+
+function _backendLocation() {
+  const env = {
+    apiDir: process.env.RIDIAN_BACKEND_DIR || '',
+    python: process.env.RIDIAN_PYTHON || '',
+  };
+  try {
+    const cfg = JSON.parse(fs.readFileSync(
+      path.join(process.resourcesPath, 'backend-location.json'), 'utf-8'));
+    return { apiDir: env.apiDir || cfg.apiDir, python: env.python || cfg.python };
+  } catch (_) {
+    return env.apiDir && env.python ? env : null;
+  }
+}
+
+function _portInUse(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host: '127.0.0.1' });
+    sock.once('connect', () => { sock.destroy(); resolve(true); });
+    sock.once('error', () => resolve(false));
+    setTimeout(() => { try { sock.destroy(); } catch (_) {} resolve(false); }, 1500);
+  });
+}
+
+async function startBackendIfNeeded() {
+  if (!app.isPackaged) return;                   // dev: external backend
+  if (await _portInUse(BACKEND_PORT)) return;    // already running — reuse
+  const loc = _backendLocation();
+  if (!loc || !fs.existsSync(loc.python) || !fs.existsSync(loc.apiDir)) return;
+  _backendChild = spawn(
+    loc.python,
+    ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT)],
+    { cwd: loc.apiDir, windowsHide: true, stdio: 'ignore' },
+  );
+  _backendChild.on('exit', () => { _backendChild = null; });
+}
+
+function stopBackend() {
+  if (!_backendChild) return;
+  const pid = _backendChild.pid;
+  _backendChild = null;
+  if (process.platform === 'win32') {
+    // Kill the whole tree — uvicorn may hold child workers.
+    try { execFile('taskkill', ['/PID', String(pid), '/T', '/F']); } catch (_) {}
+  } else {
+    try { process.kill(pid); } catch (_) {}
+  }
+}
 
 // Window/taskbar icon: the SUNRISE-WAVES emblem (favicon.ico, multi-size) —
 // the Ridian identity shared with the website + Open Gulf. Deliberately NOT
@@ -129,9 +187,10 @@ function applyContentSecurityPolicy() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
+  await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
   createWindow();
 
   app.on('activate', () => {
@@ -142,3 +201,5 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+app.on('will-quit', stopBackend);   // the hidden backend dies with the app

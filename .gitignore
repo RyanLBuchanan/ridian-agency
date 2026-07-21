@@ -41,3 +41,6 @@ desktop/out/
 .DS_Store
 
 apps/api/quickbooks_token.json
+
+desktop/dist/
+desktop/backend-location.json
