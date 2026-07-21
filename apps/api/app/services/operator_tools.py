@@ -1871,6 +1871,41 @@ async def open_browser(
 INVOICE_PROCEED = "Create the invoice as previewed"
 INVOICE_CANCEL = "Cancel the invoice"
 
+# v4.0.1 line-item PROVENANCE gate (closing the fabrication hole): every
+# numeric line field must come from exactly one of two sources — a REAL
+# QuickBooks item ("qbo-item") or a number the OPERATOR actually typed
+# ("user-stated", verified against record["user_stated_numbers"], captured
+# from their command at intake and from resume answers — the recipient-gate
+# pattern). A number the planner produced from thin air matches neither →
+# refuse and park to ask. Missing required fields (qty/rate/amount) also
+# park — never a silent default (the old qty=1 fill is gone).
+
+_STATED_NUM_RE = _re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\$?\d+(?:\.\d+)?")
+
+_ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item"})
+
+
+def extract_stated_numbers(text: str) -> list[float]:
+    """Every numeric value in the operator's own words ($1,500.00 → 1500.0).
+    Deduped; the invoice tool verifies line amounts/qtys/rates against it."""
+    out: list[float] = []
+    for m in _STATED_NUM_RE.findall(text or ""):
+        try:
+            v = float(m.replace("$", "").replace(",", ""))
+        except ValueError:
+            continue
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def _is_stated(operator, value) -> bool:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return any(abs(v - s) < 0.005 for s in operator.record.get("user_stated_numbers", []))
+
 
 def _invoice_sig(customer_id: str, lines: list) -> str:
     return json.dumps({"c": customer_id, "l": lines}, sort_keys=True, default=str)
@@ -1994,37 +2029,75 @@ async def create_quickbooks_invoice(
                 "reason": "customer_unresolved"}
     cust = matches[0]
 
+    async def _park(question: str, reason: str) -> dict:
+        await operator.emit_needs_input(
+            question=question, context_hint="QuickBooks invoice — value needed from you")
+        return {"error": f"BLOCKED: {question} A needs-input question was raised; "
+                         "WAIT for the operator. Never invent a value.",
+                "reason": reason}
+
     items = None
     norm_lines: list[dict] = []
     for ln in lines:
         if not isinstance(ln, dict):
             return {"error": "each line must be an object", "reason": "bad_args"}
         ln = dict(ln)
+        sources: dict = {}
         if ln.get("item_name"):
             if items is None:
                 items = await asyncio.to_thread(quickbooks_service.list_items)
             im = [i for i in items if i["name"].strip().lower() == str(ln["item_name"]).strip().lower()]
             if len(im) != 1:
-                await operator.emit_needs_input(
-                    question=(f'Which product/service is "{ln["item_name"]}"? It must '
-                              "match a real QuickBooks item."),
-                    context_hint="QuickBooks item not uniquely matched",
-                )
-                return {"error": f"BLOCKED: item '{ln['item_name']}' not uniquely matched; wait.",
-                        "reason": "item_unresolved"}
+                return await _park(
+                    f'Which product/service is "{ln["item_name"]}"? It must match '
+                    "a real QuickBooks item.", "item_unresolved")
             ln["item_id"] = im[0]["id"]
+            sources["item_id"] = "qbo-item"
+            # Rate: the catalog's price ("qbo-item") unless the operator
+            # explicitly stated a different one.
             if ln.get("unit_price") is None:
                 ln["unit_price"] = im[0]["unit_price"]
+                sources["unit_price"] = "qbo-item"
+            elif _is_stated(operator, ln["unit_price"]):
+                sources["unit_price"] = "user-stated"
+            else:
+                return await _park(
+                    f"What rate should I use for {ln['item_name']}? "
+                    f"({ln['unit_price']} wasn't something you stated; the catalog "
+                    f"price is {im[0]['unit_price']}.)", "line_value_unverified")
+            # Quantity: REQUIRED and operator-stated. No silent qty=1.
             if ln.get("qty") is None:
-                ln["qty"] = 1
-        if ln.get("qty") is not None and ln.get("unit_price") is not None:
+                return await _park(
+                    f"How many of '{ln['item_name']}' should I invoice?",
+                    "line_value_missing")
+            if not _is_stated(operator, ln["qty"]):
+                return await _park(
+                    f"Confirm the quantity for '{ln['item_name']}' — "
+                    f"{ln['qty']} wasn't something you stated.",
+                    "line_value_unverified")
+            sources["qty"] = "user-stated"
             ln["_amount"] = round(float(ln["qty"]) * float(ln["unit_price"]), 2)
         else:
-            ln["_amount"] = float(ln.get("amount", 0) or 0)
+            # Free-form line: the amount must be a number the operator typed.
+            if ln.get("amount") is None:
+                return await _park(
+                    f"What amount should I invoice for "
+                    f"\"{ln.get('description', 'this line')}\"?", "line_value_missing")
+            if not _is_stated(operator, ln["amount"]):
+                return await _park(
+                    f"Confirm the amount for \"{ln.get('description', 'this line')}\" "
+                    f"— {ln['amount']} wasn't something you stated.",
+                    "line_value_unverified")
+            sources["amount"] = "user-stated"
+            ln["_amount"] = float(ln["amount"])
         if ln["_amount"] <= 0:
-            return {"error": "every line needs a positive amount (from a real item "
-                             "price or an operator-stated value — ask if missing).",
-                    "reason": "bad_args"}
+            return {"error": "every line needs a positive amount.", "reason": "bad_args"}
+        # Invariant: every stamped source is from the allowlist — there is no
+        # code path that stamps anything else (the fabrication-probe test
+        # asserts this stays true).
+        if not set(sources.values()) <= _ALLOWED_LINE_SOURCES:
+            return {"error": "internal: disallowed line-value source.", "reason": "bad_args"}
+        ln["_sources"] = sources
         norm_lines.append(ln)
     total = round(sum(ln["_amount"] for ln in norm_lines), 2)
 
@@ -2035,7 +2108,7 @@ async def create_quickbooks_invoice(
     await operator.emit_step(name="quickbooks_invoice", status="running",
                              detail=f"Creating unsent invoice — {cust['name']}, ${total:.2f}.")
     try:
-        clean = [{k: v for k, v in ln.items() if k != "_amount"} for ln in norm_lines]
+        clean = [{k: v for k, v in ln.items() if not k.startswith("_")} for ln in norm_lines]
         result = await asyncio.to_thread(
             quickbooks_service.create_invoice, cust["id"], clean, txn_date, due_date)
     except Exception as exc:  # noqa: BLE001

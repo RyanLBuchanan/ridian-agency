@@ -70,16 +70,17 @@ def test_no_send_email_delete_reachable_in_code():
 
 
 def test_create_payload_never_sets_send_state(qb, tmp_path):
-    op = _ctx(tmp_path, {"invoice_plan_asked": True, "invoice_approved": True})
+    op = _ctx(tmp_path, {"user_stated_numbers": [500]})
     set_current_operator(op)
-    lines = [{"description": "Discovery", "amount": 500}]
-    op.record["invoice_preview_sig"] = t._invoice_sig(
-        "42", [dict(lines[0], _amount=500.0)])
-    asyncio.run(_tool("create_quickbooks_invoice").call(
-        {"customer": "Coastal Chamber", "lines": lines}))
+    args = {"customer": "Coastal Chamber",
+            "lines": [{"description": "Discovery", "amount": 500}]}
+    asyncio.run(_tool("create_quickbooks_invoice").call(args))          # ask
+    operator_service._apply_invoice_answer(op, "Create the invoice as previewed")
+    asyncio.run(_tool("create_quickbooks_invoice").call(args))          # create
     assert len(qb) == 1
     sent_keys = json.dumps(qb[0]).lower()
     assert "emailstatus" not in sent_keys and "needtosend" not in sent_keys
+    assert "_sources" not in json.dumps(qb[0])   # internal stamps never sent
 
 
 # --------------------------------------------------------------------------
@@ -87,7 +88,7 @@ def test_create_payload_never_sets_send_state(qb, tmp_path):
 # --------------------------------------------------------------------------
 
 def test_unapproved_create_pauses_with_preview(qb, tmp_path):
-    op = _ctx(tmp_path, {})
+    op = _ctx(tmp_path, {"user_stated_numbers": [2]})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
         {"customer": "Coastal Chamber",
@@ -99,7 +100,7 @@ def test_unapproved_create_pauses_with_preview(qb, tmp_path):
 
 
 def test_declined_create_refuses(qb, tmp_path):
-    op = _ctx(tmp_path, {"invoice_declined": True})
+    op = _ctx(tmp_path, {"invoice_declined": True, "user_stated_numbers": [10]})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
         {"customer": "Coastal Chamber", "lines": [{"description": "x", "amount": 10}]})))
@@ -109,7 +110,8 @@ def test_declined_create_refuses(qb, tmp_path):
 
 def test_changed_payload_invalidates_old_approval(qb, tmp_path):
     op = _ctx(tmp_path, {"invoice_plan_asked": True, "invoice_approved": True,
-                         "invoice_preview_sig": "SOMETHING ELSE"})
+                         "invoice_preview_sig": "SOMETHING ELSE",
+                         "user_stated_numbers": [10]})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
         {"customer": "Coastal Chamber", "lines": [{"description": "x", "amount": 10}]})))
@@ -119,7 +121,7 @@ def test_changed_payload_invalidates_old_approval(qb, tmp_path):
 
 
 def test_approved_create_writes_exact_payload(qb, tmp_path):
-    op = _ctx(tmp_path, {})
+    op = _ctx(tmp_path, {"user_stated_numbers": [2]})
     set_current_operator(op)
     args = {"customer": "Coastal Chamber",
             "lines": [{"item_name": "AI Discovery Session", "qty": 2}]}
@@ -164,10 +166,81 @@ def test_unknown_item_asks_never_guesses(qb, tmp_path):
     assert qb == []
 
 
-def test_zero_amount_rejected(qb, tmp_path):
+# --------------------------------------------------------------------------
+# v4.0.1 line-item provenance — the fabrication hole, closed and pinned
+# --------------------------------------------------------------------------
+
+def test_missing_amount_parks_and_asks(qb, tmp_path):
+    """'Invoice Acme for the consulting work' — no amount anywhere. The tool
+    PARKS to ask the human; it never fills a plausible default."""
     op = _ctx(tmp_path, {})
     set_current_operator(op)
     payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
-        {"customer": "Coastal Chamber", "lines": [{"description": "x"}]})))
-    assert payload["reason"] == "bad_args"
+        {"customer": "Coastal Chamber",
+         "lines": [{"description": "consulting work"}]})))
+    assert payload["reason"] == "line_value_missing"
     assert qb == []
+    assert "What amount" in op.record["needs_input"][-1]["question"]
+
+
+def test_fabricated_amount_refused(qb, tmp_path):
+    """The planner invents $1500 the operator never typed → refused, parked."""
+    op = _ctx(tmp_path, {"user_stated_numbers": []})
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
+        {"customer": "Coastal Chamber",
+         "lines": [{"description": "consulting", "amount": 1500}]})))
+    assert payload["reason"] == "line_value_unverified"
+    assert qb == []
+
+
+def test_missing_qty_parks_no_silent_default(qb, tmp_path):
+    """Item line without qty: the old code silently filled qty=1 — now it
+    parks to ask. No invented quantities."""
+    op = _ctx(tmp_path, {})
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
+        {"customer": "Coastal Chamber",
+         "lines": [{"item_name": "AI Discovery Session"}]})))
+    assert payload["reason"] == "line_value_missing"
+    assert qb == []
+    assert "How many" in op.record["needs_input"][-1]["question"]
+
+
+def test_fabricated_qty_refused(qb, tmp_path):
+    op = _ctx(tmp_path, {"user_stated_numbers": [500]})   # 3 never stated
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
+        {"customer": "Coastal Chamber",
+         "lines": [{"item_name": "AI Discovery Session", "qty": 3}]})))
+    assert payload["reason"] == "line_value_unverified"
+    assert qb == []
+
+
+def test_fabricated_rate_override_refused(qb, tmp_path):
+    """Planner overrides the catalog rate with a number the operator never
+    said → refused (catalog price or operator-stated only)."""
+    op = _ctx(tmp_path, {"user_stated_numbers": [2]})
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
+        {"customer": "Coastal Chamber",
+         "lines": [{"item_name": "AI Discovery Session", "qty": 2, "unit_price": 750}]})))
+    assert payload["reason"] == "line_value_unverified"
+    assert qb == []
+
+
+def test_resume_answer_number_becomes_stated():
+    assert t.extract_stated_numbers("go with $1,500.00 and qty 3") == [1500.0, 3.0]
+    assert t.extract_stated_numbers("no numbers here") == []
+
+
+def test_zero_match_customer_never_synthesizes_ref(qb, tmp_path):
+    """Step-2 hardening: unresolvable customer refuses with NO preview sig
+    set and NO create call — no CustomerRef is ever constructed for it."""
+    op = _ctx(tmp_path, {"user_stated_numbers": [10]})
+    set_current_operator(op)
+    payload = json.loads(asyncio.run(_tool("create_quickbooks_invoice").call(
+        {"customer": "Ghost Corp", "lines": [{"description": "x", "amount": 10}]})))
+    assert payload["reason"] == "customer_unresolved"
+    assert qb == []
+    assert "invoice_preview_sig" not in op.record   # gate never even reached

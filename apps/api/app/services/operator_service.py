@@ -45,6 +45,7 @@ from .operator_tools import (
     detect_save_intent,
     detect_source_lock,
     extract_emails,
+    extract_stated_numbers,
 )
 from .settings_service import (
     apply_to_environment,
@@ -797,6 +798,10 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     # v2.1: addresses the operator explicitly typed in the command are verified
     # recipients for draft_gmail's provenance gate (it never invents one).
     record["user_provided_emails"] = extract_emails(command)
+    # v4.0.1: numbers the operator actually typed — the invoice line-item
+    # provenance gate verifies every amount/qty/rate against these (never a
+    # planner-invented figure). Same pattern as the recipient emails above.
+    record["user_stated_numbers"] = extract_stated_numbers(command)
     # v2.5: conversational input must get a conversational answer — the build
     # tools refuse (operator_tools._deliverable_gate) unless the command
     # actually asked for a deliverable.
@@ -883,6 +888,12 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         for e in extract_emails(answer):
             if e not in typed:
                 typed.append(e)
+        # v4.0.1: numbers typed in a resume answer become verifiable for the
+        # invoice provenance gate ("How many?" → "3" makes 3 user-stated).
+        stated = record.setdefault("user_stated_numbers", [])
+        for v in extract_stated_numbers(answer):
+            if v not in stated:
+                stated.append(v)
         # v2.5: a resume answer can add deliverable intent ("yes, build the
         # deck") to a run that started conversational. Never downgrades.
         if not record.get("deliverable_intent") and detect_deliverable_intent(answer):
