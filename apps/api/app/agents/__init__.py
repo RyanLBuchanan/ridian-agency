@@ -9,7 +9,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+from ..services.runtime_paths import resource_base  # noqa: E402
+
+# v4.2: routed through resource_base() so the frozen build reads prompts
+# from the PyInstaller bundle; dev resolves to app/prompts exactly as before.
+PROMPTS_DIR = resource_base() / "app" / "prompts"
 
 
 def load_prompt(name: str) -> str:

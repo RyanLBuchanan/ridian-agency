@@ -58,8 +58,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/presentations",
 ]
 
-# apps/api/app/services/google_drive_service.py -> apps/api/<file>
-_API_DIR = Path(__file__).resolve().parent.parent.parent
+from .runtime_paths import data_dir
+
+# v4.2: dev -> apps/api/ exactly as before; frozen -> %APPDATA%/Ridian
+# Operator/. OAuth secrets/tokens are runtime files, never in the binary.
+_API_DIR = data_dir()
 CREDENTIALS_PATH = _API_DIR / "google_credentials.json"
 TOKEN_PATH = _API_DIR / "google_token.json"
 

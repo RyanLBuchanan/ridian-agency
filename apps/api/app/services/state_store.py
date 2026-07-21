@@ -22,8 +22,12 @@ from typing import Any
 
 log = logging.getLogger("ridian.state")
 
-# apps/api/app/services/state_store.py -> apps/api/state/
-STATE_DIR = Path(__file__).resolve().parent.parent.parent / "state"
+from .runtime_paths import data_dir
+
+# v4.2: dev -> apps/api/state/ exactly as before; frozen ->
+# %APPDATA%/Ridian Operator/state/ (memory store, operations/spend ledger,
+# projects, suggestion dismissals, logs — everything writable).
+STATE_DIR = data_dir() / "state"
 
 
 def _path_for(name: str) -> Path:

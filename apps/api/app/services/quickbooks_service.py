@@ -33,8 +33,11 @@ from .settings_service import load_settings
 
 log = logging.getLogger("ridian.quickbooks")
 
-_API_DIR = Path(__file__).resolve().parent.parent.parent
-TOKEN_PATH = _API_DIR / "quickbooks_token.json"
+from .runtime_paths import data_dir
+
+# v4.2: dev -> apps/api/ exactly as before; frozen -> %APPDATA%/Ridian
+# Operator/. The QBO token is a runtime file, never in the binary.
+TOKEN_PATH = data_dir() / "quickbooks_token.json"
 
 AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
 TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"

@@ -19,20 +19,6 @@ const BACKEND_PORT = 8000;
    no-ops because the port is already serving. */
 let _backendChild = null;
 
-function _backendLocation() {
-  const env = {
-    apiDir: process.env.RIDIAN_BACKEND_DIR || '',
-    python: process.env.RIDIAN_PYTHON || '',
-  };
-  try {
-    const cfg = JSON.parse(fs.readFileSync(
-      path.join(process.resourcesPath, 'backend-location.json'), 'utf-8'));
-    return { apiDir: env.apiDir || cfg.apiDir, python: env.python || cfg.python };
-  } catch (_) {
-    return env.apiDir && env.python ? env : null;
-  }
-}
-
 function _portInUse(port) {
   return new Promise((resolve) => {
     const sock = net.connect({ port, host: '127.0.0.1' });
@@ -43,15 +29,23 @@ function _portInUse(port) {
 }
 
 async function startBackendIfNeeded() {
-  if (!app.isPackaged) return;                   // dev: external backend
-  if (await _portInUse(BACKEND_PORT)) return;    // already running — reuse
-  const loc = _backendLocation();
-  if (!loc || !fs.existsSync(loc.python) || !fs.existsSync(loc.apiDir)) return;
-  _backendChild = spawn(
-    loc.python,
-    ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT)],
-    { cwd: loc.apiDir, windowsHide: true, stdio: 'ignore' },
-  );
+  // Three-way spawn (v4.2):
+  //   dev            -> no-op here; uvicorn runs from the venv exactly as
+  //                     always (npm start / the .bat).
+  //   packaged       -> spawn the BUNDLED self-contained backend
+  //                     (resources/backend/ridian-backend.exe, PyInstaller
+  //                     onedir) — no Python/venv/repo on the target machine.
+  //   either mode with the port already serving -> reuse, never collide.
+  // The old baked-repo-path mode (backend-location.json) is retired.
+  if (!app.isPackaged) return;
+  if (await _portInUse(BACKEND_PORT)) return;
+  const exe = path.join(process.resourcesPath, 'backend', 'ridian-backend.exe');
+  if (!fs.existsSync(exe)) return;
+  _backendChild = spawn(exe, [], {
+    cwd: path.dirname(exe),
+    windowsHide: true,
+    stdio: 'ignore',
+  });
   _backendChild.on('exit', () => { _backendChild = null; });
 }
 

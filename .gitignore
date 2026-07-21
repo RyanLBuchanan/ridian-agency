@@ -44,3 +44,7 @@ apps/api/quickbooks_token.json
 
 desktop/dist/
 desktop/backend-location.json
+
+apps/api/dist/
+apps/api/build/
+apps/api/*.spec

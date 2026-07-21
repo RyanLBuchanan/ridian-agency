@@ -13,8 +13,12 @@ from pathlib import Path
 # repo root = three levels up from this file:
 # .../ridian-agency/apps/api/app/services/artifact_service.py
 #                                ^app  ^api  ^apps  ^ridian-agency
+from .runtime_paths import data_dir, is_frozen
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_OUTPUTS_DIR = REPO_ROOT / "outputs"
+# v4.2: dev -> <repo>/outputs exactly as before; frozen -> the APPDATA data
+# dir (OUTPUTS_DIR env still overrides both, unchanged).
+DEFAULT_OUTPUTS_DIR = (data_dir() / "outputs") if is_frozen() else (REPO_ROOT / "outputs")
 
 
 def _outputs_dir() -> Path:

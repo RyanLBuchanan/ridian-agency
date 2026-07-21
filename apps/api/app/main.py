@@ -16,7 +16,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-load_dotenv()
+from .services.runtime_paths import data_dir, is_frozen, resource_base  # noqa: E402
+
+# Dev: .env from the working directory, exactly as before. Frozen: the data
+# dir's .env (optional — Settings is the primary config surface there).
+if is_frozen():
+    load_dotenv(data_dir() / ".env")
+else:
+    load_dotenv()
 
 # Mirror any saved OPENAI_* settings into os.environ BEFORE importing the
 # workflow / agents modules. The Agent instances read OPENAI_MODEL at import
@@ -85,7 +92,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("ridian.api")
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# v4.2: bundled resource in the frozen build; source tree in dev.
+STATIC_DIR = resource_base() / "app" / "static"
 
 app = FastAPI(title="Ridian Agency API", version="0.1.0")
 

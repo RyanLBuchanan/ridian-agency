@@ -7,7 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "node start.js",
-    "build": "node write-backend-location.js && electron-builder --win"
+    "build": "node build-backend.js && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -27,8 +27,8 @@
     ],
     "extraResources": [
       {
-        "from": "backend-location.json",
-        "to": "backend-location.json"
+        "from": "../apps/api/dist/ridian-backend",
+        "to": "backend"
       }
     ],
     "win": {

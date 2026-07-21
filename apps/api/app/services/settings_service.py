@@ -23,10 +23,12 @@ from typing import Any
 
 log = logging.getLogger("ridian.settings")
 
-# apps/api/app/services/settings_service.py  ->  apps/api/local_settings.json
-SETTINGS_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "local_settings.json"
-)
+from .runtime_paths import data_dir
+
+# v4.2: dev -> apps/api/local_settings.json exactly as before; frozen ->
+# %APPDATA%/Ridian Operator/local_settings.json. Secrets are RUNTIME config
+# in that file — never frozen into the binary.
+SETTINGS_PATH = data_dir() / "local_settings.json"
 
 SETTABLE_KEYS: tuple[str, ...] = (
     "operator_name",
