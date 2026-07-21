@@ -4951,11 +4951,10 @@ function _opSpeak(text) {
       await audio.play();
     } catch (err) {
       // OpenAI TTS unavailable or playback refused — degrade to the browser
-      // voice, but NEVER silently: the reason goes to backend.log via
-      // /tts/report, and (TEMPORARY, v3.7.1 debug) to the status line so a
-      // degraded read-aloud is visible instead of guessable. Playback
-      // errors carry the DOM name (NotSupportedError = blocked source,
-      // NotAllowedError = autoplay policy) — exactly what we need to see.
+      // voice quietly on screen, but never silently in the record: the named
+      // reason (backend detail, or the DOM error name for playback failures
+      // — NotSupportedError = blocked source, NotAllowedError = autoplay)
+      // goes to backend.log via /tts/report for forensics.
       const reason = err && err.message
         ? `${err.name && err.name !== 'Error' ? err.name + ': ' : ''}${err.message}`
         : String(err);
@@ -4966,10 +4965,7 @@ function _opSpeak(text) {
           body: JSON.stringify({ reason }),
         }).catch(() => {});
       } catch (_) { /* reporting must never break the fallback */ }
-      if (token === _ttsToken && _opVoiceEnabled()) {
-        _opSetStatus(`Voice: using browser fallback — OpenAI TTS failed (${reason})`, 'err');
-        _opSpeakBrowser(spoken);
-      }
+      if (token === _ttsToken && _opVoiceEnabled()) _opSpeakBrowser(spoken);
     }
   })();
 }
