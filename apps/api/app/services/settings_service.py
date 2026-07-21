@@ -41,6 +41,10 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "anthropic_script_model",
     "openai_api_key",
     "openai_model",
+    # v3.7: read-aloud (OpenAI TTS) — voice + model only; the key is the
+    # existing openai_api_key. Allowlisted in speech_service at call time.
+    "openai_tts_voice",
+    "openai_tts_model",
     "smtp_host",
     "smtp_port",
     "smtp_username",

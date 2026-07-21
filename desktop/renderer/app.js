@@ -197,7 +197,8 @@ const SOCIAL_FIELD_MAP = {
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
   'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
-  'openai_model', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
+  'openai_model', 'openai_tts_voice', 'openai_tts_model',
+  'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
   'appearance',
@@ -4875,22 +4876,98 @@ function _opSyncSpeakerIcon() {
   btn.setAttribute('aria-label', label);
 }
 
+/* v3.7: read-aloud via OpenAI TTS. The renderer posts capped text to the
+   backend (/tts/speak — the OpenAI key never leaves the server; voice +
+   model are read from Settings there on EVERY call, so a voice change
+   applies to the next reply with no restart). Any failure falls back to
+   the browser's speechSynthesis; _opSpeak is fire-and-forget after the
+   text renders, so a dead voice call can never affect the text display. */
+const _TTS_SPOKEN_CHARS = 600;   // renderer trim; backend hard-caps at 1200
+
+let _ttsAudio = null;   // the playing Audio element (null when idle)
+let _ttsToken = 0;      // bumped on stop/mute; stale fetches self-discard
+
 function _opStopSpeaking() {
-  try { window.speechSynthesis.cancel(); } catch (_) {}
+  _ttsToken += 1;   // invalidate any in-flight TTS fetch
+  if (_ttsAudio) {
+    try { _ttsAudio.pause(); } catch (_) {}
+    try { if (_ttsAudio.src) URL.revokeObjectURL(_ttsAudio.src); } catch (_) {}
+    _ttsAudio = null;
+  }
+  try { window.speechSynthesis.cancel(); } catch (_) {}   // fallback path too
 }
 
-function _opSpeak(text) {
-  if (!text || !_opVoiceEnabled()) return;
+// First _TTS_SPOKEN_CHARS chars, backed off to the last sentence end so the
+// voice never stops mid-word. Receipts front-load the summary; the tail is
+// file paths and reconciliation lines that read terribly aloud anyway.
+function _ttsTrim(text) {
+  if (text.length <= _TTS_SPOKEN_CHARS) return text;
+  const head = text.slice(0, _TTS_SPOKEN_CHARS);
+  const m = head.match(/[\s\S]*[.!?](?=\s|$)/);
+  return (m ? m[0] : head).trim();
+}
+
+// The pre-v3.7 reader, kept verbatim as the fallback engine.
+function _opSpeakBrowser(clean) {
   try {
-    // Strip markdown-ish noise so the OS voice doesn't read asterisks.
-    const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    if (!clean) return;
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(clean.slice(0, 1200));
     _applyBestVoice(utter);
     utter.rate = 1.05;
     window.speechSynthesis.speak(utter);
   } catch (_) { /* speechSynthesis unavailable — silently skip */ }
+}
+
+function _opSpeak(text) {
+  if (!text || !_opVoiceEnabled()) return;
+  // Strip markdown-ish noise so the voice doesn't read asterisks.
+  const clean = text.replace(/[*_#`>]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  if (!clean) return;
+  _opStopSpeaking();
+  const spoken = _ttsTrim(clean);
+  const token = _ttsToken;   // captured AFTER the stop's bump
+  (async () => {
+    try {
+      const res = await fetch(`${BACKEND}/tts/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: spoken }),
+      });
+      if (!res.ok) {
+        // Carry the backend's named reason (missing key / 401 / 429 / …)
+        // into the failure path instead of a bare status code.
+        const d = await res.json().catch(() => ({}));
+        throw new Error(`HTTP ${res.status}${d && d.detail ? ` — ${d.detail}` : ''}`);
+      }
+      const blob = await res.blob();
+      // Muted or superseded while the audio was generating? Drop it.
+      if (token !== _ttsToken || !_opVoiceEnabled()) return;
+      const audio = new Audio(URL.createObjectURL(blob));
+      _ttsAudio = audio;
+      audio.addEventListener('ended', () => {
+        try { URL.revokeObjectURL(audio.src); } catch (_) {}
+        if (_ttsAudio === audio) _ttsAudio = null;
+      });
+      await audio.play();
+    } catch (err) {
+      // OpenAI TTS unavailable or playback refused — degrade to the browser
+      // voice quietly on screen, but never silently in the record: the named
+      // reason (backend detail, or the DOM error name for playback failures
+      // — NotSupportedError = blocked source, NotAllowedError = autoplay)
+      // goes to backend.log via /tts/report for forensics.
+      const reason = err && err.message
+        ? `${err.name && err.name !== 'Error' ? err.name + ': ' : ''}${err.message}`
+        : String(err);
+      try {
+        fetch(`${BACKEND}/tts/report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        }).catch(() => {});
+      } catch (_) { /* reporting must never break the fallback */ }
+      if (token === _ttsToken && _opVoiceEnabled()) _opSpeakBrowser(spoken);
+    }
+  })();
 }
 
 /* ----- v1.7: voice input (MediaRecorder → Whisper) ----- */

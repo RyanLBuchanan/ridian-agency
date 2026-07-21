@@ -112,6 +112,12 @@ function applyContentSecurityPolicy() {
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self'",
+            // blob: = the OpenAI TTS read-aloud clip (fetched from the
+            // backend, played via object URL); BACKEND_ORIGIN = the
+            // audiobook player streaming /operations/audio. Without an
+            // explicit media-src both fall back to default-src 'self'
+            // and audio playback is refused.
+            `media-src 'self' blob: ${BACKEND_ORIGIN}`,
             `connect-src ${BACKEND_ORIGIN}`,
             "base-uri 'self'",
             "form-action 'none'",
