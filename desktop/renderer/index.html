@@ -237,6 +237,9 @@
                    Claude/ChatGPT-style. Chip ids are unchanged so the existing
                    JS wiring (counts, click-through to Memory) keeps working. -->
               <aside class="operator-rail" aria-label="Workspace navigation">
+                <!-- Flexible middle: everything above the Workspace footer
+                     scrolls in one region; the footer below never moves. -->
+                <div class="rail-scroll">
                 <button id="rail-new-chat" type="button" class="rail-new-chat">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                     <path d="M12 5v14M5 12h14"/>
@@ -283,6 +286,11 @@
                 <ul id="rail-threads" class="rail-threads">
                   <li class="rail-threads-empty">No chats yet.</li>
                 </ul>
+                </div><!-- /rail-scroll -->
+                <!-- Pinned footer: always on screen — the first-run banner's
+                     "Open Settings (bottom left)" points here, so no amount of
+                     banner/list growth may displace it. -->
+                <div class="rail-footer">
                 <div class="operator-rail-title">Workspace</div>
                 <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
                   <button
@@ -311,6 +319,7 @@
                   </svg>
                   <span>Settings</span>
                 </button>
+                </div><!-- /rail-footer -->
               </aside>
 
               <div class="operator-main">
@@ -599,14 +608,13 @@
                 <span id="operator-actions-status" class="operator-actions-status" role="status" aria-live="polite"></span>
               </div>
                 </div><!-- /operator-live -->
-              </div><!-- /operator-scroll -->
-              </div><!-- /operator-main -->
-            </section>
 
-            <!-- Legacy workflows — kept available but no longer the main focus.
-                 Expanding this surfaces the old Business/Social/Agentic/NotebookLM
-                 forms via mode buttons + the demoted dashboard inside it. -->
-            <details id="operator-templates" class="operator-templates">
+                <!-- Legacy workflows — kept available but no longer the main
+                     focus. Lives INSIDE the chat pane's scroll container so
+                     summoning it scrolls the pane, never the app shell.
+                     Expanding this surfaces the old Business/Social/Agentic/
+                     NotebookLM forms via mode buttons + the demoted dashboard. -->
+                <details id="operator-templates" class="operator-templates">
               <summary>Legacy workflows</summary>
 
             <div class="dashboard">
@@ -814,6 +822,9 @@
 
             </div>
             </details>
+              </div><!-- /operator-scroll -->
+              </div><!-- /operator-main -->
+            </section>
           </section>
 
           <!-- ======================== INPUT (BUSINESS) ======================== -->

@@ -220,7 +220,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
 
 body {
   font-family: Inter, 'Segoe UI', Roboto, Arial, sans-serif;
@@ -238,7 +238,9 @@ body {
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
-  height: 100vh;
+  /* Fixed shell: the document never scrolls — panes scroll inside it. */
+  height: 100vh;   /* fallback for engines without dvh */
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -1037,6 +1039,9 @@ body {
    isn't lost on a wide monitor. Active timeline + artifacts still expand. */
 .app-shell.single-pane .workspace-body {
   align-items: center;
+  /* The operator view is a fixed-height chat shell: the rail middle and the
+     chat pane scroll internally; this body must never scroll itself. */
+  overflow: hidden;
 }
 .app-shell.single-pane .workspace-view {
   width: 100%;
@@ -1047,10 +1052,13 @@ body {
 }
 
 /* v2.6: the operator view fills the window so the composer sits at the
-   BOTTOM like any chat tool, even with an empty thread. The legacy-workflows
-   block (when summoned from the menu) still scrolls in below. */
+   BOTTOM like any chat tool, even with an empty thread. It must also SHRINK
+   (flex-basis auto, min-height 0) so banners above it compress the view
+   instead of pushing the rail footer below the fold. The legacy-workflows
+   block lives inside the chat pane's scroll region. */
 .app-shell.single-pane #view-welcome {
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1243,23 +1251,49 @@ body {
   margin: 0 auto;
   width: 100%;
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
+  /* One DEFINITE row: rail + main are clamped to the operator's height and
+     scroll internally. An auto row would grow with content and reintroduce
+     whole-shell scrolling (the old calc(100vh - 130px) magic-number bug). */
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: stretch;
 }
 
+/* Full-height flex column straight from the grid row — no sticky, no
+   viewport math. Middle scrolls, footer pins. */
 .operator-rail {
-  position: sticky;
-  top: 0;
-  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: var(--space-2) 0;
-  /* Full visual height so Settings pins to the bottom-left; the chat list
-     scrolls inside. ~130px ≈ workspace header + body padding. */
-  height: calc(100vh - 130px);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Flexible middle: new chat + search + Projects/Chats lists. This is the
+   ONLY part of the rail that scrolls. */
+.rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+.rail-scroll > * { flex-shrink: 0; }
+
+/* Pinned footer: Workspace title + context chips + Settings. Never scrolls,
+   never shrinks — always on screen at any window size. */
+.rail-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .rail-new-chat {
@@ -1307,9 +1341,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
-  min-height: 60px;
-  overflow-y: auto;
+  /* Natural height — the surrounding .rail-scroll region does the scrolling. */
 }
 .rail-threads-empty {
   font-size: var(--fs-xs);
@@ -1350,7 +1382,6 @@ body {
 }
 
 .rail-settings {
-  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1375,7 +1406,8 @@ body {
   border-color: var(--color-accent);
 }
 
-/* v2.8: Projects section — same item styling as chats, capped height. */
+/* v2.8: Projects section — same item styling as chats; scrolls with the
+   shared .rail-scroll region. */
 .rail-projects-head {
   display: flex;
   align-items: center;
@@ -1411,9 +1443,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 170px;
-  overflow-y: auto;
-  flex-shrink: 0;
 }
 
 /* Active-project chip (sits by the staged-source chip under the composer). */
@@ -1446,8 +1475,14 @@ body {
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+  min-height: 0;
 }
-.operator-main .operator-scroll { flex: 1; }
+/* The chat pane scrolls on its own — independent of the rail and the shell. */
+.operator-main .operator-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 .operator-head { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1993,6 +2028,8 @@ body {
   align-items: center;
   gap: 8px;
 }
+/* Model/effort pills wrap instead of overflowing when the pane is narrow. */
+.operator-field-left { flex-wrap: wrap; }
 
 /* Circular ↑ send button (bottom-right), disabled/greyed when empty. */
 .operator-send-btn {
@@ -4140,6 +4177,9 @@ body {
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
   border: 1px solid;
+  /* Banners keep their size; the operator view shrinks around them so the
+     rail footer (Settings) is never pushed off screen. */
+  flex-shrink: 0;
 }
 
 .banner-warn {
@@ -4933,14 +4973,12 @@ body {
   color: var(--color-muted-soft);
 }
 
-/* Narrow windows: collapse the context rail above the conversation. */
+/* ≤900px viewport: the window minimum (880px outer) lands here, so this is
+   the app's smallest reachable width. Keep the two-pane chat shell — stacking
+   the rail above the chat pane would make the pinned Settings footer
+   impossible at min height — and just slim the rail. */
 @media (max-width: 900px) {
-  .operator { grid-template-columns: 1fr; }
-  .operator-rail { position: static; height: auto; }
-  .rail-threads { max-height: 180px; }
-  .rail-settings { margin-top: 0; }
-  .operator-context-strip { flex-direction: row; flex-wrap: wrap; }
-  .operator-context-strip .operator-context-chip { width: auto; }
+  .operator { grid-template-columns: 200px minmax(0, 1fr); }
 }
 
 /* v3.4: one-level sub-folders + move-chat menu ------------------------- */
