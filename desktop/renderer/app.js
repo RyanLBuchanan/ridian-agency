@@ -2886,9 +2886,22 @@ async function loadGoogleStatus() {
   }
 }
 
+// v4.3 two-phase connect: the backend returns the consent URL and we open it
+// from the DESKTOP — window.open routes through Electron's
+// setWindowOpenHandler to shell.openExternal (the system default browser).
+// The hidden packaged backend cannot open a browser itself, and its old
+// attempt failed silently. We then poll /google/status until the background
+// exchange finishes, and surface EVERY failure — a click may never be a
+// silent no-op.
+let _googlePollTimer = null;
+function _googleStopPoll() {
+  if (_googlePollTimer) { clearInterval(_googlePollTimer); _googlePollTimer = null; }
+}
+
 async function connectGoogleDrive() {
+  _googleStopPoll();
   setGoogleStatusUI({ connected: googleConnected, email: googleConnectedEmail, busy: true });
-  setSettingsStatus('A browser tab opened for Google sign-in. Complete it to continue…');
+  setSettingsStatus('Opening your browser for Google sign-in…');
   try {
     const res = await fetch(`${BACKEND}/google/connect`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
@@ -2896,8 +2909,40 @@ async function connectGoogleDrive() {
       const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
-    setGoogleStatusUI(data);
-    setSettingsStatus(data.connected ? `Connected as ${data.email || 'your Google account'}.` : 'Connect did not complete.', data.connected ? 'ok' : 'err');
+    if (!data.auth_url) throw new Error('Backend did not return a sign-in URL.');
+    window.open(data.auth_url);
+    setSettingsStatus('Complete the Google sign-in in your browser…');
+    let waited = 0;
+    _googlePollTimer = setInterval(async () => {
+      waited += 2;
+      try {
+        const s = await fetch(`${BACKEND}/google/status`).then((r) => (r.ok ? r.json() : null));
+        if (!s) return;
+        if (s.connected) {
+          _googleStopPoll();
+          setGoogleStatusUI(s);
+          setSettingsStatus(`Connected as ${s.email || 'your Google account'}.`, 'ok');
+          return;
+        }
+        if (s.flow_error) {
+          _googleStopPoll();
+          setGoogleStatusUI({ connected: false, email: null });
+          setSettingsStatus(`Google connect failed: ${s.flow_error}`, 'err');
+          return;
+        }
+        if (!s.in_progress) {
+          _googleStopPoll();
+          setGoogleStatusUI({ connected: false, email: null });
+          setSettingsStatus('Google connect did not complete — try again.', 'err');
+          return;
+        }
+        if (waited >= 310) {
+          _googleStopPoll();
+          setGoogleStatusUI({ connected: false, email: null });
+          setSettingsStatus('Google connect timed out. If no browser window opened, try again.', 'err');
+        }
+      } catch (_) { /* transient poll failure — keep waiting */ }
+    }, 2000);
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     setGoogleStatusUI({ connected: false, email: null });
@@ -6090,15 +6135,40 @@ async function _qbRefreshStatus() {
     if (s) _qbSetStatus(s.connected ? `Connected (company ${s.realm_id}).` : 'Not connected.');
   } catch (_) { /* backend not up */ }
 }
+// v4.3 two-phase connect — same pattern as connectGoogleDrive: the desktop
+// opens the consent URL (window.open → shell.openExternal); we poll status
+// and surface every failure. A click may never be a silent no-op.
 const _qbConnectBtn = document.getElementById('settings-qb-connect');
+let _qbPollTimer = null;
+function _qbStopPoll() {
+  if (_qbPollTimer) { clearInterval(_qbPollTimer); _qbPollTimer = null; }
+}
 if (_qbConnectBtn) {
   _qbConnectBtn.addEventListener('click', async () => {
-    _qbSetStatus('Complete the consent in your browser…');
+    _qbStopPoll();
+    _qbSetStatus('Opening your browser for QuickBooks sign-in…');
     try {
       const res = await fetch(`${BACKEND}/quickbooks/connect`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
-      _qbSetStatus(data.connected ? `Connected (company ${data.realm_id}).` : 'Not connected.');
+      if (!data.auth_url) throw new Error('Backend did not return a sign-in URL.');
+      window.open(data.auth_url);
+      _qbSetStatus('Complete the sign-in in your browser…');
+      let waited = 0;
+      _qbPollTimer = setInterval(async () => {
+        waited += 2;
+        try {
+          const s = await fetch(`${BACKEND}/quickbooks/status`).then((r) => (r.ok ? r.json() : null));
+          if (!s) return;
+          if (s.connected) { _qbStopPoll(); _qbSetStatus(`Connected (company ${s.realm_id}).`); return; }
+          if (s.flow_error) { _qbStopPoll(); _qbSetStatus(`Connect failed: ${s.flow_error}`); return; }
+          if (!s.in_progress) { _qbStopPoll(); _qbSetStatus('Connect did not complete — try again.'); return; }
+          if (waited >= 310) {
+            _qbStopPoll();
+            _qbSetStatus('Connect timed out. If no browser window opened, try again.');
+          }
+        } catch (_) { /* transient poll failure — keep waiting */ }
+      }, 2000);
     } catch (err) {
       _qbSetStatus(`Connect failed: ${err && err.message ? err.message : err}`);
     }

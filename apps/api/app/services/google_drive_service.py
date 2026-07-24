@@ -15,8 +15,12 @@ Security model:
 
 from __future__ import annotations
 
+import http.server
 import logging
 import re
+import threading
+import time
+import urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -178,17 +182,23 @@ def _build_service(creds: Credentials):
 
 def get_status() -> dict:
     """Safe public status. Never returns token contents."""
+    with _flow_lock:
+        in_progress = _flow_state["in_progress"]
+        flow_error = _flow_state["error"]
     creds = _load_credentials()
     if not creds or not creds.valid:
-        return {"connected": False, "email": None}
+        return {"connected": False, "email": None,
+                "in_progress": in_progress, "flow_error": flow_error}
     try:
         service = _build_service(creds)
         about = service.about().get(fields="user(emailAddress)").execute()
         email = (about or {}).get("user", {}).get("emailAddress")
-        return {"connected": True, "email": email}
+        return {"connected": True, "email": email,
+                "in_progress": in_progress, "flow_error": flow_error}
     except Exception as exc:  # noqa: BLE001
         log.warning("google.status_lookup_failed type=%s", type(exc).__name__)
-        return {"connected": False, "email": None}
+        return {"connected": False, "email": None,
+                "in_progress": in_progress, "flow_error": flow_error}
 
 
 # ---------------------------------------------------------------------------
@@ -196,13 +206,40 @@ def get_status() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def run_oauth_flow() -> dict:
-    """Run the installed-app OAuth flow.
+# v4.3: the OAuth browser launch moved OUT of this backend process. The
+# packaged backend is a hidden PyInstaller --noconsole process where
+# webbrowser.open() (which run_local_server(open_browser=True) relied on)
+# returns without launching anything — and run_local_server then blocked
+# FOREVER, so the Connect click was a silent no-op. Now: begin_oauth()
+# binds a fixed loopback port, returns the consent URL for the DESKTOP to
+# open (renderer window.open → Electron shell.openExternal), and a
+# background thread finishes the token exchange. get_status() reports
+# in_progress/flow_error so the UI can surface every failure.
+GOOGLE_REDIRECT_PORT = 8124
+_FLOW_TIMEOUT_S = 300
+_flow_lock = threading.Lock()
+_flow_state: dict = {"in_progress": False, "error": ""}
 
-    Blocks the calling thread until the user finishes in their browser.
-    Endpoints should call this via ``asyncio.to_thread`` so uvicorn stays
-    responsive to other requests (such as the /google/status poll).
-    """
+
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 — stdlib API
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        result = getattr(self.server, "ridian_result", {})
+        result["code"] = (q.get("code") or [""])[0]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<h3>Ridian is connected to Google. Close this tab.</h3>")
+
+    def log_message(self, *a):  # silence stdlib request logging
+        return
+
+
+def begin_oauth() -> dict:
+    """Phase 1: bind the callback listener, return {"auth_url": ...}.
+
+    Raises immediately (operator-actionable) when the credentials file is
+    missing/unparseable, a flow is already pending, or the port can't bind."""
     if not credentials_present():
         raise GoogleDriveError(
             "google_credentials.json is missing. Create an OAuth Client ID "
@@ -222,29 +259,59 @@ def run_oauth_flow() -> dict:
             status=400,
         ) from exc
 
-    try:
-        # port=0 picks a random free port. open_browser=True launches the
-        # default system browser (Electron's renderer is NEVER involved).
-        creds = flow.run_local_server(port=0, open_browser=True)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("google.oauth_flow_failed type=%s", type(exc).__name__)
-        raise GoogleDriveError(
-            f"OAuth flow did not complete ({type(exc).__name__}). Close the "
-            "browser tab and try again.",
-            status=500,
-        ) from exc
+    flow.redirect_uri = f"http://localhost:{GOOGLE_REDIRECT_PORT}/"
+    auth_url, _state = flow.authorization_url()
 
-    try:
-        TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
-    except OSError as exc:
-        log.warning("google.token_write_failed type=%s", type(exc).__name__)
-        raise GoogleDriveError(
-            "OAuth succeeded but the token could not be saved to disk.",
-            status=500,
-        ) from exc
+    with _flow_lock:
+        if _flow_state["in_progress"]:
+            raise GoogleDriveError(
+                "A Google connect attempt is already waiting for browser "
+                "consent. Finish it or wait for it to time out.", status=409)
+        try:
+            server = http.server.HTTPServer(
+                ("127.0.0.1", GOOGLE_REDIRECT_PORT), _CallbackHandler)
+        except OSError as exc:
+            log.warning("google.oauth_bind_failed port=%s type=%s",
+                        GOOGLE_REDIRECT_PORT, type(exc).__name__)
+            raise GoogleDriveError(
+                f"Could not open the OAuth callback port {GOOGLE_REDIRECT_PORT} — "
+                "another app is using it. Close it and try again.",
+                status=500) from exc
+        _flow_state.update(in_progress=True, error="")
+    server.ridian_result = {}
+    threading.Thread(target=_complete_oauth, args=(server, flow), daemon=True).start()
+    log.info("google.oauth_begun port=%s", GOOGLE_REDIRECT_PORT)
+    return {"auth_url": auth_url}
 
-    log.info("google.connected")
-    return get_status()
+
+def _complete_oauth(server: http.server.HTTPServer, flow: InstalledAppFlow) -> None:
+    """Background: wait for ONE callback (or timeout), exchange the code."""
+    result = server.ridian_result
+    err = ""
+    try:
+        # Wait for a REAL callback (do_GET sets the "code" key, possibly
+        # empty), not merely a TCP connection — stray connects (port scans,
+        # health probes) must not abort a pending consent.
+        deadline = time.time() + _FLOW_TIMEOUT_S
+        server.timeout = 5
+        while time.time() < deadline and "code" not in result:
+            server.handle_request()
+        server.server_close()
+        code = result.get("code")
+        if not code:
+            err = ("Browser consent did not complete within 5 minutes. "
+                   "If no browser window opened, try Connect again.")
+        else:
+            flow.fetch_token(code=code)
+            TOKEN_PATH.write_text(flow.credentials.to_json(), encoding="utf-8")
+            log.info("google.connected")
+    except Exception as exc:  # noqa: BLE001 — surfaced via flow_error, never silent
+        err = f"Google sign-in failed ({type(exc).__name__})."
+    finally:
+        with _flow_lock:
+            _flow_state.update(in_progress=False, error=err)
+        if err:
+            log.warning("google.oauth_failed detail=%s", err)
 
 
 def disconnect() -> dict:

@@ -255,6 +255,18 @@ class GoogleStatusResponse(BaseModel):
     """Safe public Google Drive connection state. Never contains tokens."""
     connected: bool
     email: str | None = None
+    # v4.3 two-phase OAuth: the renderer polls status while the operator
+    # finishes consent in the browser; flow_error carries the reason when a
+    # flow ends without connecting (never silent).
+    in_progress: bool = False
+    flow_error: str = ""
+
+
+class OAuthBeginResponse(BaseModel):
+    """Phase-1 response of a connect flow: the consent URL the DESKTOP must
+    open (via shell.openExternal). The hidden packaged backend cannot open
+    a browser itself — see google_drive_service/quickbooks_service v4.3."""
+    auth_url: str
 
 
 class GoogleUploadRequest(BaseModel):
@@ -1526,19 +1538,18 @@ async def google_status() -> GoogleStatusResponse:
     return GoogleStatusResponse(**google_drive_service.get_status())
 
 
-@app.post("/google/connect", response_model=GoogleStatusResponse)
-async def google_connect() -> GoogleStatusResponse:
-    """Run the installed-app OAuth flow.
+@app.post("/google/connect", response_model=OAuthBeginResponse)
+async def google_connect() -> OAuthBeginResponse:
+    """Begin the installed-app OAuth flow (v4.3 two-phase).
 
-    Blocks the calling HTTP request until the user finishes consent in
-    their browser. Runs via asyncio.to_thread so uvicorn stays responsive
-    to /health, /google/status, and other endpoints during the wait.
+    Returns the consent URL immediately; the desktop opens it in the system
+    browser and the renderer polls /google/status for completion or error.
     """
     try:
-        status = await asyncio.to_thread(google_drive_service.run_oauth_flow)
+        begun = await asyncio.to_thread(google_drive_service.begin_oauth)
     except google_drive_service.GoogleDriveError as exc:
         raise _google_error_to_http(exc) from exc
-    return GoogleStatusResponse(**status)
+    return OAuthBeginResponse(**begun)
 
 
 @app.post("/google/disconnect", response_model=GoogleStatusResponse)
@@ -1557,13 +1568,18 @@ async def quickbooks_status() -> dict:
     return quickbooks_service.get_status()
 
 
-@app.post("/quickbooks/connect")
-async def quickbooks_connect() -> dict:
-    """Browser OAuth consent (blocks this request only; runs in a thread)."""
+@app.post("/quickbooks/connect", response_model=OAuthBeginResponse)
+async def quickbooks_connect() -> OAuthBeginResponse:
+    """Begin the OAuth consent flow (v4.3 two-phase).
+
+    Returns the consent URL immediately; the desktop opens it in the system
+    browser and the renderer polls /quickbooks/status for completion or error.
+    """
     try:
-        return await asyncio.to_thread(quickbooks_service.run_oauth_flow)
+        begun = await asyncio.to_thread(quickbooks_service.begin_oauth)
     except quickbooks_service.QuickBooksError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return OAuthBeginResponse(**begun)
 
 
 @app.post("/quickbooks/disconnect")

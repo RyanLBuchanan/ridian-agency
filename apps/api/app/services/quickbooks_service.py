@@ -24,7 +24,6 @@ import logging
 import threading
 import time
 import urllib.parse
-import webbrowser
 from pathlib import Path
 
 import httpx
@@ -83,8 +82,13 @@ def _save_token(tok: dict) -> None:
 
 def get_status() -> dict:
     tok = _load_token()
+    with _flow_lock:
+        in_progress = _flow_state["in_progress"]
+        flow_error = _flow_state["error"]
     return {"connected": bool(tok and tok.get("refresh_token")),
-            "realm_id": (tok or {}).get("realm_id", "")}
+            "realm_id": (tok or {}).get("realm_id", ""),
+            "in_progress": in_progress,
+            "flow_error": flow_error}
 
 
 def disconnect() -> dict:
@@ -96,49 +100,103 @@ def disconnect() -> dict:
     return {"connected": False}
 
 
-def run_oauth_flow() -> dict:
-    """Blocking browser consent → token exchange. Call via asyncio.to_thread."""
-    cid, secret = _credentials()
-    result: dict = {}
+# v4.3: the OAuth browser launch moved OUT of this backend process. The
+# packaged backend is a hidden PyInstaller --noconsole process (spawned
+# windowsHide by Electron) and webbrowser.open() there returns WITHOUT
+# launching anything — and the old code ignored its return value and then
+# blocked for 300s, so the Connect click looked like a silent no-op.
+# Now: begin_oauth() binds the loopback listener, returns the consent URL,
+# and finishes the token exchange on a background thread; the DESKTOP opens
+# the URL (renderer window.open → Electron shell.openExternal). Progress and
+# every failure are reported through get_status() — nothing is silent.
+_FLOW_TIMEOUT_S = 300
+_flow_lock = threading.Lock()
+_flow_state: dict = {"in_progress": False, "error": ""}
 
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 — stdlib API
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            result["code"] = (q.get("code") or [""])[0]
-            result["realm_id"] = (q.get("realmId") or [""])[0]
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(b"<h3>Ridian is connected to QuickBooks. Close this tab.</h3>")
 
-        def log_message(self, *a):  # silence stdlib request logging
-            return
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 — stdlib API
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        result = getattr(self.server, "ridian_result", {})
+        result["code"] = (q.get("code") or [""])[0]
+        result["realm_id"] = (q.get("realmId") or [""])[0]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<h3>Ridian is connected to QuickBooks. Close this tab.</h3>")
 
-    server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), _Handler)
-    thread = threading.Thread(target=server.handle_request, daemon=True)
-    thread.start()
+    def log_message(self, *a):  # silence stdlib request logging
+        return
+
+
+def begin_oauth() -> dict:
+    """Phase 1: bind the callback listener, return {"auth_url": ...}.
+
+    Raises immediately (with an operator-actionable message) when creds are
+    missing, a flow is already pending, or the callback port can't bind."""
+    cid, _secret = _credentials()
+    with _flow_lock:
+        if _flow_state["in_progress"]:
+            raise QuickBooksError(
+                "A QuickBooks connect attempt is already waiting for browser "
+                "consent. Finish it or wait for it to time out.", 409)
+        try:
+            server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), _CallbackHandler)
+        except OSError as exc:
+            log.warning("quickbooks.oauth_bind_failed port=%s type=%s",
+                        REDIRECT_PORT, type(exc).__name__)
+            raise QuickBooksError(
+                f"Could not open the OAuth callback port {REDIRECT_PORT} — "
+                "another app is using it. Close it and try again.", 500) from exc
+        _flow_state.update(in_progress=True, error="")
+    server.ridian_result = {}
+    threading.Thread(target=_complete_oauth, args=(server,), daemon=True).start()
     params = urllib.parse.urlencode({
         "client_id": cid, "response_type": "code", "scope": SCOPE,
         "redirect_uri": REDIRECT_URI, "state": "ridian",
     })
-    webbrowser.open(f"{AUTH_URL}?{params}")
-    thread.join(timeout=300)
-    server.server_close()
-    if not result.get("code") or not result.get("realm_id"):
-        raise QuickBooksError("QuickBooks consent did not complete — try again.", 500)
+    log.info("quickbooks.oauth_begun port=%s", REDIRECT_PORT)
+    return {"auth_url": f"{AUTH_URL}?{params}"}
 
-    basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
-    resp = httpx.post(TOKEN_URL, headers={"Authorization": f"Basic {basic}"},
-                      data={"grant_type": "authorization_code",
-                            "code": result["code"], "redirect_uri": REDIRECT_URI},
-                      timeout=30)
-    if resp.status_code != 200:
-        raise QuickBooksError(f"Token exchange failed (HTTP {resp.status_code}).", 502)
-    tok = resp.json()
-    tok["realm_id"] = result["realm_id"]
-    _save_token(tok)
-    log.info("quickbooks.connected realm=%s", result["realm_id"])
-    return get_status()
+
+def _complete_oauth(server: http.server.HTTPServer) -> None:
+    """Background: wait for ONE callback (or timeout), exchange the code."""
+    result = server.ridian_result
+    err = ""
+    try:
+        # Wait for a REAL callback (do_GET sets the "code" key, possibly
+        # empty), not merely a TCP connection — stray connects (port scans,
+        # health probes) must not abort a pending consent.
+        deadline = time.time() + _FLOW_TIMEOUT_S
+        server.timeout = 5
+        while time.time() < deadline and "code" not in result:
+            server.handle_request()
+        server.server_close()
+        if not result.get("code") or not result.get("realm_id"):
+            err = ("Browser consent did not complete within 5 minutes. "
+                   "If no browser window opened, try Connect again.")
+        else:
+            cid, secret = _credentials()
+            basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+            resp = httpx.post(TOKEN_URL, headers={"Authorization": f"Basic {basic}"},
+                              data={"grant_type": "authorization_code",
+                                    "code": result["code"],
+                                    "redirect_uri": REDIRECT_URI},
+                              timeout=30)
+            if resp.status_code != 200:
+                err = f"QuickBooks token exchange failed (HTTP {resp.status_code})."
+            else:
+                tok = resp.json()
+                tok["realm_id"] = result["realm_id"]
+                _save_token(tok)
+                log.info("quickbooks.connected realm=%s", result["realm_id"])
+    except Exception as exc:  # noqa: BLE001 — surfaced via flow_error, never silent
+        err = f"QuickBooks connect failed ({type(exc).__name__})."
+    finally:
+        with _flow_lock:
+            _flow_state.update(in_progress=False, error=err)
+        if err:
+            log.warning("quickbooks.oauth_failed detail=%s", err)
 
 
 def _access_token() -> tuple[str, str]:
