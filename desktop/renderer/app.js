@@ -428,6 +428,7 @@ const els = {
   settingsStatus: document.getElementById('settings-status'),
   settingsPasswordHint: document.getElementById('settings-password-hint'),
   settingsAnthropicKeyHint: document.getElementById('settings-anthropic-key-hint'),
+  settingsQboSecretHint: document.getElementById('settings-qbo-secret-hint'),
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
   googleConnectBtn: document.getElementById('google-connect-btn'),
@@ -3079,6 +3080,15 @@ function applySettingsToForm(settings) {
     } else {
       els.settingsPasswordHint.className = 'field-hint';
       els.settingsPasswordHint.textContent = 'No password saved yet. For Gmail use an App Password.';
+    }
+  }
+  if (els.settingsQboSecretHint) {
+    if (settings.quickbooks_client_secret_configured) {
+      els.settingsQboSecretHint.className = 'field-hint is-ok';
+      els.settingsQboSecretHint.textContent = 'A client secret is currently saved. Leave blank to keep it; type a new one to replace it.';
+    } else {
+      els.settingsQboSecretHint.className = 'field-hint';
+      els.settingsQboSecretHint.textContent = 'No client secret saved yet.';
     }
   }
   if (els.settingsOutputsPath) els.settingsOutputsPath.textContent = settings.outputs_path || '—';

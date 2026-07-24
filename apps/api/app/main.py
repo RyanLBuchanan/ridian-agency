@@ -157,8 +157,12 @@ class SettingsView(BaseModel):
     default_to_email: str = ""
     company_name: str = ""
     anthropic_model: str = ""
+    anthropic_research_model: str = ""
+    anthropic_script_model: str = ""
     anthropic_api_key_configured: bool = False
     openai_model: str = ""
+    openai_tts_voice: str = ""
+    openai_tts_model: str = ""
     openai_api_key_configured: bool = False
     smtp_host: str = ""
     smtp_port: str = ""
@@ -166,6 +170,13 @@ class SettingsView(BaseModel):
     smtp_from_email: str = ""
     smtp_password_configured: bool = False
     google_drive_root_folder_id: str = ""
+    # v4.0 QuickBooks OAuth app credentials. The ID is public config; the
+    # secret is exposed ONLY as a configured flag (same pattern as
+    # smtp_password). test_settings_contract pins this model against
+    # SETTABLE_KEYS so a new settings key can never silently vanish again.
+    quickbooks_client_id: str = ""
+    quickbooks_client_secret_configured: bool = False
+    operator_run_cost_ceiling_usd: str = ""
     # v1.4: when True (default), every operator run auto-uploads its artifact
     # folder to Google Drive at the end of the run, no manual click required.
     # Stored as "true"/"false" string in local_settings.json.
@@ -191,8 +202,12 @@ class SettingsUpdate(BaseModel):
     company_name: str | None = None
     anthropic_api_key: str | None = None
     anthropic_model: str | None = None
+    anthropic_research_model: str | None = None
+    anthropic_script_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
+    openai_tts_voice: str | None = None
+    openai_tts_model: str | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_username: str | None = None
@@ -200,6 +215,9 @@ class SettingsUpdate(BaseModel):
     smtp_from_email: str | None = None
     google_drive_root_folder_id: str | None = None
     operator_auto_upload_drive: str | None = None
+    quickbooks_client_id: str | None = None
+    quickbooks_client_secret: str | None = None
+    operator_run_cost_ceiling_usd: str | None = None
     appearance: str | None = None
 
 

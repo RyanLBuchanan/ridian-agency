@@ -1770,6 +1770,10 @@
             <label class="field">
               <span class="field-label">Client Secret</span>
               <input name="quickbooks_client_secret" type="password" autocomplete="new-password" />
+              <!-- Saved-secret hint, same pattern as the SMTP password: the
+                   input is never round-tripped, so this line is the ONLY
+                   truthful signal of whether a secret is stored. -->
+              <span id="settings-qbo-secret-hint" class="field-hint"></span>
               <span class="field-hint">
                 Production keys from developer.intuit.com. Register redirect URI
                 <code>http://localhost:8123/callback</code> in the Intuit app.

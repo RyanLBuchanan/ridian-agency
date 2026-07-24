@@ -156,6 +156,9 @@ def public_view() -> dict[str, Any]:
     out["anthropic_api_key_configured"] = bool(
         s.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
     )
+    out["quickbooks_client_secret_configured"] = bool(
+        s.get("quickbooks_client_secret")
+    )
     return out
 
 
