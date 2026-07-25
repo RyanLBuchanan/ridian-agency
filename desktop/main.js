@@ -3,7 +3,7 @@
 // The renderer talks to the existing FastAPI backend at http://127.0.0.1:8000
 // over plain fetch — no IPC needed.
 
-const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
@@ -14,6 +14,34 @@ const path = require('node:path');
 // never collide with a real instance on 8000. Unset = 8000, unchanged.
 const BACKEND_PORT = parseInt(process.env.RIDIAN_PORT || '8000', 10);
 const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
+
+// v4.4.1 leaked-sandbox preflight. Harnesses run the app with ALL THREE of
+// RIDIAN_SANDBOX + RIDIAN_DATA_DIR + RIDIAN_PORT (per-child env only —
+// scripts/Run-Sandboxed-Backend.ps1 is the paved road). If the sandbox flag
+// reaches a REAL launch (a terminal or Explorer session still holding
+// leaked harness vars), the backend would refuse with a cryptic crash;
+// catch it HERE with an actionable message instead. A complete sandbox
+// config passes through untouched.
+function sandboxEnvPreflight() {
+  if (!process.env.RIDIAN_SANDBOX) return true;
+  const missing = [];
+  if (!process.env.RIDIAN_DATA_DIR) missing.push('RIDIAN_DATA_DIR');
+  if (!process.env.RIDIAN_PORT || BACKEND_PORT === 8000) missing.push('RIDIAN_PORT (non-8000)');
+  if (missing.length === 0) return true;
+  dialog.showErrorBox(
+    'Ridian Operator — leaked sandbox environment',
+    'RIDIAN_SANDBOX is set in this launch environment, but the sandbox config is '
+    + `incomplete (missing ${missing.join(', ')}).\n\n`
+    + 'This usually means test-harness variables leaked into the session you are '
+    + 'launching from. Clear them there and relaunch:\n\n'
+    + 'PowerShell:\n'
+    + '  Remove-Item Env:RIDIAN_SANDBOX, Env:RIDIAN_DATA_DIR, Env:RIDIAN_PORT -ErrorAction SilentlyContinue\n\n'
+    + 'cmd:\n'
+    + '  set RIDIAN_SANDBOX= & set RIDIAN_DATA_DIR= & set RIDIAN_PORT=\n\n'
+    + 'Or simply launch Ridian Operator from the Start menu after signing out and '
+    + 'back in (nothing is set persistently).');
+  return false;
+}
 
 /* v4.1 packaged mode: main.js is the backend SUPERVISOR — it spawns uvicorn
    as a hidden background process (windowsHide: no console window ever
@@ -185,6 +213,7 @@ function applyContentSecurityPolicy() {
 }
 
 app.whenReady().then(async () => {
+  if (!sandboxEnvPreflight()) { app.quit(); return; }
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
   await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
