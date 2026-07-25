@@ -9,8 +9,11 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 
-const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
-const BACKEND_PORT = 8000;
+// v4.4 state-guard: RIDIAN_PORT lets a sandboxed harness run the whole app
+// (supervisor, CSP, renderer origin) on a scratch port so its probes can
+// never collide with a real instance on 8000. Unset = 8000, unchanged.
+const BACKEND_PORT = parseInt(process.env.RIDIAN_PORT || '8000', 10);
+const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
 
 /* v4.1 packaged mode: main.js is the backend SUPERVISOR — it spawns uvicorn
    as a hidden background process (windowsHide: no console window ever

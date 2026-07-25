@@ -23,7 +23,7 @@ from typing import Any
 
 log = logging.getLogger("ridian.settings")
 
-from .runtime_paths import data_dir
+from .runtime_paths import data_dir, guard_real_state_write
 
 # v4.2: dev -> apps/api/local_settings.json exactly as before; frozen ->
 # %APPDATA%/Ridian Operator/local_settings.json. Secrets are RUNTIME config
@@ -119,6 +119,9 @@ def save_settings(updates: dict[str, Any]) -> dict[str, str]:
         (so the GUI never has to round-trip the password back to the server).
       - All other keys: a present-but-blank value clears the field.
     """
+    # v4.4 state-guard gate: a test/diagnostic context aiming at the REAL
+    # settings store refuses here, before any read-modify-write begins.
+    guard_real_state_write(SETTINGS_PATH)
     current = load_settings()
     new = dict(current)
     for k in SETTABLE_KEYS:

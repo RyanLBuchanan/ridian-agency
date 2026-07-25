@@ -7,6 +7,8 @@
 const { contextBridge } = require('electron');
 
 contextBridge.exposeInMainWorld('ridian', {
-  backendOrigin: 'http://127.0.0.1:8000',
+  // v4.4 state-guard: RIDIAN_PORT moves a sandboxed harness's whole app to
+  // a scratch port (matches main.js's supervisor + CSP). Unset = 8000.
+  backendOrigin: `http://127.0.0.1:${parseInt(process.env.RIDIAN_PORT || '8000', 10)}`,
   platform: process.platform,
 });

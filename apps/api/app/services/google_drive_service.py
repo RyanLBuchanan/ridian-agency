@@ -62,7 +62,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/presentations",
 ]
 
-from .runtime_paths import data_dir
+from .runtime_paths import data_dir, guard_real_state_write
 
 # v4.2: dev -> apps/api/ exactly as before; frozen -> %APPDATA%/Ridian
 # Operator/. OAuth secrets/tokens are runtime files, never in the binary.
@@ -162,6 +162,7 @@ def _load_credentials() -> Optional[Credentials]:
         return creds
     if creds.expired and creds.refresh_token:
         try:
+            guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
             creds.refresh(Request())
             TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
             return creds
@@ -302,6 +303,7 @@ def _complete_oauth(server: http.server.HTTPServer, flow: InstalledAppFlow) -> N
             err = ("Browser consent did not complete within 5 minutes. "
                    "If no browser window opened, try Connect again.")
         else:
+            guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
             flow.fetch_token(code=code)
             TOKEN_PATH.write_text(flow.credentials.to_json(), encoding="utf-8")
             log.info("google.connected")

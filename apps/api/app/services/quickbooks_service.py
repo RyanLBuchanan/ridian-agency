@@ -32,7 +32,7 @@ from .settings_service import load_settings
 
 log = logging.getLogger("ridian.quickbooks")
 
-from .runtime_paths import data_dir
+from .runtime_paths import data_dir, guard_real_state_write
 
 # v4.2: dev -> apps/api/ exactly as before; frozen -> %APPDATA%/Ridian
 # Operator/. The QBO token is a runtime file, never in the binary.
@@ -76,6 +76,7 @@ def _load_token() -> dict | None:
 
 
 def _save_token(tok: dict) -> None:
+    guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
     tok["saved_at"] = int(time.time())
     TOKEN_PATH.write_text(json.dumps(tok, indent=2), encoding="utf-8")
 
