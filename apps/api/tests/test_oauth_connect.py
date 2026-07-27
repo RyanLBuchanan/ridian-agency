@@ -75,22 +75,30 @@ def _seed_qbo_creds():
 
 
 class _FakeHttpx:
-    """Stands in for httpx inside quickbooks_service. Never touches Intuit."""
-    def __init__(self, status_code=200):
+    """Stands in for httpx inside quickbooks_service. Never touches Intuit.
+    ``get`` serves the post-connect companyinfo validation (v4.6)."""
+    def __init__(self, status_code=200, get_status_code=200):
         self.status_code = status_code
+        self.get_status_code = get_status_code
         self.calls = []
 
-    def post(self, url, **kw):
-        self.calls.append((url, kw))
-        fake = self
-
+    def _resp(self, code, payload):
         class _Resp:
-            status_code = fake.status_code
+            status_code = code
 
             @staticmethod
             def json():
-                return {"access_token": "at", "refresh_token": "rt"}
+                return payload
         return _Resp()
+
+    def post(self, url, **kw):
+        self.calls.append(("POST", url, kw))
+        return self._resp(self.status_code,
+                          {"access_token": "at", "refresh_token": "rt"})
+
+    def get(self, url, **kw):
+        self.calls.append(("GET", url, kw))
+        return self._resp(self.get_status_code, {"CompanyInfo": {}})
 
 
 # --------------------------------------------------------------------------
@@ -159,6 +167,76 @@ def test_qbo_endpoint_returns_auth_url_fast(monkeypatch):
     assert time.time() - t0 < 5           # no 300s block — phase 1 returns now
     assert r.json()["auth_url"].startswith("https://appcenter.intuit.com")
     _callback(qbs.REDIRECT_PORT, "state=cleanup")   # free the port
+    _wait(lambda: not qbs.get_status()["in_progress"])
+
+
+def test_connect_stamps_token_with_consent_time_environment(monkeypatch):
+    """Env flipped between begin_oauth and the browser callback: the token
+    is stamped with the environment the consent STARTED in."""
+    _seed_qbo_creds()
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200))
+    qbs.begin_oauth()                                    # env snapshot: sandbox
+    settings_service.save_settings({"quickbooks_environment": "production"})
+    _callback(qbs.REDIRECT_PORT, "code=abc&realmId=7")
+    assert _wait(lambda: not qbs.get_status()["in_progress"])
+    tok = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    assert tok["environment"] == "sandbox"
+
+
+def test_wrong_environment_keys_fail_at_connect_with_plain_message(monkeypatch):
+    """Post-connect validation: when the environment's API rejects the fresh
+    token (Development keys in production or vice versa), the flow errors
+    with an actionable message and NO token is saved."""
+    _seed_qbo_creds()
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200, get_status_code=401))
+    qbs.begin_oauth()
+    _callback(qbs.REDIRECT_PORT, "code=abc&realmId=7")
+    assert _wait(lambda: not qbs.get_status()["in_progress"])
+    st = qbs.get_status()
+    assert not st["connected"]
+    assert "Client ID/Secret" in st["flow_error"]
+    assert "Development" in st["flow_error"]             # sandbox -> Dev keys
+    assert not qbs.TOKEN_PATH.exists()
+
+
+# --------------------------------------------------------------------------
+# One-action connect (v4.5 UX): paste creds -> Connect, no separate Save
+# --------------------------------------------------------------------------
+
+def test_paste_then_connect_is_one_action(monkeypatch):
+    """The renderer's Connect button persists the fields (the Save write
+    path) and immediately begins OAuth. Pin the backend sequence: a
+    settings POST followed at once by connect must succeed using exactly
+    the just-posted values — never 'Client ID/Secret are not set'."""
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200))
+    r1 = client.post("/settings", json={
+        "quickbooks_client_id": "PASTEDID",
+        "quickbooks_client_secret": "PASTEDSECRET",
+    })
+    assert r1.status_code == 200
+    r2 = client.post("/quickbooks/connect")
+    assert r2.status_code == 200
+    assert "PASTEDID" in r2.json()["auth_url"]
+    _callback(qbs.REDIRECT_PORT, "state=cleanup")
+    _wait(lambda: not qbs.get_status()["in_progress"])
+
+
+def test_connect_uses_freshly_saved_credentials_not_stale_ones(monkeypatch):
+    """Replacing the Client ID and clicking Connect must use the NEW id
+    (blank secret = keep the stored one, per the saved-secret contract)."""
+    settings_service.save_settings({
+        "quickbooks_client_id": "OLDID",
+        "quickbooks_client_secret": "KEEPSECRET",
+    })
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200))
+    r1 = client.post("/settings", json={"quickbooks_client_id": "NEWID"})
+    assert r1.status_code == 200
+    r2 = client.post("/quickbooks/connect")
+    assert r2.status_code == 200
+    assert "NEWID" in r2.json()["auth_url"]
+    assert "OLDID" not in r2.json()["auth_url"]
+    assert settings_service.load_settings()["quickbooks_client_secret"] == "KEEPSECRET"
+    _callback(qbs.REDIRECT_PORT, "state=cleanup")
     _wait(lambda: not qbs.get_status()["in_progress"])
 
 

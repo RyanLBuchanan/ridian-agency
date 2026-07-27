@@ -10,9 +10,15 @@ Scope, enforced by what exists in this module:
          reviews/sends/deletes it in QuickBooks itself.
 
 Auth: OAuth2 authorization-code with a loopback redirect (same
-installed-app pattern as Google). Production Client ID/Secret live in
-Settings (secret never returned/logged); tokens in the git-ignored
+installed-app pattern as Google). Client ID/Secret live in Settings
+(secret never returned/logged); tokens in the git-ignored
 quickbooks_token.json, refreshed automatically (rolling refresh persisted).
+
+Environments (v4.6): quickbooks_environment selects sandbox (default —
+test company, Development keys, cannot touch real books) or production
+(explicit opt-in, Production keys). The environment is SNAPSHOT once per
+operation and threaded through guard, API base, and token stamping, so a
+concurrent Settings flip can never aim a token at the wrong host.
 """
 
 from __future__ import annotations
@@ -40,11 +46,19 @@ TOKEN_PATH = data_dir() / "quickbooks_token.json"
 
 AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
 TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-API_BASE = "https://quickbooks.api.intuit.com/v3/company"
+# v4.6 environments. Intuit's OAuth endpoints (authorize + token above) are
+# SHARED between sandbox and production — the environment is determined by
+# the app keys and the company chosen at consent. What differs is the API
+# base (and the QBO web-app links), so those resolve per call from the
+# quickbooks_environment setting.
+PROD_API_BASE = "https://quickbooks.api.intuit.com/v3/company"
+SANDBOX_API_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company"
+PROD_APP_URL = "https://qbo.intuit.com"
+SANDBOX_APP_URL = "https://sandbox.qbo.intuit.com"
 SCOPE = "com.intuit.quickbooks.accounting"
 REDIRECT_PORT = 8123
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
-_MINOR_VERSION = "73"
+_MINOR_VERSION = "75"   # Intuit ignores <75 since 2025-08-01 (75 is the floor)
 
 
 class QuickBooksError(Exception):
@@ -54,6 +68,24 @@ class QuickBooksError(Exception):
         self.detail = detail
         self.status = status
         super().__init__(detail)
+
+
+def get_environment() -> str:
+    """The active QuickBooks environment. 'production' ONLY when explicitly
+    chosen in Settings; anything else — unset, blank, typo — resolves to
+    'sandbox', the environment that cannot touch real books (safe default)."""
+    env = (load_settings().get("quickbooks_environment") or "").strip().lower()
+    return "production" if env == "production" else "sandbox"
+
+
+def _api_base(env: str) -> str:
+    """Base for an ALREADY-SNAPSHOT environment — never re-reads settings,
+    so guard and URL can never disagree within one operation."""
+    return PROD_API_BASE if env == "production" else SANDBOX_API_BASE
+
+
+def _app_url(env: str) -> str:
+    return PROD_APP_URL if env == "production" else SANDBOX_APP_URL
 
 
 def _credentials() -> tuple[str, str]:
@@ -78,7 +110,19 @@ def _load_token() -> dict | None:
 def _save_token(tok: dict) -> None:
     guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
     tok["saved_at"] = int(time.time())
+    # v4.6: every token carries the environment it belongs to. Callers that
+    # KNOW the environment (consent completion, refresh inheritance) set it
+    # before calling; this fallback only covers a caller that forgot, and
+    # never overwrites an existing stamp — a Settings flip between an
+    # operation's start and this save must not relabel the token.
+    tok.setdefault("environment", get_environment())
     TOKEN_PATH.write_text(json.dumps(tok, indent=2), encoding="utf-8")
+
+
+def _token_environment(tok: dict) -> str:
+    """Tokens from before v4.6 carry no stamp — they were created when the
+    integration was hardcoded to production, so that is what they are."""
+    return tok.get("environment") or "production"
 
 
 def get_status() -> dict:
@@ -86,8 +130,15 @@ def get_status() -> dict:
     with _flow_lock:
         in_progress = _flow_state["in_progress"]
         flow_error = _flow_state["error"]
-    return {"connected": bool(tok and tok.get("refresh_token")),
+    env = get_environment()
+    connected = bool(tok and tok.get("refresh_token"))
+    return {"connected": connected,
             "realm_id": (tok or {}).get("realm_id", ""),
+            "environment": env,
+            # True when a saved connection belongs to the OTHER environment —
+            # the UI tells the operator to reconnect rather than letting
+            # calls fail with opaque auth errors.
+            "environment_mismatch": bool(connected and _token_environment(tok) != env),
             "in_progress": in_progress,
             "flow_error": flow_error}
 
@@ -151,17 +202,23 @@ def begin_oauth() -> dict:
                 "another app is using it. Close it and try again.", 500) from exc
         _flow_state.update(in_progress=True, error="")
     server.ridian_result = {}
-    threading.Thread(target=_complete_oauth, args=(server,), daemon=True).start()
+    env = get_environment()   # SNAPSHOT: the consent belongs to this env,
+    # even if Settings flips during the (up to 5-minute) browser wait.
+    threading.Thread(target=_complete_oauth, args=(server, env), daemon=True).start()
     params = urllib.parse.urlencode({
         "client_id": cid, "response_type": "code", "scope": SCOPE,
         "redirect_uri": REDIRECT_URI, "state": "ridian",
     })
-    log.info("quickbooks.oauth_begun port=%s", REDIRECT_PORT)
+    log.info("quickbooks.oauth_begun port=%s env=%s", REDIRECT_PORT, env)
     return {"auth_url": f"{AUTH_URL}?{params}"}
 
 
-def _complete_oauth(server: http.server.HTTPServer) -> None:
-    """Background: wait for ONE callback (or timeout), exchange the code."""
+def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
+    """Background: wait for ONE callback (or timeout), exchange the code.
+    ``env`` is the environment snapshot from begin_oauth — the token is
+    stamped with it and validated against its API base before we report
+    success, so Development/Production keys pasted into the wrong
+    environment fail HERE with a plain message, not later with opaque 401s."""
     result = server.ridian_result
     err = ""
     try:
@@ -189,8 +246,27 @@ def _complete_oauth(server: http.server.HTTPServer) -> None:
             else:
                 tok = resp.json()
                 tok["realm_id"] = result["realm_id"]
-                _save_token(tok)
-                log.info("quickbooks.connected realm=%s", result["realm_id"])
+                tok["environment"] = env
+                # Validate against THIS environment's API before declaring
+                # success: a consent driven by keys from the other
+                # environment yields a token its API base rejects.
+                realm = result["realm_id"]
+                check = httpx.get(
+                    f"{_api_base(env)}/{realm}/companyinfo/{realm}",
+                    params={"minorversion": _MINOR_VERSION},
+                    headers={"Authorization": f"Bearer {tok.get('access_token', '')}",
+                             "Accept": "application/json"},
+                    timeout=30)
+                if check.status_code != 200:
+                    err = (f"Consent completed, but the {env} API rejected the "
+                           f"connection (HTTP {check.status_code}). Check that "
+                           f"your Client ID/Secret are "
+                           f"{'Development' if env == 'sandbox' else 'Production'} "
+                           f"keys and the company you picked is a {env} company.")
+                else:
+                    _save_token(tok)
+                    log.info("quickbooks.connected realm=%s env=%s",
+                             result["realm_id"], env)
     except Exception as exc:  # noqa: BLE001 — surfaced via flow_error, never silent
         err = f"QuickBooks connect failed ({type(exc).__name__})."
     finally:
@@ -200,12 +276,21 @@ def _complete_oauth(server: http.server.HTTPServer) -> None:
             log.warning("quickbooks.oauth_failed detail=%s", err)
 
 
-def _access_token() -> tuple[str, str]:
-    """(access_token, realm_id), refreshing when older than ~50 minutes."""
+def _access_token(env: str) -> tuple[str, str]:
+    """(access_token, realm_id) for the SNAPSHOT environment ``env``,
+    refreshing when older than ~50 minutes. The caller snapshots the
+    environment ONCE and uses it for this guard and for the API base, so a
+    concurrent Settings flip cannot aim the token at the wrong host."""
     tok = _load_token()
     if not tok or not tok.get("refresh_token"):
         raise QuickBooksError(
             "QuickBooks is not connected. Open Settings to connect first.", 400)
+    if _token_environment(tok) != env:
+        raise QuickBooksError(
+            f"QuickBooks is connected to the {_token_environment(tok)} "
+            f"environment, but Settings now selects {env}. Open Settings and "
+            "click Connect QuickBooks to reconnect (or switch the environment "
+            "back).", 409)
     if time.time() - tok.get("saved_at", 0) > 3000:
         cid, secret = _credentials()
         basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
@@ -219,15 +304,20 @@ def _access_token() -> tuple[str, str]:
                 "reconnect in Settings.", 502)
         new = resp.json()
         new["realm_id"] = tok["realm_id"]
+        # INHERIT the lineage's environment — never re-read settings here,
+        # or a flip during the refresh window would relabel the token and
+        # permanently defeat the mismatch guard.
+        new["environment"] = _token_environment(tok)
         _save_token(new)
         tok = new
     return tok["access_token"], tok["realm_id"]
 
 
 def _query(sql: str) -> list[dict]:
-    access, realm = _access_token()
+    env = get_environment()          # ONE snapshot: guard + base agree
+    access, realm = _access_token(env)
     resp = httpx.get(
-        f"{API_BASE}/{realm}/query",
+        f"{_api_base(env)}/{realm}/query",
         params={"query": sql, "minorversion": _MINOR_VERSION},
         headers={"Authorization": f"Bearer {access}", "Accept": "application/json"},
         timeout=30,
@@ -292,9 +382,10 @@ def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
         body["TxnDate"] = txn_date
     if due_date:
         body["DueDate"] = due_date
-    access, realm = _access_token()
+    env = get_environment()          # ONE snapshot: guard + base + link agree
+    access, realm = _access_token(env)
     resp = httpx.post(
-        f"{API_BASE}/{realm}/invoice", params={"minorversion": _MINOR_VERSION},
+        f"{_api_base(env)}/{realm}/invoice", params={"minorversion": _MINOR_VERSION},
         headers={"Authorization": f"Bearer {access}",
                  "Accept": "application/json", "Content-Type": "application/json"},
         json=body, timeout=30,
@@ -306,6 +397,6 @@ def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
            "customer": (inv.get("CustomerRef") or {}).get("name", ""),
            "total": inv.get("TotalAmt", 0),
            "email_status": inv.get("EmailStatus", "NotSet"),
-           "link": f"https://qbo.intuit.com/app/invoice?txnId={inv.get('Id', '')}"}
+           "link": f"{_app_url(env)}/app/invoice?txnId={inv.get('Id', '')}"}
     log.info("quickbooks.invoice_created id=%s total=%s", out["id"], out["total"])
     return out

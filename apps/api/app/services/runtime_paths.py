@@ -115,9 +115,12 @@ def data_dir() -> Path:
             raise SandboxViolation(
                 "RIDIAN_SANDBOX is set but RIDIAN_DATA_DIR is not — a sandboxed "
                 "process must name its own data dir, never default to real state.")
-        d = Path(override)
+        # Resolve to ABSOLUTE: /health reports this path for the desktop's
+        # identity handshake, and a relative path would compare against the
+        # wrong working directory on the Electron side.
+        d = Path(override).expanduser().resolve()
         for real in _real_store_dirs():
-            if d.resolve() == real.resolve():
+            if d == real.resolve():
                 raise SandboxViolation(
                     f"RIDIAN_DATA_DIR points at the real state store ({real}) — "
                     "pick a scratch directory.")

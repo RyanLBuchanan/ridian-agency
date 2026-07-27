@@ -29,13 +29,17 @@
       {
         "from": "../apps/api/dist/ridian-backend",
         "to": "backend"
+      },
+      {
+        "from": "assets/sunrise-waves.ico",
+        "to": "sunrise-waves.ico"
       }
     ],
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "assets/android-chrome-512x512.png"
+      "icon": "assets/sunrise-waves.ico"
     },
     "nsis": {
       "oneClick": true,

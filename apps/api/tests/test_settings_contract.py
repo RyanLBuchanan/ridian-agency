@@ -123,6 +123,86 @@ def test_qbo_credentials_round_trip_through_the_api(monkeypatch, tmp_path):
     assert s["quickbooks_client_secret"] == "s3cr3tVALUE"
 
 
+def test_whitespace_only_key_never_reads_as_configured(monkeypatch, tmp_path):
+    """A stored blank/whitespace API key must never render 'currently saved'
+    — that is the fake success state behind 'key saved but 401 invalid'.
+    smtp_password is the deliberate exception: SMTP passwords may legally
+    contain whitespace and are stored verbatim, so a stored one counts."""
+    _patch_settings_file(monkeypatch, tmp_path, {
+        "anthropic_api_key": "   \n",
+        "openai_api_key": "  ",
+        "smtp_password": " ",
+        "quickbooks_client_secret": "\t",
+    })
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    view = settings_service.public_view()
+    assert view["anthropic_api_key_configured"] is False
+    assert view["openai_api_key_configured"] is False
+    assert view["quickbooks_client_secret_configured"] is False
+    assert view["smtp_password_configured"] is True   # RFC-legal, stored verbatim
+
+
+def test_pasted_secrets_are_trimmed_on_save(monkeypatch, tmp_path):
+    """Clipboard whitespace is invisible in a masked field but makes the
+    credential malformed — the save path strips it."""
+    path = _patch_settings_file(monkeypatch, tmp_path)
+    settings_service.save_settings({"anthropic_api_key": "  sk-ant-REAL\n"})
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["anthropic_api_key"] == "sk-ant-REAL"
+    # Whitespace-only submission == untouched masked field == keep stored.
+    settings_service.save_settings({"anthropic_api_key": "   "})
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["anthropic_api_key"] == "sk-ant-REAL"
+
+
+class _FakeKeyProbe:
+    def __init__(self, status_code):
+        self.status_code = status_code
+        self.calls = []
+
+    def get(self, url, **kw):
+        self.calls.append((url, kw))
+        probe = self
+
+        class _R:
+            status_code = probe.status_code
+
+            @staticmethod
+            def json():
+                return {}
+        return _R()
+
+
+def test_key_test_endpoint_proves_a_working_key(monkeypatch, tmp_path):
+    _patch_settings_file(monkeypatch, tmp_path, {"anthropic_api_key": "sk-ant-GOOD"})
+    probe = _FakeKeyProbe(200)
+    monkeypatch.setattr("httpx.get", probe.get)
+    r = client.post("/settings/test-anthropic")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["source"] == "settings"
+    assert probe.calls[0][0] == "https://api.anthropic.com/v1/models"
+    assert probe.calls[0][1]["headers"]["x-api-key"] == "sk-ant-GOOD"
+
+
+def test_key_test_endpoint_reports_invalid_key_plainly(monkeypatch, tmp_path):
+    _patch_settings_file(monkeypatch, tmp_path, {"anthropic_api_key": "sk-ant-REVOKED"})
+    monkeypatch.setattr("httpx.get", _FakeKeyProbe(401).get)
+    body = client.post("/settings/test-anthropic").json()
+    assert body["ok"] is False
+    assert "invalid or revoked" in body["detail"]
+
+
+def test_key_test_endpoint_with_no_key_says_so(monkeypatch, tmp_path):
+    _patch_settings_file(monkeypatch, tmp_path, {})
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    a = client.post("/settings/test-anthropic").json()
+    o = client.post("/settings/test-openai").json()
+    assert a["ok"] is False and a["source"] == "none"
+    assert o["ok"] is False and o["source"] == "none"
+
+
 def test_frozen_mode_writes_and_reads_the_same_appdata_file(monkeypatch, tmp_path):
     """Frozen build: SETTINGS_PATH must resolve to
     %APPDATA%/Ridian Operator/local_settings.json for BOTH save and load

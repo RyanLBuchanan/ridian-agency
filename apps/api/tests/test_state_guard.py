@@ -18,6 +18,9 @@ import contextlib
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
 
 from app.services import google_drive_service as gds
 from app.services import quickbooks_service as qbs
@@ -137,6 +140,25 @@ def test_real_app_port_resolution_is_unchanged(monkeypatch):
     monkeypatch.delenv("RIDIAN_SANDBOX", raising=False)
     monkeypatch.delenv("RIDIAN_PORT", raising=False)
     assert resolve_backend_port() == 8000
+
+
+def test_health_reports_backend_identity(monkeypatch, tmp_path):
+    """v4.7 identity handshake: /health names the backend's state home and
+    sandbox flag, so the desktop supervisor can refuse to adopt strangers.
+    (The 2026-07-27 'wiped state' incidents were the real app ADOPTING an
+    orphaned sandbox backend on port 8000 and rendering its empty state —
+    no real file was ever written, which is why the write-gate never fired.)"""
+    c = TestClient(app)
+    j = c.get("/health").json()
+    assert j["service"] == "ridian-agency"
+    assert "data_dir" in j
+    assert j["sandbox"] is False
+
+    monkeypatch.setenv("RIDIAN_SANDBOX", "1")
+    monkeypatch.setenv("RIDIAN_DATA_DIR", str(tmp_path / "sbx"))
+    j2 = c.get("/health").json()
+    assert j2["sandbox"] is True
+    assert Path(j2["data_dir"]).resolve() == (tmp_path / "sbx").resolve()
 
 
 def test_frozen_entrypoint_refuses_sandbox_misconfig_cleanly(monkeypatch):

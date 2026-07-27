@@ -202,6 +202,7 @@ const SETTINGS_FIELDS = [
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
   'quickbooks_client_id',
+  'quickbooks_environment',
   'appearance',
 ];
 const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password',
@@ -3082,6 +3083,9 @@ function applySettingsToForm(settings) {
     if (!input) return;
     if (name === 'appearance') {
       input.value = settings[name] || 'system';
+    } else if (name === 'quickbooks_environment') {
+      // Unset means the safe default — mirror quickbooks_service.get_environment.
+      input.value = settings[name] === 'production' ? 'production' : 'sandbox';
     } else {
       input.value = settings[name] || '';
     }
@@ -3164,6 +3168,11 @@ function openSettings() {
     if (first && typeof first.focus === 'function') first.focus();
   });
   loadGoogleStatus();
+  // Status lines must reflect the CURRENT state on every open — a failure
+  // message from a previous attempt must never greet the user as if it
+  // described the present.
+  _qbSetStatus('');
+  _qbRefreshStatus();
 }
 
 function openTips() {
@@ -3199,9 +3208,11 @@ function handleSettingsKeydown(e) {
   if (e.key === 'Escape') { e.preventDefault(); closeSettings(); }
 }
 
+// Returns true when the save persisted, false on any failure — so flows
+// that save as a STEP (Connect QuickBooks) can branch on the outcome.
 async function saveSettings(e) {
   if (e) e.preventDefault();
-  if (!els.settingsForm) return;
+  if (!els.settingsForm) return false;
   const fd = new FormData(els.settingsForm);
   const payload = {};
   SETTINGS_FIELDS.forEach((name) => { payload[name] = (fd.get(name) || '').toString().trim(); });
@@ -3246,9 +3257,16 @@ async function saveSettings(e) {
     setTimeout(() => {
       if (els.settingsStatus && els.settingsStatus.textContent === 'Settings saved.') setSettingsStatus('');
     }, 2500);
+    // A save can change the QuickBooks environment — the status line must
+    // reflect it immediately (e.g. show the reconnect-needed mismatch),
+    // not wait for the modal to be reopened. Suppressed while the Connect
+    // flow drives the status line itself (its save would race this fetch).
+    if (!_qbConnecting) _qbRefreshStatus();
+    return true;
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     setSettingsStatus(/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg) ? 'Backend is not reachable.' : `Could not save: ${msg}`, 'err');
+    return false;
   } finally { els.settingsSaveBtn.disabled = false; }
 }
 
@@ -6129,10 +6147,21 @@ if (_receiptSpeakBtn) {
    OAuth consent happens in the system browser via the backend. */
 const _qbStatusEl = document.getElementById('settings-qb-status');
 function _qbSetStatus(text) { if (_qbStatusEl) _qbStatusEl.textContent = text; }
+// Status text always names the environment, and a saved connection that
+// belongs to the OTHER environment says so instead of failing later with
+// opaque auth errors.
+function _qbStatusText(s) {
+  const env = s.environment === 'production' ? 'production' : 'sandbox';
+  if (s.in_progress) return 'Waiting for the browser sign-in to finish…';
+  if (s.environment_mismatch) {
+    return `Connected to the other environment — click Connect QuickBooks to reconnect in ${env}.`;
+  }
+  return s.connected ? `Connected to ${env} (company ${s.realm_id}).` : 'Not connected.';
+}
 async function _qbRefreshStatus() {
   try {
     const s = await fetch(`${BACKEND}/quickbooks/status`).then((r) => (r.ok ? r.json() : null));
-    if (s) _qbSetStatus(s.connected ? `Connected (company ${s.realm_id}).` : 'Not connected.');
+    if (s) _qbSetStatus(_qbStatusText(s));
   } catch (_) { /* backend not up */ }
 }
 // v4.3 two-phase connect — same pattern as connectGoogleDrive: the desktop
@@ -6140,12 +6169,35 @@ async function _qbRefreshStatus() {
 // and surface every failure. A click may never be a silent no-op.
 const _qbConnectBtn = document.getElementById('settings-qb-connect');
 let _qbPollTimer = null;
+let _qbConnecting = false;   // true from Connect click until the flow ends
 function _qbStopPoll() {
   if (_qbPollTimer) { clearInterval(_qbPollTimer); _qbPollTimer = null; }
+  _qbConnecting = false;
 }
 if (_qbConnectBtn) {
   _qbConnectBtn.addEventListener('click', async () => {
     _qbStopPoll();
+    _qbConnecting = true;
+    // ONE ACTION: paste Client ID + Secret, click Connect, done. Persist
+    // whatever the fields hold right now (the exact Save write path — blank
+    // secret still means "keep the stored one"), then start OAuth with the
+    // just-saved values. No Save → close → reopen → Connect dance.
+    _qbSetStatus('Saving credentials…');
+    const saved = await saveSettings();
+    if (!saved) {
+      _qbConnecting = false;
+      _qbSetStatus('Credentials could not be saved — see the message at the bottom of Settings, then try again.');
+      return;
+    }
+    const s = cachedSettings || {};
+    if (!s.quickbooks_client_id || !s.quickbooks_client_secret_configured) {
+      _qbConnecting = false;
+      // Friendly precheck — the backend's "not set" error is unreachable
+      // from this button: with filled fields they were just saved above,
+      // and with missing ones the user gets told exactly what to do.
+      _qbSetStatus('Enter both the Client ID and Client Secret above, then click Connect.');
+      return;
+    }
     _qbSetStatus('Opening your browser for QuickBooks sign-in…');
     try {
       const res = await fetch(`${BACKEND}/quickbooks/connect`, { method: 'POST' });
@@ -6155,21 +6207,38 @@ if (_qbConnectBtn) {
       window.open(data.auth_url);
       _qbSetStatus('Complete the sign-in in your browser…');
       let waited = 0;
+      let pollFails = 0;
       _qbPollTimer = setInterval(async () => {
         waited += 2;
         try {
           const s = await fetch(`${BACKEND}/quickbooks/status`).then((r) => (r.ok ? r.json() : null));
           if (!s) return;
-          if (s.connected) { _qbStopPoll(); _qbSetStatus(`Connected (company ${s.realm_id}).`); return; }
-          if (s.flow_error) { _qbStopPoll(); _qbSetStatus(`Connect failed: ${s.flow_error}`); return; }
-          if (!s.in_progress) { _qbStopPoll(); _qbSetStatus('Connect did not complete — try again.'); return; }
-          if (waited >= 310) {
-            _qbStopPoll();
-            _qbSetStatus('Connect timed out. If no browser window opened, try again.');
+          pollFails = 0;
+          // While THIS flow is pending, `connected` may still describe the
+          // PREVIOUS token — success is only judged once the flow ends.
+          if (s.in_progress) {
+            if (waited >= 310) {
+              _qbStopPoll();
+              _qbSetStatus('Connect timed out. If no browser window opened, try again.');
+            }
+            return;
           }
-        } catch (_) { /* transient poll failure — keep waiting */ }
+          _qbStopPoll();
+          if (s.flow_error) { _qbSetStatus(`Connect failed: ${s.flow_error}`); return; }
+          if (s.connected && !s.environment_mismatch) { _qbSetStatus(_qbStatusText(s)); return; }
+          _qbSetStatus('Connect did not complete — try again.');
+        } catch (_) {
+          // Transient poll failure — keep waiting, but not forever: a dead
+          // backend must not leave the flow (and _qbConnecting) stuck.
+          pollFails += 1;
+          if (pollFails >= 3) {
+            _qbStopPoll();
+            _qbSetStatus('Backend became unreachable during Connect — restart the app and try again.');
+          }
+        }
       }, 2000);
     } catch (err) {
+      _qbConnecting = false;
       _qbSetStatus(`Connect failed: ${err && err.message ? err.message : err}`);
     }
   });
@@ -6182,6 +6251,35 @@ if (_qbDisconnectBtn) {
     _qbRefreshStatus();
   });
 }
+
+/* v4.7: "saved" is a claim — Test is proof. Saves the form first (same
+   one-action pattern as Connect QuickBooks: paste → Test just works), then
+   makes ONE free live call and reports the provider's actual verdict. */
+function _wireKeyTest(btnId, statusId, endpoint) {
+  const btn = document.getElementById(btnId);
+  const status = document.getElementById(statusId);
+  if (!btn || !status) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    status.className = 'field-hint';
+    status.textContent = 'Saving, then testing against the live API…';
+    try {
+      const saved = await saveSettings();
+      if (!saved) { status.textContent = '✗ Could not save settings — fix the error at the bottom first.'; return; }
+      const res = await fetch(`${BACKEND}${endpoint}`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+      status.className = data.ok ? 'field-hint is-ok' : 'field-hint';
+      status.textContent = (data.ok ? '✓ ' : '✗ ') + data.detail;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      status.textContent = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+        ? '✗ Backend is not reachable.' : `✗ Test failed: ${msg}`;
+    } finally { btn.disabled = false; }
+  });
+}
+_wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic');
+_wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai');
 
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {

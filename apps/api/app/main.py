@@ -176,6 +176,9 @@ class SettingsView(BaseModel):
     # SETTABLE_KEYS so a new settings key can never silently vanish again.
     quickbooks_client_id: str = ""
     quickbooks_client_secret_configured: bool = False
+    # v4.6: "sandbox" (default, safe) or "production" — raw stored value;
+    # blank means the sandbox default (quickbooks_service.get_environment).
+    quickbooks_environment: str = ""
     operator_run_cost_ceiling_usd: str = ""
     # v1.4: when True (default), every operator run auto-uploads its artifact
     # folder to Google Drive at the end of the run, no manual click required.
@@ -217,8 +220,17 @@ class SettingsUpdate(BaseModel):
     operator_auto_upload_drive: str | None = None
     quickbooks_client_id: str | None = None
     quickbooks_client_secret: str | None = None
+    quickbooks_environment: str | None = None
     operator_run_cost_ceiling_usd: str | None = None
     appearance: str | None = None
+
+
+class KeyTestResponse(BaseModel):
+    """Result of one cheap real API call proving a key works (v4.7).
+    ``source`` says which store the runtime would use: settings|environment|none."""
+    ok: bool
+    source: str
+    detail: str
 
 
 class ArtifactFolderRequest(BaseModel):
@@ -400,6 +412,14 @@ async def health() -> dict:
         "model": settings_service.get_effective_value("ANTHROPIC_MODEL") or "claude-opus-4-8",
         "anthropic_key_loaded": bool(settings_service.get_effective_value("ANTHROPIC_API_KEY")),
         "openai_key_loaded": bool(settings_service.get_effective_value("OPENAI_API_KEY")),
+        # v4.7 identity handshake: WHO am I, state-wise. The desktop
+        # supervisor refuses to adopt a backend whose state home differs
+        # from its own — on 2026-07-27 orphaned sandbox backends holding
+        # port 8000 were adopted by the real app, which then faithfully
+        # rendered their EMPTY state (the "wiped settings/chats/memory"
+        # incidents). Identity, not trust-the-port.
+        "data_dir": str(data_dir()),
+        "sandbox": bool(os.environ.get("RIDIAN_SANDBOX")),
     }
 
 
@@ -637,6 +657,20 @@ async def projects_load(artifact_folder: str) -> LoadProjectResponse:
     return LoadProjectResponse(**data)
 
 
+@app.post("/settings/test-anthropic", response_model=KeyTestResponse)
+async def settings_test_anthropic() -> KeyTestResponse:
+    """One live, free auth check against Anthropic — 'saved' is a claim,
+    this is proof. Never returns or logs the key itself."""
+    return KeyTestResponse(**await asyncio.to_thread(
+        settings_service.test_api_key, "anthropic"))
+
+
+@app.post("/settings/test-openai", response_model=KeyTestResponse)
+async def settings_test_openai() -> KeyTestResponse:
+    return KeyTestResponse(**await asyncio.to_thread(
+        settings_service.test_api_key, "openai"))
+
+
 @app.get("/settings", response_model=SettingsView)
 async def settings_get() -> SettingsView:
     """Return the operator-visible settings. Never includes smtp_password."""
@@ -659,6 +693,15 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
     and gets an actionable message about whether uploads will work.
     """
     updates = payload.model_dump(exclude_unset=True)
+
+    # v4.6: canonicalize the QuickBooks environment — anything that is not
+    # exactly "production" (case-insensitively) is stored as "sandbox", so
+    # the stored value always matches what the UI select and the service
+    # resolve. Garbage never silently half-works.
+    if "quickbooks_environment" in updates:
+        raw_env = (updates["quickbooks_environment"] or "").strip().lower()
+        updates["quickbooks_environment"] = (
+            "production" if raw_env == "production" else "sandbox")
 
     # Pre-save normalize: store the bare folder ID, not the URL the user pasted.
     if "google_drive_root_folder_id" in updates:

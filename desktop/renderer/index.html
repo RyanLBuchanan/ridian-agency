@@ -1669,6 +1669,9 @@
               <span class="field-label">Anthropic API key</span>
               <input name="anthropic_api_key" type="password" autocomplete="new-password" />
               <span id="settings-anthropic-key-hint" class="field-hint"></span>
+              <!-- "Saved" is a claim; Test is proof — one free live call. -->
+              <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test key</button>
+              <span id="settings-test-anthropic-status" class="field-hint" role="status" aria-live="polite"></span>
             </label>
             <label class="field">
               <span class="field-label">Planner model</span>
@@ -1720,6 +1723,8 @@
               <span class="field-label">OpenAI API key</span>
               <input name="openai_api_key" type="password" autocomplete="new-password" />
               <span id="settings-openai-key-hint" class="field-hint"></span>
+              <button id="settings-test-openai" type="button" class="btn btn-ghost btn-compact">Test key</button>
+              <span id="settings-test-openai-status" class="field-hint" role="status" aria-live="polite"></span>
             </label>
             <label class="field">
               <span class="field-label">Model</span>
@@ -1763,6 +1768,20 @@
 
           <fieldset class="form-group">
             <legend>QuickBooks Online (Ridian Technologies)</legend>
+            <label class="field">
+              <span class="field-label">Environment</span>
+              <select name="quickbooks_environment">
+                <option value="sandbox">Sandbox (test company — safe)</option>
+                <option value="production">Production (real books)</option>
+              </select>
+              <span class="field-hint">
+                Sandbox pairs with <strong>Development</strong> keys and a
+                sandbox company from developer.intuit.com — it can never touch
+                the real company file. Choose Production (with Production
+                keys) only when you're ready for real books. After switching,
+                click Connect QuickBooks again.
+              </span>
+            </label>
             <label class="field">
               <span class="field-label">Client ID</span>
               <input name="quickbooks_client_id" type="text" autocomplete="off" />

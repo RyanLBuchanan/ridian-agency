@@ -54,10 +54,14 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "smtp_from_email",
     "google_drive_root_folder_id",
     "operator_auto_upload_drive",
-    # v4.0: QuickBooks Online OAuth app credentials (production). The secret
-    # joins SECRET_KEYS below — never returned by the public view.
+    # v4.0: QuickBooks Online OAuth app credentials. The secret joins
+    # SECRET_KEYS below — never returned by the public view.
     "quickbooks_client_id",
     "quickbooks_client_secret",
+    # v4.6: "sandbox" (default — test company, safe) or "production" (real
+    # books, must be chosen explicitly). Resolved by
+    # quickbooks_service.get_environment(); anything unrecognized = sandbox.
+    "quickbooks_environment",
     # v3.2: hard per-run dollar ceiling. Blank = the $1.00 default (an
     # untouched field is blank, so this is the only way a default can apply);
     # "off" = no ceiling, deliberately. Parsed by
@@ -129,9 +133,17 @@ def save_settings(updates: dict[str, Any]) -> dict[str, str]:
             continue
         val = updates[k]
         # Secrets: blank/missing means "keep the existing saved value" so the
-        # GUI never has to round-trip the secret back to the server.
-        if k in SECRET_KEYS and (val is None or val == ""):
-            continue
+        # GUI never has to round-trip the secret back to the server. API
+        # keys/tokens are TRIMMED — a stray newline or space from a
+        # clipboard is invisible in a masked field but makes the credential
+        # malformed. smtp_password is exempt: SMTP passwords may legally
+        # contain leading/trailing whitespace, so it keeps its raw form.
+        if k in SECRET_KEYS:
+            val = "" if val is None else str(val)
+            if k != "smtp_password":
+                val = val.strip()
+            if val == "":
+                continue
         new[k] = "" if val is None else str(val)
 
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -154,14 +166,18 @@ def public_view() -> dict[str, Any]:
     """
     s = load_settings()
     out: dict[str, Any] = {k: s.get(k, "") for k in PUBLIC_KEYS}
+    # "Configured" means a real, non-whitespace value exists — a stored
+    # blank/whitespace string must never render a "currently saved" hint.
+    # (smtp_password stays truthiness-based: whitespace passwords are
+    # RFC-legal and stored verbatim, so a stored one IS configured.)
+    def _set(k: str) -> bool:
+        return bool((s.get(k) or "").strip())
     out["smtp_password_configured"] = bool(s.get("smtp_password"))
-    out["openai_api_key_configured"] = bool(s.get("openai_api_key"))
+    out["openai_api_key_configured"] = _set("openai_api_key")
     out["anthropic_api_key_configured"] = bool(
-        s.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+        _set("anthropic_api_key") or (os.getenv("ANTHROPIC_API_KEY") or "").strip()
     )
-    out["quickbooks_client_secret_configured"] = bool(
-        s.get("quickbooks_client_secret")
-    )
+    out["quickbooks_client_secret_configured"] = _set("quickbooks_client_secret")
     return out
 
 
@@ -182,6 +198,51 @@ def apply_to_environment() -> None:
         val = (s.get(snake) or "").strip()
         if val:
             os.environ[env_key] = val
+
+
+def test_api_key(provider: str) -> dict[str, Any]:
+    """One cheap REAL API call to prove a stored key actually works.
+
+    A "currently saved" hint only says a string exists; this says whether
+    the provider accepts it (models-list endpoints: free, auth-checked).
+    Reports the SOURCE the runtime would use (settings file vs environment)
+    so a stale env value can never masquerade as a working saved key."""
+    import httpx
+
+    s = load_settings()
+    if provider == "anthropic":
+        stored = (s.get("anthropic_api_key") or "").strip()
+        env = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+        url = "https://api.anthropic.com/v1/models"
+        headers_for = lambda key: {"x-api-key": key, "anthropic-version": "2023-06-01"}  # noqa: E731
+        label = "Anthropic"
+    elif provider == "openai":
+        stored = (s.get("openai_api_key") or "").strip()
+        env = (os.getenv("OPENAI_API_KEY") or "").strip()
+        url = "https://api.openai.com/v1/models"
+        headers_for = lambda key: {"Authorization": f"Bearer {key}"}  # noqa: E731
+        label = "OpenAI"
+    else:
+        return {"ok": False, "source": "none", "detail": f"Unknown provider {provider!r}."}
+
+    key = stored or env
+    source = "settings" if stored else ("environment" if env else "none")
+    if not key:
+        return {"ok": False, "source": "none",
+                "detail": f"No {label} API key is saved. Paste one and try again."}
+    try:
+        resp = httpx.get(url, headers=headers_for(key), timeout=15)
+    except Exception as exc:  # noqa: BLE001 — network problems are a result, not a crash
+        return {"ok": False, "source": source,
+                "detail": f"Could not reach {label} ({type(exc).__name__}) — check your connection and try again."}
+    if resp.status_code == 200:
+        return {"ok": True, "source": source,
+                "detail": f"Key works — verified live with {label} (from {source})."}
+    if resp.status_code in (401, 403):
+        return {"ok": False, "source": source,
+                "detail": f"{label} rejected the key (HTTP {resp.status_code}): it is invalid or revoked. Paste a fresh one and Save."}
+    return {"ok": False, "source": source,
+            "detail": f"{label} responded HTTP {resp.status_code} — could not verify; try again."}
 
 
 def get_bool_setting(key: str, default: bool = False) -> bool:

@@ -59,6 +59,41 @@ function _portInUse(port) {
   });
 }
 
+// v4.7: the state home THIS app instance expects its backend to use.
+function _expectedDataDir() {
+  if (process.env.RIDIAN_SANDBOX && process.env.RIDIAN_DATA_DIR) {
+    return process.env.RIDIAN_DATA_DIR;
+  }
+  // Dev (.bat flow): the historical writable base is the repo's apps/api.
+  if (!app.isPackaged) return path.join(__dirname, '..', 'apps', 'api');
+  return path.join(process.env.APPDATA || '', 'Ridian Operator');
+}
+
+// v4.7 identity handshake: ask the process on our port WHO it is. Returns
+// true only for a Ridian backend using OUR expected data dir. Anything
+// else — a sandbox orphan, another profile, a non-Ridian service, or a
+// backend too old to identify itself — is a stranger.
+async function _backendIdentityMatches() {
+  // The abort deadline covers headers AND body: a stranger that sends 200
+  // then stalls the body must not hang startup past the 3s budget (found
+  // by adversarial review — clearing the timeout before res.json() left a
+  // silent up-to-5-minute hang exactly for the not-Ridian-at-all case).
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const res = await fetch(`${BACKEND_ORIGIN}/health`, { signal: ctl.signal });
+    if (!res.ok) return false;
+    const j = await res.json();
+    if (j.service !== 'ridian-agency' || typeof j.data_dir !== 'string') return false;
+    const norm = (p) => path.resolve(p).toLowerCase();
+    return norm(j.data_dir) === norm(_expectedDataDir());
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function startBackendIfNeeded() {
   // Three-way spawn (v4.2):
   //   dev            -> no-op here; uvicorn runs from the venv exactly as
@@ -66,18 +101,39 @@ async function startBackendIfNeeded() {
   //   packaged       -> spawn the BUNDLED self-contained backend
   //                     (resources/backend/ridian-backend.exe, PyInstaller
   //                     onedir) — no Python/venv/repo on the target machine.
-  //   either mode with the port already serving -> reuse, never collide.
-  // The old baked-repo-path mode (backend-location.json) is retired.
-  if (!app.isPackaged) return;
-  if (await _portInUse(BACKEND_PORT)) return;
+  //   port already serving -> adopt ONLY after the identity handshake
+  //                     (v4.7). "Reuse whatever answers the port" let the
+  //                     real app adopt orphaned sandbox backends and render
+  //                     their empty state as if the operator's settings,
+  //                     chats, and memory had been wiped (4x, 2026-07-27).
+  // Returns false when startup must abort (stranger on the port).
+  // The handshake runs in DEV too (expected home: the repo's apps/api) —
+  // the dev .bat flow was just as exposed to orphan adoption.
+  if (await _portInUse(BACKEND_PORT)) {
+    if (await _backendIdentityMatches()) return true;
+    dialog.showErrorBox(
+      'Ridian Operator — another backend owns port ' + BACKEND_PORT,
+      'Something is already serving on port ' + BACKEND_PORT + ', but it is not '
+      + 'THIS app\'s backend (wrong state directory, or not Ridian at all — '
+      + 'often a leftover test/sandbox backend).\n\n'
+      + 'Ridian Operator will not adopt it: doing so would show you the wrong '
+      + '(usually empty) settings, chats, and memory.\n\n'
+      + 'Fix: close the other process — look for ridian-backend.exe or '
+      + 'python/uvicorn in Task Manager, or run '
+      + '"netstat -ano | findstr :' + BACKEND_PORT + '" to find its PID — '
+      + 'then launch Ridian Operator again.');
+    return false;
+  }
+  if (!app.isPackaged) return true;   // dev: backend is external (.bat); nothing to spawn
   const exe = path.join(process.resourcesPath, 'backend', 'ridian-backend.exe');
-  if (!fs.existsSync(exe)) return;
+  if (!fs.existsSync(exe)) return true;
   _backendChild = spawn(exe, [], {
     cwd: path.dirname(exe),
     windowsHide: true,
     stdio: 'ignore',
   });
   _backendChild.on('exit', () => { _backendChild = null; });
+  return true;
 }
 
 function stopBackend() {
@@ -92,13 +148,29 @@ function stopBackend() {
   }
 }
 
-// Window/taskbar icon: the SUNRISE-WAVES emblem (favicon.ico, multi-size) —
-// the Ridian identity shared with the website + Open Gulf. Deliberately NOT
-// a file named icon.ico/icon.png: those names carried the retired blue "RA"
-// badge and are the Electron-tooling default, so they were deleted to keep
-// any future packaging config from silently shipping the wrong identity.
-const ICON_PATH = path.join(__dirname, 'assets', 'favicon.ico');
-const ICON_OPTION = fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {};
+// Window/taskbar icon: the SUNRISE-WAVES emblem — the Ridian identity shared
+// with the website + Open Gulf. Deliberately NOT a file named icon.ico/
+// icon.png: those names carried the retired blue "RA" badge and are the
+// Electron-tooling default, so they were deleted to keep any future packaging
+// config from silently shipping the wrong identity.
+//
+// PACKAGED: set NO window icon. Windows derives the window/taskbar icon
+// from the exe's embedded resource (sunrise-waves.ico via win.icon — proper
+// multi-res: 256/48/32/16, classic BMP frames). Passing an .ico path to
+// BrowserWindow loads as an EMPTY image (Electron's image loader does not
+// decode ICO), and an explicitly-set empty icon OVERRIDES the exe's good
+// one — that was the blank-taskbar bug, regardless of where the .ico lived.
+// DEV: the exe is electron.exe (Electron logo), so give the window the
+// emblem from a PNG, which the image loader handles reliably.
+const ICON_PATH = path.join(__dirname, 'assets', 'android-chrome-512x512.png');
+const ICON_OPTION = app.isPackaged
+  ? {}
+  : (fs.existsSync(ICON_PATH) ? { icon: ICON_PATH } : {});
+// Windows AppUserModel surfaces (taskbar relaunch/pin) want a real .ico
+// FILE path — ships via extraResources in packaged builds.
+const APPDETAILS_ICON = app.isPackaged
+  ? path.join(process.resourcesPath, 'sunrise-waves.ico')
+  : path.join(__dirname, 'assets', 'sunrise-waves.ico');
 
 // Stable AppUserModelID so Windows groups our taskbar entries and applies
 // the icon correctly when the shortcut is launched. MUST match the AUMID
@@ -141,7 +213,7 @@ function createWindow() {
   if (process.platform === 'win32' && fs.existsSync(LAUNCHER_PATH)) {
     win.setAppDetails({
       appId: 'com.ridiantechnologies.ridianagency',   // must match the .lnk + setAppUserModelId
-      appIconPath: ICON_PATH,                          // assets/favicon.ico — sunrise-waves
+      appIconPath: APPDETAILS_ICON,                    // sunrise-waves.ico (real file, never asar)
       appIconIndex: 0,
       relaunchCommand: `"${LAUNCHER_PATH}"`,
       relaunchDisplayName: 'Ridian Agency',
@@ -216,7 +288,8 @@ app.whenReady().then(async () => {
   if (!sandboxEnvPreflight()) { app.quit(); return; }
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
-  await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
+  const backendOk = await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
+  if (!backendOk) { app.quit(); return; }          // stranger on the port — refused
   createWindow();
 
   app.on('activate', () => {
