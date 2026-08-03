@@ -4800,6 +4800,14 @@ body {
   font-size: var(--fs-sm);
   color: var(--color-text-strong);
 }
+/* Inline status text occupying a row's control column (Drive/Gmail rows). */
+.settings-row-inline {
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .settings-advanced {
   border-top: 1px solid var(--color-border);
   padding-top: var(--space-3);

@@ -45,6 +45,7 @@ from .services.export_service import (  # noqa: E402
     open_artifact_folder,
 )
 from .services import dashboard_service  # noqa: E402
+from .services import gmail_service  # noqa: E402
 from .services import google_drive_service  # noqa: E402
 from .services import memory_service  # noqa: E402
 from .services import operation_log_service  # noqa: E402
@@ -669,6 +670,43 @@ async def settings_test_anthropic() -> KeyTestResponse:
 async def settings_test_openai() -> KeyTestResponse:
     return KeyTestResponse(**await asyncio.to_thread(
         settings_service.test_api_key, "openai"))
+
+
+@app.post("/google/test-drive", response_model=KeyTestResponse)
+async def google_test_drive() -> KeyTestResponse:
+    """One REAL Drive call (about.get) proving the connection works —
+    verified-only status, never inferred from a token merely existing."""
+    def probe() -> dict:
+        st = google_drive_service.get_status()   # real API call when creds valid
+        if st.get("connected"):
+            who = st.get("email") or "your account"
+            return {"ok": True, "source": "google_token",
+                    "detail": f"Drive works — verified live as {who}."}
+        if not google_drive_service.credentials_present():
+            return {"ok": False, "source": "none",
+                    "detail": "google_credentials.json is missing (Desktop-app "
+                              "OAuth client from Google Cloud Console) — see "
+                              "QUICKSTART.md, then Connect."}
+        return {"ok": False, "source": "google_token",
+                "detail": "Drive is not connected (no valid token). Click Connect."}
+    return KeyTestResponse(**await asyncio.to_thread(probe))
+
+
+@app.post("/google/test-gmail", response_model=KeyTestResponse)
+async def google_test_gmail() -> KeyTestResponse:
+    """One REAL Gmail call (users.getProfile) proving draft access works."""
+    def probe() -> dict:
+        email = gmail_service.get_user_email()   # real API call
+        if email:
+            return {"ok": True, "source": "google_token",
+                    "detail": f"Gmail works — verified live as {email}."}
+        if not gmail_service.is_compose_ready():
+            return {"ok": False, "source": "google_token",
+                    "detail": "Gmail draft access is not granted — Connect (or "
+                              "Reconnect) Google to grant it."}
+        return {"ok": False, "source": "google_token",
+                "detail": "Gmail did not respond — try again."}
+    return KeyTestResponse(**await asyncio.to_thread(probe))
 
 
 @app.get("/settings", response_model=SettingsView)

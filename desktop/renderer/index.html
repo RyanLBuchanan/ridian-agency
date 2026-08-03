@@ -865,6 +865,28 @@
                   </div>
 
                   <div class="settings-row">
+                    <span id="settings-dot-drive" class="settings-dot" aria-hidden="true"></span>
+                    <span class="settings-row-label">Drive</span>
+                    <span id="settings-drive-note" class="settings-row-inline"></span>
+                    <button id="settings-test-drive" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    <button id="settings-drive-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                  </div>
+                  <div class="settings-row-note">
+                    <span id="settings-drive-status" role="status" aria-live="polite"></span>
+                  </div>
+
+                  <div class="settings-row">
+                    <span id="settings-dot-gmail" class="settings-dot" aria-hidden="true"></span>
+                    <span class="settings-row-label">Gmail</span>
+                    <span id="settings-gmail-note" class="settings-row-inline"></span>
+                    <button id="settings-test-gmail" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    <button id="settings-gmail-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                  </div>
+                  <div class="settings-row-note">
+                    <span id="settings-gmail-status" role="status" aria-live="polite"></span>
+                  </div>
+
+                  <div class="settings-row">
                     <span class="settings-dot is-blank" aria-hidden="true"></span>
                     <span class="settings-row-label">Voice</span>
                     <label class="settings-toggle">
@@ -907,6 +929,17 @@
                           <option value="tts-1">tts-1</option>
                           <option value="tts-1-hd">tts-1-hd</option>
                         </select></label>
+                      <label class="settings-adv-field"><span>SMTP host</span>
+                        <input name="smtp_host" type="text" autocomplete="off" placeholder="smtp.gmail.com" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>SMTP port</span>
+                        <input name="smtp_port" type="text" inputmode="numeric" autocomplete="off" placeholder="587" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>SMTP username</span>
+                        <input name="smtp_username" type="email" autocomplete="off" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>SMTP password</span>
+                        <input name="smtp_password" type="password" autocomplete="new-password" class="settings-input" />
+                        <span id="settings-password-hint"></span></label>
+                      <label class="settings-adv-field"><span>SMTP from email</span>
+                        <input name="smtp_from_email" type="email" autocomplete="off" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Run cost ceiling (USD)</span>
                         <input name="operator_run_cost_ceiling_usd" type="text" autocomplete="off" placeholder="1.00" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Appearance</span>

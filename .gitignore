@@ -48,3 +48,6 @@ desktop/backend-location.json
 apps/api/dist/
 apps/api/build/
 apps/api/*.spec
+
+# Local Claude Code config — machine-specific, never tracked.
+.claude/

@@ -203,6 +203,36 @@ def test_key_test_endpoint_with_no_key_says_so(monkeypatch, tmp_path):
     assert o["ok"] is False and o["source"] == "none"
 
 
+def test_google_row_tests_are_verified_by_real_calls(monkeypatch):
+    """v5.0 Phase 2: the Drive/Gmail row Tests report ok ONLY from a real
+    API result, with actionable details for every failure shape."""
+    from app.services import gmail_service, google_drive_service
+
+    # Drive: connected (get_status did a real about() call) -> ok.
+    monkeypatch.setattr(google_drive_service, "get_status",
+                        lambda: {"connected": True, "email": "ryan@x.test"})
+    body = client.post("/google/test-drive").json()
+    assert body["ok"] is True and "ryan@x.test" in body["detail"]
+
+    # Drive: no credentials file -> actionable, not vague.
+    monkeypatch.setattr(google_drive_service, "get_status",
+                        lambda: {"connected": False, "email": None})
+    monkeypatch.setattr(google_drive_service, "credentials_present", lambda: False)
+    body = client.post("/google/test-drive").json()
+    assert body["ok"] is False and "google_credentials.json" in body["detail"]
+
+    # Gmail: profile call works -> ok with the live address.
+    monkeypatch.setattr(gmail_service, "get_user_email", lambda: "ryan@x.test")
+    body = client.post("/google/test-gmail").json()
+    assert body["ok"] is True and "ryan@x.test" in body["detail"]
+
+    # Gmail: scope not granted -> says to (re)connect.
+    monkeypatch.setattr(gmail_service, "get_user_email", lambda: None)
+    monkeypatch.setattr(gmail_service, "is_compose_ready", lambda: False)
+    body = client.post("/google/test-gmail").json()
+    assert body["ok"] is False and "Connect" in body["detail"]
+
+
 def test_frozen_mode_writes_and_reads_the_same_appdata_file(monkeypatch, tmp_path):
     """Frozen build: SETTINGS_PATH must resolve to
     %APPDATA%/Ridian Operator/local_settings.json for BOTH save and load

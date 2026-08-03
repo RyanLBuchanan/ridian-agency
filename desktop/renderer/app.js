@@ -3175,6 +3175,9 @@ function openSettings() {
   // Verified-state dots: neutral until proven this session.
   _setKeyDot('settings-dot-anthropic', null);
   _setKeyDot('settings-dot-openai', null);
+  _setKeyDot('settings-dot-drive', null);
+  _setKeyDot('settings-dot-gmail', null);
+  _googleRowsRefresh();
   // Status lines must reflect the CURRENT state on every open — a failure
   // message from a previous attempt must never greet the user as if it
   // described the present.
@@ -4849,9 +4852,10 @@ const _OP_ERROR_FIXES = [
     run: () => openSettings() },
 ];
 
-// Two-phase Google connect, reporting into whatever line the caller owns —
-// Drive has no Settings section anymore, so this IS the connect surface.
-async function _driveInlineConnect(report) {
+// Two-phase Google connect (ONE sign-in covers Drive AND Gmail — single
+// token, multiple scopes). Reports into whatever line the caller owns;
+// onDone fires when the flow ends with a connection.
+async function _googleTwoPhaseConnect(report, onDone) {
   report('Opening your browser for Google sign-in…');
   try {
     const res = await fetch(`${BACKEND}/google/connect`, { method: 'POST' });
@@ -4874,7 +4878,11 @@ async function _driveInlineConnect(report) {
           return;
         }
         clearInterval(timer);
-        if (s.connected) { report(`Google Drive connected as ${s.email || 'your account'} — run the action again.`); return; }
+        if (s.connected) {
+          report(`Google connected as ${s.email || 'your account'}.`);
+          if (onDone) onDone(s);
+          return;
+        }
         if (s.flow_error) { report(`Google connect failed: ${s.flow_error}`); return; }
         report('Google connect did not complete — try again.');
       } catch (_) { /* transient */ }
@@ -4882,6 +4890,13 @@ async function _driveInlineConnect(report) {
   } catch (err) {
     report(`Google connect failed: ${err && err.message ? err.message : err}`);
   }
+}
+
+// Inline point-of-failure variant (error rows in the chat).
+async function _driveInlineConnect(report) {
+  return _googleTwoPhaseConnect(
+    (t) => report(t),
+    () => report('Google Drive connected — run the action again.'));
 }
 
 function _opRenderError(message) {
@@ -6394,6 +6409,84 @@ function _wireKeyTest(btnId, statusId, endpoint, dotId) {
 }
 _wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic', 'settings-dot-anthropic');
 _wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
+
+/* v5.0 Phase 2: Drive + Gmail as first-class Settings rows. One Google
+   sign-in covers both; each row verifies ITS service with a real API call
+   (dots are Test-proven only, same contract as the key rows). */
+async function _googleRowTest(kind) {
+  const dotId = kind === 'drive' ? 'settings-dot-drive' : 'settings-dot-gmail';
+  const statusEl = document.getElementById(
+    kind === 'drive' ? 'settings-drive-status' : 'settings-gmail-status');
+  _setKeyDot(dotId, null);
+  if (statusEl) { statusEl.className = ''; statusEl.textContent = 'Testing against the live API…'; }
+  try {
+    const res = await fetch(`${BACKEND}/google/test-${kind}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+    _setKeyDot(dotId, !!data.ok);
+    if (statusEl) {
+      statusEl.className = data.ok ? 'is-ok' : '';
+      statusEl.textContent = (data.ok ? '✓ ' : '✗ ') + data.detail;
+    }
+  } catch (err) {
+    _setKeyDot(dotId, false);
+    const msg = err && err.message ? err.message : String(err);
+    if (statusEl) statusEl.textContent = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+      ? '✗ Backend is not reachable.' : `✗ ${msg}`;
+  }
+}
+
+async function _googleRowsRefresh() {
+  const driveConn = document.getElementById('settings-drive-conn');
+  const gmailConn = document.getElementById('settings-gmail-conn');
+  if (!driveConn && !gmailConn) return;
+  try {
+    const s = await fetch(`${BACKEND}/google/status`).then((r) => (r.ok ? r.json() : null));
+    if (!s) return;
+    const label = s.connected ? 'Disconnect' : 'Connect';
+    const note = s.connected
+      ? `Connected as ${s.email || 'your account'} — Test to verify.`
+      : 'Not connected.';
+    for (const [btn, noteId] of [[driveConn, 'settings-drive-note'], [gmailConn, 'settings-gmail-note']]) {
+      if (btn) btn.textContent = label;
+      const n = document.getElementById(noteId);
+      if (n) n.textContent = note;
+    }
+  } catch (_) { /* backend not up */ }
+}
+
+async function _googleConnToggle(statusId) {
+  const statusEl = document.getElementById(statusId);
+  const report = (t) => { if (statusEl) { statusEl.className = ''; statusEl.textContent = t; } };
+  let connected = false;
+  try {
+    const s = await fetch(`${BACKEND}/google/status`).then((r) => (r.ok ? r.json() : null));
+    connected = !!(s && s.connected);
+  } catch (_) { /* treat as not connected */ }
+  if (connected) {
+    if (!window.confirm('Disconnect Google? Drive AND Gmail share one sign-in — both disconnect, and the saved token is deleted from this machine.')) return;
+    try { await fetch(`${BACKEND}/google/disconnect`, { method: 'POST' }); } catch (_) {}
+    _setKeyDot('settings-dot-drive', null);
+    _setKeyDot('settings-dot-gmail', null);
+    report('Disconnected.');
+    _googleRowsRefresh();
+    return;
+  }
+  _googleTwoPhaseConnect(report, () => {
+    _googleRowsRefresh();
+    _googleRowTest('drive');   // verified dots via one real call per service
+    _googleRowTest('gmail');
+  });
+}
+
+const _driveTestBtn = document.getElementById('settings-test-drive');
+if (_driveTestBtn) _driveTestBtn.addEventListener('click', () => _googleRowTest('drive'));
+const _gmailTestBtn = document.getElementById('settings-test-gmail');
+if (_gmailTestBtn) _gmailTestBtn.addEventListener('click', () => _googleRowTest('gmail'));
+const _driveConnBtn = document.getElementById('settings-drive-conn');
+if (_driveConnBtn) _driveConnBtn.addEventListener('click', () => _googleConnToggle('settings-drive-status'));
+const _gmailConnBtn = document.getElementById('settings-gmail-conn');
+if (_gmailConnBtn) _gmailConnBtn.addEventListener('click', () => _googleConnToggle('settings-gmail-status'));
 
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {

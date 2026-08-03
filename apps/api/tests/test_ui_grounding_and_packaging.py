@@ -37,10 +37,15 @@ def test_planner_prompt_carries_verified_ui_facts():
     # v4.9 reality: Settings is a full-page view, single entry bottom-left.
     assert "FULL-PAGE view" in text
     assert "BOTTOM-LEFT" in text
-    # Google Drive connects INLINE at the point of failure — no Settings
-    # section for it (the app once fabricated one; never again).
-    assert "Connect Google Drive" in text
-    assert "NO Settings section" in text
+    # v5.0 Phase 2: Drive + Gmail are first-class rows sharing one sign-in;
+    # the inline point-of-failure Connect stays too.
+    assert "six rows" in text
+    assert "Drive (Test + Connect/Disconnect)" in text
+    assert "Gmail (Test + Connect/Disconnect)" in text
+    assert "ONE Google sign-in covers Drive" in text
+    assert "Connect Google Drive" in text          # inline error-row fix
+    # SMTP lives under Advanced now.
+    assert "SMTP" in text and "Advanced" in text
     # The fabricated paths are explicitly denied:
     assert 'NO "Integrations" page' in text
     assert 'NO "Connections" page' in text
@@ -48,11 +53,13 @@ def test_planner_prompt_carries_verified_ui_facts():
     assert "QuickBooks" in text and "Environment" in text
     # And the facts must match the ACTUAL rendered UI (self-consistency):
     html = (_REPO / "desktop" / "renderer" / "index.html").read_text(encoding="utf-8")
-    assert 'id="settings-view"' in html          # full-page view exists
-    assert 'id="settings-modal"' not in html     # the modal is gone
-    assert 'name="smtp_host"' not in html        # SMTP UI removed
-    assert 'id="google-connect-btn"' not in html  # Drive section removed
-    assert 'id="google-pill"' not in html        # persistent badge removed
+    assert 'id="settings-view"' in html            # full-page view exists
+    assert 'id="settings-modal"' not in html       # the modal stays gone
+    assert 'name="smtp_host"' in html              # SMTP restored (Advanced)
+    assert 'id="settings-drive-conn"' in html      # Drive row restored
+    assert 'id="settings-gmail-conn"' in html      # Gmail row restored
+    assert 'id="settings-test-drive"' in html and 'id="settings-test-gmail"' in html
+    assert 'id="google-pill"' not in html          # persistent badge stays gone
 
 
 def test_planner_prompt_forbids_inventing_ui():
