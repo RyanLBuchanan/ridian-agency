@@ -2426,6 +2426,111 @@ async def log_touch(deal: str, note: str) -> dict:
     return {"deal": _deal_summary(updated), "touches": len(updated.get("touches", []))}
 
 
+# ---------------------------------------------------------------------------
+# v5.0 Phase 3 — follow-through: grounded follow-up drafts + weekly review.
+# ---------------------------------------------------------------------------
+
+def _followup_system() -> str:
+    from ..agents import PROMPTS_DIR as _PD
+    return (_PD / "operator_followup_prompt.txt").read_text(encoding="utf-8")
+
+
+@planner_tool
+async def draft_followup(contact: str, context: str = "") -> dict:
+    """Draft a recap / next-step email to a contact, grounded in the LOGGED
+    touches on their deal. Creates a Gmail DRAFT only — nothing is ever
+    sent without the operator's own review in Gmail. Refuses (before
+    drafting) when the contact is unknown, has no email on record, or has
+    no logged touch to recap — a follow-up recaps something that actually
+    happened.
+
+    Args:
+        contact: Contact id or name to follow up with.
+        context: Optional operator guidance ("mention the Tuesday deadline").
+    """
+    operator = current_operator()
+    operator.note_tool("draft_followup")
+
+    match, candidates = _resolve_contact(contact)
+    if not match:
+        if candidates:
+            return {"error": f"{contact!r} matches several contacts — which one?",
+                    "candidates": [{"id": c.get("id"), "name": c.get("name"),
+                                    "company": c.get("company")} for c in candidates]}
+        return {"error": f"No contact matching {contact!r}. Add them first (add_contact)."}
+    email = (match.get("email") or "").strip()
+    if not email:
+        return {"error": (f"{match.get('name')} has no email on record — the "
+                          "recipient gate only drafts to a contact record's "
+                          "address. Add one with update_contact first.")}
+
+    deals = [d for d in pipeline_service.list_deals()
+             if d.get("contact_id") == match.get("id")]
+    touched = [d for d in deals if d.get("touches")]
+    if not touched:
+        return {"error": (f"No logged touch for {match.get('name')} — a follow-up "
+                          "recaps something that happened. Use log_touch first "
+                          "(what was said / done), then draft the follow-up.")}
+    deal = max(touched, key=lambda d: d.get("last_touch_iso") or "")
+
+    profile = settings_service.load_settings()
+    facts = [
+        f"Contact: {match.get('name')}"
+        + (f" ({match.get('company')})" if match.get("company") else ""),
+        f"Deal: {deal.get('title') or '(untitled)'} — stage {deal.get('stage')}"
+        + (f", value ${deal.get('value_usd')}" if deal.get("value_usd") else ""),
+        "Logged touches (most recent last):",
+    ]
+    for touch in deal.get("touches", [])[-3:]:
+        facts.append(f"  - {touch.get('when', '')[:10]}: {touch.get('note', '')}")
+    if deal.get("next_action"):
+        facts.append(f"Next action: {deal['next_action']}"
+                     + (f" (due {deal['next_action_date']})" if deal.get("next_action_date") else ""))
+    sender = (profile.get("operator_name") or "").strip()
+    if sender:
+        facts.append(f"Operator (signature name): {sender}")
+    if str(context or "").strip():
+        facts.append(f"Operator guidance: {context.strip()}")
+
+    text = await run_text_agent(_followup_system(), "\n".join(facts),
+                                max_tokens=1000)
+    lines = (text or "").strip().split("\n")
+    subject = (lines[0] or "").strip() or f"Following up — {deal.get('title') or match.get('name')}"
+    body = "\n".join(lines[1:]).strip()
+    if not body:
+        return {"error": "The follow-up composer returned nothing — try again."}
+
+    # The SAME gated path the planner's own drafts use: recipient provenance
+    # gate + Gmail config circuit breaker + draft (never send) — the email
+    # comes from the contact RECORD, so the gate passes by construction.
+    return await _draft_gmail(operator, email, subject, body)
+
+
+@planner_tool
+async def weekly_review() -> dict:
+    """The Monday-morning review. READ-ONLY — nothing is written, created,
+    or changed. Returns: active deals gone quiet (no touch in 7 days), next
+    actions due within 7 days, and unpaid QuickBooks invoices (balance > 0)
+    when QuickBooks is connected.
+    """
+    operator = current_operator()
+    operator.note_tool("weekly_review")
+    report = pipeline_service.deals_needing_followup()
+    out: dict = {
+        "stale_deals": [_deal_summary(d) for d in report["stale"]],
+        "due_actions": [_deal_summary(d) for d in report["due"]],
+        "days_stale": report["days_stale"],
+        "due_within_days": report["due_within_days"],
+    }
+    try:
+        invoices = await asyncio.to_thread(quickbooks_service.list_invoices, 50)
+        out["unpaid_invoices"] = [v for v in invoices
+                                  if float(v.get("balance") or 0) > 0]
+    except Exception as exc:  # noqa: BLE001 — review stays useful without QBO
+        out["unpaid_invoices_error"] = str(exc)
+    return out
+
+
 PLANNER_TOOLS = [
     web_research,
     read_url,
@@ -2452,6 +2557,9 @@ PLANNER_TOOLS = [
     update_deal,
     list_deals,
     log_touch,
+    # v5.0 Phase 3 — follow-through
+    draft_followup,
+    weekly_review,
 ]
 
 
