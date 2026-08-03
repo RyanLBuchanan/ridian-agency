@@ -29,7 +29,9 @@ def _new_id() -> str:
 # this from operation logs; now it's a required, self-describing field.
 # "unknown" appears only on records that predate the stamp (one-time backfill,
 # 2026-07-15) — new code must never write it.
-WRITTEN_BY_VALUES = ("commit", "save_memory", "manual", "unknown")
+# "pipeline" = the v5.0 contact/deal tools, where the operator's explicit
+# command is the approval (same consent model as save_memory).
+WRITTEN_BY_VALUES = ("commit", "save_memory", "manual", "pipeline", "unknown")
 
 
 def _stamp(entry: dict, written_by: str, source_op: str) -> dict:
@@ -59,7 +61,8 @@ def _default_brand() -> dict:
 # Contacts
 # ---------------------------------------------------------------------------
 
-CONTACT_FIELDS = ("name", "role", "company", "email", "phone", "notes", "last_contact_iso")
+CONTACT_FIELDS = ("name", "role", "company", "email", "phone", "source",
+                  "notes", "last_contact_iso")
 
 
 def list_contacts() -> list[dict]:

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(../../.venv/Scripts/python.exe -m pytest tests/test_pipeline.py -q)",
+      "Bash(../../.venv/Scripts/python.exe -m pytest tests/test_pipeline.py::test_add_contact_feeds_the_recipient_gate -q)"
+    ]
+  }
+}

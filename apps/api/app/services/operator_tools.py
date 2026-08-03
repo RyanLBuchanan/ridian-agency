@@ -44,6 +44,7 @@ from . import (
     google_drive_service,
     google_workspace_service,
     memory_service,
+    pipeline_service,
     quickbooks_service,
     settings_service,
     tts_service,
@@ -2145,6 +2146,286 @@ async def create_quickbooks_invoice(
     return result
 
 
+# ---------------------------------------------------------------------------
+# v5.0 Phase 1 — contacts + deals pipeline (the back-office spine).
+# Consent model: these write LOCAL state only, and only on the operator's
+# explicit command (same as save_memory) — the command IS the approval.
+# All validation is deterministic Python in pipeline_service/memory_service;
+# invalid input refuses BEFORE anything is written.
+# ---------------------------------------------------------------------------
+
+def _resolve_contact(query: str) -> tuple[dict | None, list[dict]]:
+    """Deterministic contact resolution: id, exact name, unique substring.
+    Returns (match, candidates) — candidates non-empty only on ambiguity."""
+    q = str(query or "").strip().lower()
+    if not q:
+        return None, []
+    contacts = memory_service.list_contacts()
+    for c in contacts:
+        if c.get("id") == query:
+            return c, []
+    exact = [c for c in contacts if (c.get("name") or "").strip().lower() == q]
+    if len(exact) == 1:
+        return exact[0], []
+    if len(exact) > 1:
+        return None, exact
+    subs = [c for c in contacts
+            if q in (c.get("name") or "").lower()
+            or q in (c.get("company") or "").lower()]
+    if len(subs) == 1:
+        return subs[0], []
+    return None, subs
+
+
+def _resolve_deal(query: str) -> tuple[dict | None, list[dict]]:
+    """Deterministic deal resolution: id, then unique contact/title substring."""
+    q = str(query or "").strip().lower()
+    if not q:
+        return None, []
+    deals = pipeline_service.list_deals()
+    for d in deals:
+        if d.get("id") == query:
+            return d, []
+    subs = [d for d in deals
+            if q in (d.get("contact_name") or "").lower()
+            or q in (d.get("title") or "").lower()]
+    if len(subs) == 1:
+        return subs[0], []
+    return None, subs
+
+
+def _deal_summary(d: dict) -> dict:
+    return {"id": d.get("id"), "contact": d.get("contact_name"),
+            "title": d.get("title"), "stage": d.get("stage"),
+            "value_usd": d.get("value_usd"), "next_action": d.get("next_action"),
+            "next_action_date": d.get("next_action_date"),
+            "last_touch": d.get("last_touch_iso")}
+
+
+@planner_tool
+async def add_contact(name: str, company: str = "", email: str = "",
+                      phone: str = "", source: str = "", role: str = "",
+                      notes: str = "") -> dict:
+    """Add a contact to the operator's contact store. Call ONLY when the
+    operator explicitly asked to add/save someone — their command is the
+    approval. Contacts are the ONLY valid source of recipient emails for
+    any send or draft, so capture the email when the operator gives one.
+
+    Args:
+        name: Person's name (required).
+        company: Company or domain they belong to.
+        email: Email address, when the operator provided one.
+        phone: Phone number.
+        source: Where this contact came from (referral, event, inbound...).
+        role: Their role/title.
+        notes: Anything else the operator said about them.
+    """
+    operator = current_operator()
+    operator.note_tool("add_contact")
+    clean = str(name or "").strip()
+    if not clean:
+        return {"error": "name is required."}
+    existing, _ = _resolve_contact(clean)
+    if existing and (not email or (existing.get("email") or "").lower() == email.strip().lower()):
+        return {"error": f"A contact named {existing.get('name')!r} already exists "
+                         f"(id {existing.get('id')}). Use update_contact instead.",
+                "contact": existing}
+    entry = memory_service.add_contact(
+        {"name": clean, "company": company, "email": email, "phone": phone,
+         "source": source, "role": role, "notes": notes},
+        written_by="pipeline", source_op=operator.record.get("id", ""))
+    return {"contact": entry}
+
+
+@planner_tool
+async def update_contact(contact: str, name: str = "", company: str = "",
+                         email: str = "", phone: str = "", source: str = "",
+                         role: str = "", notes: str = "") -> dict:
+    """Update fields on an existing contact (only the fields the operator
+    gave — blanks are left alone). Call only on the operator's explicit ask.
+
+    Args:
+        contact: Contact id or name to update.
+        name: New name, if changing.
+        company: New company.
+        email: New email address.
+        phone: New phone.
+        source: New source.
+        role: New role/title.
+        notes: New notes.
+    """
+    operator = current_operator()
+    operator.note_tool("update_contact")
+    match, candidates = _resolve_contact(contact)
+    if not match:
+        if candidates:
+            return {"error": f"{contact!r} matches several contacts — which one?",
+                    "candidates": [{"id": c.get("id"), "name": c.get("name"),
+                                    "company": c.get("company")} for c in candidates]}
+        return {"error": f"No contact matching {contact!r}. Use add_contact to create one."}
+    updates = {k: v for k, v in {"name": name, "company": company, "email": email,
+                                 "phone": phone, "source": source, "role": role,
+                                 "notes": notes}.items() if str(v or "").strip()}
+    if not updates:
+        return {"error": "nothing to update — give at least one field."}
+    updated = memory_service.update_contact(match["id"], updates)
+    return {"contact": updated}
+
+
+@planner_tool
+async def list_contacts(query: str = "") -> dict:
+    """List contacts, optionally filtered by name/company/email substring.
+    READ-ONLY.
+
+    Args:
+        query: Optional filter text; blank lists everything.
+    """
+    operator = current_operator()
+    operator.note_tool("list_contacts")
+    q = str(query or "").strip().lower()
+    rows = memory_service.list_contacts()
+    if q:
+        rows = [c for c in rows if q in (c.get("name") or "").lower()
+                or q in (c.get("company") or "").lower()
+                or q in (c.get("email") or "").lower()]
+    return {"contacts": rows, "count": len(rows)}
+
+
+@planner_tool
+async def add_deal(contact: str, title: str = "", stage: str = "lead",
+                   value_usd: str = "", next_action: str = "",
+                   next_action_date: str = "", notes: str = "") -> dict:
+    """Open a deal in the pipeline, linked to an EXISTING contact record.
+    Call only on the operator's explicit ask. Stages:
+    lead/contacted/meeting/proposal/won/lost. Invalid input refuses before
+    anything is written.
+
+    Args:
+        contact: Contact id or name the deal belongs to (must already exist —
+            use add_contact first if not).
+        title: Short deal title (e.g. "AI discovery engagement").
+        stage: One of lead/contacted/meeting/proposal/won/lost (default lead).
+        value_usd: Dollar value if the operator stated one (e.g. "4500").
+        next_action: The next concrete step.
+        next_action_date: When it's due (YYYY-MM-DD).
+        notes: Anything else.
+    """
+    operator = current_operator()
+    operator.note_tool("add_deal")
+    match, candidates = _resolve_contact(contact)
+    if not match:
+        if candidates:
+            return {"error": f"{contact!r} matches several contacts — which one?",
+                    "candidates": [{"id": c.get("id"), "name": c.get("name"),
+                                    "company": c.get("company")} for c in candidates]}
+        return {"error": (f"No contact matching {contact!r}. A deal must link to a "
+                          "real contact record — add the contact first "
+                          "(add_contact), then open the deal.")}
+    try:
+        deal = pipeline_service.add_deal(
+            {"contact_id": match["id"], "contact_name": match.get("name", ""),
+             "title": title, "stage": stage, "value_usd": value_usd,
+             "next_action": next_action, "next_action_date": next_action_date,
+             "notes": notes},
+            written_by="pipeline", source_op=operator.record.get("id", ""))
+    except pipeline_service.PipelineError as exc:
+        return {"error": str(exc)}
+    return {"deal": _deal_summary(deal)}
+
+
+@planner_tool
+async def update_deal(deal: str, stage: str = "", value_usd: str = "",
+                      title: str = "", next_action: str = "",
+                      next_action_date: str = "", notes: str = "") -> dict:
+    """Update a deal (stage moves, value, next action...). Only the fields
+    the operator gave — blanks are left alone. Refuses invalid stages,
+    values, or dates before writing.
+
+    Args:
+        deal: Deal id, or the contact name / deal title to match.
+        stage: New stage (lead/contacted/meeting/proposal/won/lost).
+        value_usd: New dollar value the operator stated.
+        title: New title.
+        next_action: New next step.
+        next_action_date: New due date (YYYY-MM-DD).
+        notes: New notes.
+    """
+    operator = current_operator()
+    operator.note_tool("update_deal")
+    match, candidates = _resolve_deal(deal)
+    if not match:
+        if candidates:
+            return {"error": f"{deal!r} matches several deals — which one?",
+                    "candidates": [_deal_summary(d) for d in candidates]}
+        return {"error": f"No deal matching {deal!r}. Use list_deals to see the pipeline."}
+    updates = {k: v for k, v in {"stage": stage, "value_usd": value_usd,
+                                 "title": title, "next_action": next_action,
+                                 "next_action_date": next_action_date,
+                                 "notes": notes}.items() if str(v or "").strip()}
+    if not updates:
+        return {"error": "nothing to update — give at least one field."}
+    try:
+        updated = pipeline_service.update_deal(match["id"], updates)
+    except pipeline_service.PipelineError as exc:
+        return {"error": str(exc)}
+    return {"deal": _deal_summary(updated)}
+
+
+@planner_tool
+async def list_deals(stage: str = "", needs_followup: bool = False) -> dict:
+    """List pipeline deals. READ-ONLY. With needs_followup=True, returns the
+    follow-up report instead: active deals with no touch in 7 days plus
+    next actions due within 7 days — the answer to "what needs follow-up
+    this week?".
+
+    Args:
+        stage: Optional stage filter (lead/contacted/meeting/proposal/won/lost).
+        needs_followup: True for the weekly follow-up view.
+    """
+    operator = current_operator()
+    operator.note_tool("list_deals")
+    if needs_followup:
+        report = pipeline_service.deals_needing_followup()
+        return {"stale": [_deal_summary(d) for d in report["stale"]],
+                "due": [_deal_summary(d) for d in report["due"]],
+                "days_stale": report["days_stale"],
+                "due_within_days": report["due_within_days"]}
+    rows = pipeline_service.list_deals()
+    s = str(stage or "").strip().lower()
+    if s:
+        if s not in pipeline_service.STAGES:
+            return {"error": f"stage must be one of {'/'.join(pipeline_service.STAGES)}."}
+        rows = [d for d in rows if d.get("stage") == s]
+    return {"deals": [_deal_summary(d) for d in rows], "count": len(rows)}
+
+
+@planner_tool
+async def log_touch(deal: str, note: str) -> dict:
+    """Log a touch (call, email, meeting — what happened) on a deal. Updates
+    the deal's last-touch time, which drives the follow-up report. Call only
+    on the operator's explicit ask.
+
+    Args:
+        deal: Deal id, or the contact name / deal title to match.
+        note: What happened, in the operator's words.
+    """
+    operator = current_operator()
+    operator.note_tool("log_touch")
+    match, candidates = _resolve_deal(deal)
+    if not match:
+        if candidates:
+            return {"error": f"{deal!r} matches several deals — which one?",
+                    "candidates": [_deal_summary(d) for d in candidates]}
+        return {"error": f"No deal matching {deal!r}."}
+    try:
+        updated = pipeline_service.log_touch(
+            match["id"], note, written_by="pipeline",
+            source_op=operator.record.get("id", ""))
+    except pipeline_service.PipelineError as exc:
+        return {"error": str(exc)}
+    return {"deal": _deal_summary(updated), "touches": len(updated.get("touches", []))}
+
+
 PLANNER_TOOLS = [
     web_research,
     read_url,
@@ -2163,6 +2444,14 @@ PLANNER_TOOLS = [
     list_quickbooks_items,
     list_quickbooks_invoices,
     create_quickbooks_invoice,
+    # v5.0 Phase 1 — contacts + pipeline (the back-office spine)
+    add_contact,
+    update_contact,
+    list_contacts,
+    add_deal,
+    update_deal,
+    list_deals,
+    log_touch,
 ]
 
 
