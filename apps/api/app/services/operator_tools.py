@@ -597,6 +597,7 @@ async def _research_plan_gate(
                 {"label": "Proceed", "action": "submit", "value": RESEARCH_PLAN_PROCEED},
                 {"label": "Cancel", "action": "submit", "value": RESEARCH_PLAN_CANCEL},
             ],
+            buttons_only=True,   # signature-matched: only the buttons can answer
         )
         await operator.emit_step(
             name="research_plan", status="running",
@@ -1952,6 +1953,7 @@ async def _invoice_approval_gate(operator, customer_id, customer_name, lines, to
         context_hint="QuickBooks invoice approval — nothing created until you answer",
         options=[{"label": "Create it", "action": "submit", "value": INVOICE_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": INVOICE_CANCEL}],
+        buttons_only=True,   # signature-matched: only the buttons can answer
     )
     await operator.emit_step(name="quickbooks_invoice", status="running",
                              detail=f"Awaiting your approval — {customer_name}, ${total:.2f}.")

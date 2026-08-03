@@ -327,6 +327,35 @@ def _query(sql: str) -> list[dict]:
     return resp.json().get("QueryResponse", {})
 
 
+def _fault_detail(resp) -> str:
+    """Human-readable detail from a QuickBooks Fault response body.
+
+    QBO errors carry Fault.Error[].{code, Message, Detail}; the Detail
+    string ("Required param missing...", duplicate DocNumber, etc.) is the
+    part the operator can act on — 'HTTP 400' alone taught nobody anything."""
+    try:
+        errors = (resp.json().get("Fault") or {}).get("Error") or []
+    except Exception:  # noqa: BLE001 — non-JSON body
+        return ""
+    parts = []
+    for e in errors:
+        frag = (e.get("Detail") or "").strip() or (e.get("Message") or "").strip()
+        code = str(e.get("code") or "").strip()
+        if frag:
+            parts.append(frag + (f" (code {code})" if code else ""))
+    return "; ".join(parts)
+
+
+def _body_for_log(resp) -> str:
+    """Full response body for backend.log, capped so a rogue payload can't
+    flood the log. Never contains our credentials — it is QBO's reply."""
+    try:
+        body = getattr(resp, "text", "") or json.dumps(resp.json())
+    except Exception:  # noqa: BLE001
+        body = "<unreadable>"
+    return body[:2000]
+
+
 def list_customers() -> list[dict]:
     rows = _query("select Id, DisplayName, PrimaryEmailAddr from Customer "
                   "where Active = true maxresults 1000").get("Customer", [])
@@ -391,12 +420,24 @@ def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
         json=body, timeout=30,
     )
     if resp.status_code not in (200, 201):
-        raise QuickBooksError(f"Invoice create failed (HTTP {resp.status_code}).", 502)
+        detail = _fault_detail(resp)
+        log.warning("quickbooks.invoice_create_failed status=%s body=%s",
+                    resp.status_code, _body_for_log(resp))
+        raise QuickBooksError(
+            f"Invoice create failed (HTTP {resp.status_code})"
+            + (f": {detail}" if detail else "."), 502)
     inv = resp.json().get("Invoice", {})
     out = {"id": inv.get("Id", ""), "doc_number": inv.get("DocNumber", ""),
            "customer": (inv.get("CustomerRef") or {}).get("name", ""),
            "total": inv.get("TotalAmt", 0),
            "email_status": inv.get("EmailStatus", "NotSet"),
-           "link": f"{_app_url(env)}/app/invoice?txnId={inv.get('Id', '')}"}
+           # deeplinkcompanyid makes the link survive QBO's sign-in redirect:
+           # without it the auth hop drops the whole path+query (verified —
+           # the sign-in Location carries no continuation) and the user lands
+           # on a BLANK new-invoice form; with it, the auth layer parses the
+           # company (it surfaces as account_id_hint in the sign-in URL) and
+           # restores the deep link after login.
+           "link": (f"{_app_url(env)}/app/invoice?txnId={inv.get('Id', '')}"
+                    f"&deeplinkcompanyid={realm}")}
     log.info("quickbooks.invoice_created id=%s total=%s", out["id"], out["total"])
     return out

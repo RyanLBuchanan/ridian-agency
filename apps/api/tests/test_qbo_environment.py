@@ -157,6 +157,55 @@ def test_status_reports_the_active_environment():
     assert qbs.get_status()["environment"] == "production"
 
 
+def test_invoice_deep_link_shape_survives_auth_redirect(monkeypatch):
+    """Pin the EXACT link shape per environment: txnId AND deeplinkcompanyid.
+    Without deeplinkcompanyid, QBO's sign-in redirect drops the whole
+    path+query (verified live: the sign-in Location carries no continuation)
+    and the user lands on a BLANK new-invoice form; with it, the auth layer
+    parses the company (surfacing as account_id_hint) and restores the link."""
+    inv = {"Invoice": {"Id": "145", "DocNumber": "1042",
+                       "CustomerRef": {"name": "Coastal"},
+                       "TotalAmt": 500.0, "EmailStatus": "NotSet"}}
+    _seed_token(env="sandbox")
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(inv))
+    out = qbs.create_invoice("42", [{"description": "d", "amount": 500}])
+    assert out["link"] == ("https://sandbox.qbo.intuit.com/app/invoice"
+                           "?txnId=145&deeplinkcompanyid=555")
+
+    settings_service.save_settings({"quickbooks_environment": "production"})
+    _seed_token(env="production")
+    monkeypatch.setattr(qbs, "httpx", _FakeHttpx(inv))
+    out2 = qbs.create_invoice("42", [{"description": "d", "amount": 500}])
+    assert out2["link"] == ("https://qbo.intuit.com/app/invoice"
+                            "?txnId=145&deeplinkcompanyid=555")
+
+
+def test_invoice_create_fault_detail_reaches_the_operator(monkeypatch):
+    """A QuickBooks Fault must surface its Detail string to the user —
+    'Invoice create failed (HTTP 400).' alone taught nobody anything."""
+    _seed_token(env="sandbox")
+
+    class _FaultHttpx:
+        def post(self, url, **kw):
+            class _R:
+                status_code = 400
+
+                @staticmethod
+                def json():
+                    return {"Fault": {"Error": [{
+                        "Message": "Invalid Reference Id",
+                        "Detail": "Invalid Reference Id : Customer is required for this transaction.",
+                        "code": "2050"}], "type": "ValidationFault"}}
+            return _R()
+
+    monkeypatch.setattr(qbs, "httpx", _FaultHttpx())
+    with pytest.raises(qbs.QuickBooksError) as exc:
+        qbs.create_invoice("42", [{"description": "d", "amount": 500}])
+    assert exc.value.status == 502
+    assert "Customer is required for this transaction." in exc.value.detail
+    assert "code 2050" in exc.value.detail
+
+
 # --------------------------------------------------------------------------
 # Adversarial-review pins: refresh inheritance + mid-operation flips
 # --------------------------------------------------------------------------

@@ -50,6 +50,28 @@ def test_planner_prompt_forbids_inventing_ui():
     assert "not certain" in text
 
 
+def test_planner_prompt_carries_operator_profile_from_settings(monkeypatch, tmp_path):
+    """v4.8: operator_name/operator_email/company_name were saved by the UI
+    and read by NOTHING while the prompt hardcoded 'Ryan Buchanan'. The
+    profile now splices live from Settings and the file carries no name."""
+    monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "s.json")
+    settings_service.save_settings({
+        "operator_name": "Test Operator",
+        "operator_email": "op@example.test",
+        "company_name": "Testco LLC",
+    })
+    from app.agents.planner_agent import build_planner_system
+    system = build_planner_system()
+    assert "Test Operator" in system
+    assert "op@example.test" in system
+    assert "Testco LLC" in system
+    assert "Ryan Buchanan" not in system
+    assert "Ryan" not in _planner_prompt()          # the FILE is identity-free
+    # Unset name degrades honestly instead of guessing.
+    settings_service.save_settings({"operator_name": ""})
+    assert "name not set" in build_planner_system()
+
+
 # --------------------------------------------------------------------------
 # 2. Taskbar icon asset + packaging config
 # --------------------------------------------------------------------------

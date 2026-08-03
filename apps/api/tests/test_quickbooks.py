@@ -69,6 +69,26 @@ def test_no_send_email_delete_reachable_in_code():
                                 "list_quickbooks_invoices", "list_quickbooks_items"]
 
 
+def test_invoice_approval_question_is_buttons_only(qb, tmp_path):
+    """v4.8: the approval is signature-matched — typed text can NEVER satisfy
+    it, so the need event must say buttons_only so the renderer locks the
+    composer instead of letting a submit silently no-op. Open-ended
+    questions keep the free-text default."""
+    op = _ctx(tmp_path, {"user_stated_numbers": [500]})
+    set_current_operator(op)
+    args = {"customer": "Coastal Chamber",
+            "lines": [{"description": "Discovery", "amount": 500}]}
+    asyncio.run(_tool("create_quickbooks_invoice").call(args))          # the ask
+    need = op.record["needs_input"][-1]
+    assert need["buttons_only"] is True
+    assert need["options"] and all(o["action"] == "submit" for o in need["options"])
+    # Signature gate untouched: nothing was created by the ask.
+    assert len(qb) == 0
+    # Open-ended questions stay free-text (default False).
+    entry = asyncio.run(op.emit_needs_input(question="Which color?"))
+    assert entry["buttons_only"] is False
+
+
 def test_create_payload_never_sets_send_state(qb, tmp_path):
     op = _ctx(tmp_path, {"user_stated_numbers": [500]})
     set_current_operator(op)

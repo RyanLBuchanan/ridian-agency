@@ -4506,7 +4506,8 @@ function _opSetRunning(running) {
 function _opUpdateSendEnabled() {
   if (!OPERATOR.runBtn) return;
   const hasText = !!(OPERATOR.command && OPERATOR.command.value.trim());
-  OPERATOR.runBtn.disabled = !!operatorState.running || !hasText;
+  const locked = !!(OPERATOR.command && OPERATOR.command.disabled);
+  OPERATOR.runBtn.disabled = !!operatorState.running || !hasText || locked;
 }
 
 // v2.7: composer state is scoped to its chat. Reset on every navigation
@@ -4536,20 +4537,28 @@ function _opSetAnswerMode(mode) {
   const chip = document.getElementById('operator-answer-chip');
   const label = document.getElementById('operator-answer-chip-text');
   const q = mode ? (mode.question || '').replace(/\s+/g, ' ').trim() : '';
+  // v4.8: signature-matched approvals (invoice preview, research plan) can
+  // ONLY be answered by the declared buttons — typing looked live but a
+  // submit silently no-oped. Lock the composer and say so, instead.
+  const lock = !!(mode && mode.buttonsOnly);
   if (chip && label) {
     if (mode) {
-      label.textContent = 'Answering: ' + (q.length > 70 ? q.slice(0, 67) + '…' : q);
+      label.textContent = (lock ? 'Approval needed: ' : 'Answering: ')
+        + (q.length > 70 ? q.slice(0, 67) + '…' : q);
       chip.classList.remove('hidden');
     } else {
       chip.classList.add('hidden');
     }
   }
   if (OPERATOR.command) {
+    OPERATOR.command.disabled = lock;
     OPERATOR.command.setAttribute(
       'placeholder',
-      mode && q ? `Answer: ${q}` : _COMPOSER_PLACEHOLDER,
+      lock ? 'Use the buttons below to approve or cancel.'
+           : (mode && q ? `Answer: ${q}` : _COMPOSER_PLACEHOLDER),
     );
   }
+  _opUpdateSendEnabled();
   if (!mode) _opHideOptionsRow();
 }
 
@@ -5353,6 +5362,7 @@ function _opHandleEvent(evt) {
         _opSetAnswerMode({
           opId: operatorState.active && operatorState.active.id,
           question: need.question,
+          buttonsOnly: !!need.buttons_only,
         });
       }
       break;

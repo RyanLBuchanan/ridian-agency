@@ -118,6 +118,7 @@ class OperatorContext:
     async def emit_needs_input(
         self, *, question: str, context_hint: str = "",
         options: "list[dict] | None" = None,
+        buttons_only: bool = False,
     ) -> dict:
         """Record a missing-information request + broadcast it to the renderer.
 
@@ -137,6 +138,11 @@ class OperatorContext:
             # The tool that raises the question declares these; the UI renders
             # buttons for options or the composer for free-text.
             "options": [dict(o) for o in options] if options else [],
+            # v4.8: True for signature-matched approvals (invoice preview,
+            # research plan) where ONLY the declared buttons can answer —
+            # typed text can never satisfy the gate, so the renderer locks
+            # the composer instead of letting a submit silently no-op.
+            "buttons_only": bool(buttons_only),
         }
         if "needs_input" not in self.record:
             self.record["needs_input"] = []
