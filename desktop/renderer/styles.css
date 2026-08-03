@@ -4703,6 +4703,141 @@ body {
 .modal-status.is-ok { color: var(--color-success); font-weight: 600; }
 .modal-status.is-err { color: var(--color-error-text); font-weight: 600; }
 
+/* ---------- Settings — full-page view (v4.9, replaces the modal) ----------
+   Occupies the chat pane's grid cell (rail stays); header / scroll / pinned
+   footer. One control style (.settings-input), no explanatory paragraphs. */
+.settings-view {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.settings-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+  color: var(--color-text-strong);
+}
+.settings-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: 14px 110px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+.settings-row-sub {
+  grid-template-columns: 14px 110px minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: -2px;
+}
+.settings-row-note {
+  margin: -4px 0 4px 134px;   /* aligns under the control column */
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 1em;
+}
+.settings-row-note .is-ok { color: var(--color-success); }
+/* Verified-state dot: neutral = unverified (never green just for "saved"),
+   green = live-verified this session, red = verification failed. */
+.settings-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+  justify-self: center;
+}
+.settings-dot.is-ok { background: var(--color-success); }
+.settings-dot.is-err { background: var(--color-error-text); }
+.settings-dot.is-blank { background: transparent; }
+.settings-row-label {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--color-text-strong);
+}
+.settings-input {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  min-width: 0;
+}
+.settings-input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.settings-input-compact { max-width: 170px; }
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+}
+.settings-advanced {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+.settings-advanced > summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--color-muted);
+  user-select: none;
+}
+.settings-adv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: var(--space-3);
+}
+.settings-adv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+}
+.settings-status { min-height: 1.4em; font-size: var(--fs-sm); color: var(--color-muted); }
+.settings-status.is-ok { color: var(--color-success); font-weight: 600; }
+.settings-status.is-err { color: var(--color-error-text); font-weight: 600; }
+.settings-foot {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+/* Inline point-of-failure fix button riding an error row. */
+.operator-error-fix { margin-left: 10px; }
+
 .modal-foot {
   display: flex;
   align-items: center;

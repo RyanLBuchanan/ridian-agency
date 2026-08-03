@@ -34,14 +34,25 @@ def _planner_prompt() -> str:
 def test_planner_prompt_carries_verified_ui_facts():
     text = _planner_prompt()
     assert "APP UI FACTS" in text
-    # The REAL Google Drive path (the one the app once got wrong):
-    assert "Google Workspace" in text
+    # v4.9 reality: Settings is a full-page view, single entry bottom-left.
+    assert "FULL-PAGE view" in text
+    assert "BOTTOM-LEFT" in text
+    # Google Drive connects INLINE at the point of failure — no Settings
+    # section for it (the app once fabricated one; never again).
     assert "Connect Google Drive" in text
+    assert "NO Settings section" in text
     # The fabricated paths are explicitly denied:
     assert 'NO "Integrations" page' in text
     assert 'NO "Connections" page' in text
-    # QuickBooks path, including the environment dropdown:
-    assert "QuickBooks Online" in text and "Environment" in text
+    # QuickBooks row facts, including the environment dropdown:
+    assert "QuickBooks" in text and "Environment" in text
+    # And the facts must match the ACTUAL rendered UI (self-consistency):
+    html = (_REPO / "desktop" / "renderer" / "index.html").read_text(encoding="utf-8")
+    assert 'id="settings-view"' in html          # full-page view exists
+    assert 'id="settings-modal"' not in html     # the modal is gone
+    assert 'name="smtp_host"' not in html        # SMTP UI removed
+    assert 'id="google-connect-btn"' not in html  # Drive section removed
+    assert 'id="google-pill"' not in html        # persistent badge removed
 
 
 def test_planner_prompt_forbids_inventing_ui():

@@ -3021,7 +3021,7 @@ async function uploadArtifactsToDrive() {
 function setSettingsStatus(text, kind) {
   if (!els.settingsStatus) return;
   els.settingsStatus.textContent = text || '';
-  els.settingsStatus.className = 'modal-status';
+  els.settingsStatus.className = 'settings-status';
   if (kind === 'ok') els.settingsStatus.classList.add('is-ok');
   if (kind === 'err') els.settingsStatus.classList.add('is-err');
 }
@@ -3158,21 +3158,38 @@ async function loadSettingsIntoForm() {
   }
 }
 
+// v4.9: Settings is a FULL-PAGE view in the chat pane's grid cell — not a
+// modal. The rail stays; back returns to the chat.
 function openSettings() {
-  if (!els.settingsModal) return;
-  els.settingsModal.classList.remove('hidden');
-  els.settingsModal.setAttribute('aria-hidden', 'false');
+  const view = document.getElementById('settings-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  if (main) main.classList.add('hidden');
+  view.classList.remove('hidden');
   document.addEventListener('keydown', handleSettingsKeydown);
-  loadSettingsIntoForm().then(() => {
-    const first = els.settingsForm && els.settingsForm.elements.namedItem('openai_api_key');
-    if (first && typeof first.focus === 'function') first.focus();
-  });
-  loadGoogleStatus();
+  // Always open at the top. (The old modal auto-focused a mid-form field,
+  // which scrolled it open mid-list — no autofocus, explicit scrollTop.)
+  const scroll = view.querySelector('.settings-scroll');
+  if (scroll) scroll.scrollTop = 0;
+  loadSettingsIntoForm().then(() => { if (scroll) scroll.scrollTop = 0; });
+  // Verified-state dots: neutral until proven this session.
+  _setKeyDot('settings-dot-anthropic', null);
+  _setKeyDot('settings-dot-openai', null);
   // Status lines must reflect the CURRENT state on every open — a failure
   // message from a previous attempt must never greet the user as if it
   // described the present.
   _qbSetStatus('');
   _qbRefreshStatus();
+}
+
+// Verified-state dot helper: null = neutral (unverified), true = verified
+// working, false = verification failed. "Saved" alone never turns a dot on.
+function _setKeyDot(id, state) {
+  const dot = document.getElementById(id);
+  if (!dot) return;
+  dot.classList.remove('is-ok', 'is-err');
+  if (state === true) dot.classList.add('is-ok');
+  if (state === false) dot.classList.add('is-err');
 }
 
 function openTips() {
@@ -3196,12 +3213,13 @@ function handleTipsKeydown(e) {
 }
 
 function closeSettings() {
-  if (!els.settingsModal) return;
-  els.settingsModal.classList.add('hidden');
-  els.settingsModal.setAttribute('aria-hidden', 'true');
+  const view = document.getElementById('settings-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  view.classList.add('hidden');
+  if (main) main.classList.remove('hidden');
   document.removeEventListener('keydown', handleSettingsKeydown);
   setSettingsStatus('');
-  if (els.sidebarSettingsBtn) els.sidebarSettingsBtn.focus();
 }
 
 function handleSettingsKeydown(e) {
@@ -3215,7 +3233,14 @@ async function saveSettings(e) {
   if (!els.settingsForm) return false;
   const fd = new FormData(els.settingsForm);
   const payload = {};
-  SETTINGS_FIELDS.forEach((name) => { payload[name] = (fd.get(name) || '').toString().trim(); });
+  SETTINGS_FIELDS.forEach((name) => {
+    // Fields not rendered in the UI (e.g. SMTP, Drive root folder after the
+    // v4.9 settings rebuild) are OMITTED, never sent blank — omitted means
+    // "leave the stored value alone" on the backend. Sending '' would
+    // silently CLEAR settings we only removed from the screen.
+    if (!els.settingsForm.elements.namedItem(name)) return;
+    payload[name] = (fd.get(name) || '').toString().trim();
+  });
   SETTINGS_SECRET_FIELDS.forEach((name) => {
     const v = (fd.get(name) || '').toString();
     if (v !== '') payload[name] = v;
@@ -4809,6 +4834,56 @@ function _opShowAudio(filename) {
 // six red rows — the wall-of-red from repeated Gmail 403s taught us that.
 const _opRenderedErrors = new Map();  // message → <li>
 
+// v4.9 point-of-failure fixes: a failure whose remedy we KNOW offers it
+// inline, right in the error row — the persistent "Drive offline" badge is
+// gone, so the fix must live where the failure surfaces.
+const _OP_ERROR_FIXES = [
+  { re: /google drive is(n't| not) connected|google_credentials\.json|drive is(n't| not) connected|reconnect google/i,
+    label: 'Connect Google Drive',
+    run: (report) => _driveInlineConnect(report) },
+  { re: /quickbooks is not connected|client id\/secret are not set|connected to the (sandbox|production) environment/i,
+    label: 'Open Settings',
+    run: () => openSettings() },
+  { re: /anthropic_api_key is not set|openai_api_key is not set|api key is invalid|rejected the (api )?key/i,
+    label: 'Open Settings',
+    run: () => openSettings() },
+];
+
+// Two-phase Google connect, reporting into whatever line the caller owns —
+// Drive has no Settings section anymore, so this IS the connect surface.
+async function _driveInlineConnect(report) {
+  report('Opening your browser for Google sign-in…');
+  try {
+    const res = await fetch(`${BACKEND}/google/connect`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    if (!data.auth_url) throw new Error('Backend did not return a sign-in URL.');
+    window.open(data.auth_url);
+    report('Complete the Google sign-in in your browser…');
+    let waited = 0;
+    const timer = setInterval(async () => {
+      waited += 2;
+      try {
+        const s = await fetch(`${BACKEND}/google/status`).then((r) => (r.ok ? r.json() : null));
+        if (!s) return;
+        if (s.in_progress) {
+          if (waited >= 310) { clearInterval(timer); report('Google connect timed out — try again.'); }
+          return;
+        }
+        clearInterval(timer);
+        if (s.connected) { report(`Google Drive connected as ${s.email || 'your account'} — run the action again.`); return; }
+        if (s.flow_error) { report(`Google connect failed: ${s.flow_error}`); return; }
+        report('Google connect did not complete — try again.');
+      } catch (_) { /* transient */ }
+    }, 2000);
+  } catch (err) {
+    report(`Google connect failed: ${err && err.message ? err.message : err}`);
+  }
+}
+
 function _opRenderError(message) {
   if (!OPERATOR.errors) return;
   OPERATOR.errors.classList.remove('hidden');
@@ -4823,13 +4898,30 @@ function _opRenderError(message) {
   if (existing) {
     const n = (parseInt(existing.dataset.count || '1', 10) || 1) + 1;
     existing.dataset.count = String(n);
-    existing.textContent = `${message}  (×${n})`;
+    let c = existing.querySelector('.op-err-count');
+    if (!c) {
+      c = document.createElement('span');
+      c.className = 'op-err-count';
+      existing.appendChild(c);
+    }
+    c.textContent = `  (×${n})`;
     return;
   }
   const ul = OPERATOR.errors.querySelector('.operator-errors-list');
   const li = document.createElement('li');
-  li.textContent = message;
+  const msg = document.createElement('span');
+  msg.textContent = message;
+  li.appendChild(msg);
   li.dataset.count = '1';
+  const fix = _OP_ERROR_FIXES.find((f) => f.re.test(message));
+  if (fix) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-ghost btn-compact operator-error-fix';
+    b.textContent = fix.label;
+    b.addEventListener('click', () => fix.run((t) => { msg.textContent = t; }));
+    li.appendChild(b);
+  }
   ul.appendChild(li);
   _opRenderedErrors.set(message, li);
 }
@@ -6168,10 +6260,18 @@ function _qbStatusText(s) {
   }
   return s.connected ? `Connected to ${env} (company ${s.realm_id}).` : 'Not connected.';
 }
+// QBO's dot IS verified state: a connected token in the matching
+// environment was validated live at connect time (companyinfo probe).
+function _qbSetDot(s) {
+  _setKeyDot('settings-dot-qbo',
+    s ? (s.connected && !s.environment_mismatch ? true
+         : (s.environment_mismatch || s.flow_error ? false : null))
+      : null);
+}
 async function _qbRefreshStatus() {
   try {
     const s = await fetch(`${BACKEND}/quickbooks/status`).then((r) => (r.ok ? r.json() : null));
-    if (s) _qbSetStatus(_qbStatusText(s));
+    if (s) { _qbSetStatus(_qbStatusText(s)); _qbSetDot(s); }
   } catch (_) { /* backend not up */ }
 }
 // v4.3 two-phase connect — same pattern as connectGoogleDrive: the desktop
@@ -6234,6 +6334,7 @@ if (_qbConnectBtn) {
             return;
           }
           _qbStopPoll();
+          _qbSetDot(s);
           if (s.flow_error) { _qbSetStatus(`Connect failed: ${s.flow_error}`); return; }
           if (s.connected && !s.environment_mismatch) { _qbSetStatus(_qbStatusText(s)); return; }
           _qbSetStatus('Connect did not complete — try again.');
@@ -6265,12 +6366,13 @@ if (_qbDisconnectBtn) {
 /* v4.7: "saved" is a claim — Test is proof. Saves the form first (same
    one-action pattern as Connect QuickBooks: paste → Test just works), then
    makes ONE free live call and reports the provider's actual verdict. */
-function _wireKeyTest(btnId, statusId, endpoint) {
+function _wireKeyTest(btnId, statusId, endpoint, dotId) {
   const btn = document.getElementById(btnId);
   const status = document.getElementById(statusId);
   if (!btn || !status) return;
   btn.addEventListener('click', async () => {
     btn.disabled = true;
+    _setKeyDot(dotId, null);
     status.className = 'field-hint';
     status.textContent = 'Saving, then testing against the live API…';
     try {
@@ -6281,15 +6383,17 @@ function _wireKeyTest(btnId, statusId, endpoint) {
       if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
       status.className = data.ok ? 'field-hint is-ok' : 'field-hint';
       status.textContent = (data.ok ? '✓ ' : '✗ ') + data.detail;
+      _setKeyDot(dotId, !!data.ok);
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       status.textContent = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
         ? '✗ Backend is not reachable.' : `✗ Test failed: ${msg}`;
+      _setKeyDot(dotId, false);
     } finally { btn.disabled = false; }
   });
 }
-_wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic');
-_wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai');
+_wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic', 'settings-dot-anthropic');
+_wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
 
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {
