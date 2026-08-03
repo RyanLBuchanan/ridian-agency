@@ -2427,6 +2427,121 @@ async def log_touch(deal: str, note: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v5.0 Phase 4 — prep briefs with a HARD source gate. Every factual line
+# must cite a URL the search ACTUALLY returned (TextAgentResult.source_urls,
+# harvested from the server's web_search_tool_result blocks). Uncited lines
+# and fabricated-URL lines are STRIPPED by deterministic code — never
+# softened, never trusted. Zero retrieved sources = no brief at all.
+# ---------------------------------------------------------------------------
+
+_SRC_RE = _re.compile(r"\[src:\s*(https?://[^\]\s]+)\s*\]")
+
+
+def _norm_url(u: str) -> str:
+    return str(u or "").strip().split("#")[0].rstrip("/")
+
+
+def _gate_brief(text: str, retrieved_urls) -> tuple[str, int]:
+    """THE Phase-4 gate (pure, deterministic): keep a content line ONLY if
+    every fact-bearing line cites a retrieved URL.
+
+    Line rules:
+      - structure passes: headers (#...), blank lines, numbered questions
+        and question-mark lines (questions assert nothing), and the literal
+        "- Nothing found." honesty marker;
+      - every other content line must carry [src: URL] with URL in the
+        RETRIEVED set — uncited or fabricated-URL lines are deleted.
+    Returns (gated_text, stripped_count)."""
+    retrieved = {_norm_url(u) for u in (retrieved_urls or []) if u}
+    kept: list[str] = []
+    stripped = 0
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if (not s or s.startswith("#") or s.endswith("?")
+                or _re.match(r"^\d+[.)]\s", s)
+                or s.lower() in ("- nothing found.", "nothing found.")):
+            kept.append(line)
+            continue
+        cites = _SRC_RE.findall(s)
+        if cites and all(_norm_url(c) in retrieved for c in cites):
+            kept.append(line)
+        else:
+            stripped += 1
+    return "\n".join(kept).strip() + "\n", stripped
+
+
+def _prep_system() -> str:
+    from ..agents import PROMPTS_DIR as _PD
+    return (_PD / "operator_prep_prompt.txt").read_text(encoding="utf-8")
+
+
+@planner_tool
+async def prep_brief(company_or_person: str) -> dict:
+    """Meeting-prep brief on a company or person from LIVE web search:
+    what they do, size, recent news, likely pain, three opening questions.
+    HARD GATE (code, not prompt): every factual line must cite a URL the
+    search actually returned; uncited or fabricated-source lines are
+    stripped from the output. If search finds nothing, no brief is
+    produced — the tool says so and stops.
+
+    Args:
+        company_or_person: Who to research (company name, domain, or person).
+    """
+    operator = current_operator()
+    operator.note_tool("prep_brief")
+    subject = str(company_or_person or "").strip()
+    if not subject:
+        return {"error": "company_or_person is required."}
+    await operator.emit_step(name="prep_brief", status="running",
+                             detail=f"Researching {subject}…")
+    try:
+        res = await run_text_agent(
+            _prep_system(), f"Prep brief subject: {subject}",
+            use_web_search=True, return_stats=True,
+            model=_effective_research_model(operator),
+            effort=_effective_effort(operator) or None,
+            max_tokens=4000,
+            **_ceiling_kwargs(operator),
+        )
+        _add_spend(operator, _effective_research_model(operator), res)
+    except Exception as exc:  # noqa: BLE001
+        partial_note = _add_partial_spend(operator, exc)
+        await operator.emit_step(name="prep_brief", status="failed",
+                                 detail=f"Research failed: {exc}." + partial_note)
+        return {"error": f"prep research failed: {exc}"}
+
+    retrieved = [u for u in res.source_urls if u]
+    if res.searches == 0 or not retrieved:
+        await operator.emit_step(
+            name="prep_brief", status="failed",
+            detail=f"Live search returned no sources for {subject!r}.")
+        return {"error": (f"Live search returned no sources for {subject!r} — "
+                          "no brief produced. Nothing here to ground claims "
+                          "in, and Ridian does not write ungrounded briefs.")}
+
+    gated, stripped = _gate_brief(res.text, retrieved)
+    if not _SRC_RE.search(gated):
+        await operator.emit_step(
+            name="prep_brief", status="failed",
+            detail="Every factual line failed the source gate — no brief produced.")
+        return {"error": ("Every factual line failed the source gate (no line "
+                          "cited a retrieved URL) — no brief produced.")}
+
+    path = operator.folder / "brief.md"
+    path.write_text(gated, encoding="utf-8")
+    await operator.emit_artifact(name="brief.md", path=str(path), kind="markdown")
+    await operator.emit_step(
+        name="prep_brief", status="completed",
+        detail=(f"Brief on {subject}: {res.searches} searches, "
+                f"{len(set(_norm_url(u) for u in retrieved))} sources"
+                + (f", {stripped} uncited line(s) stripped" if stripped else "")))
+    return {"brief_path": str(path),
+            "stripped_uncited_lines": stripped,
+            "searches": res.searches,
+            "sources": sorted(set(_norm_url(u) for u in retrieved))}
+
+
+# ---------------------------------------------------------------------------
 # v5.0 Phase 3 — follow-through: grounded follow-up drafts + weekly review.
 # ---------------------------------------------------------------------------
 
@@ -2560,6 +2675,8 @@ PLANNER_TOOLS = [
     # v5.0 Phase 3 — follow-through
     draft_followup,
     weekly_review,
+    # v5.0 Phase 4 — prep / research (hard source gate)
+    prep_brief,
 ]
 
 

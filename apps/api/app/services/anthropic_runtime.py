@@ -148,6 +148,11 @@ class TextAgentResult:
     elapsed_seconds: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
+    # v5.0 Phase 4: every URL the server-side web search ACTUALLY returned
+    # (harvested from web_search_tool_result blocks). Deterministic
+    # grounding gates validate the model's citations against THIS set — a
+    # fabricated URL is not in it, no matter how plausible it looks.
+    source_urls: tuple = ()
 
 
 def _final_text(blocks) -> str:
@@ -279,6 +284,7 @@ async def run_text_agent(
     tokens_in = 0       # completed segments' usage
     tokens_out = 0
     restarts = 0
+    source_urls: list = []   # URLs the search ACTUALLY returned (all segments)
     live_searches = 0   # stream-observed billed proxy, across segments
     seg_in = 0          # current stream segment, live (message_start/_delta)
     seg_out = 0
@@ -306,6 +312,16 @@ async def run_text_agent(
         billed = _billed_searches(resp)
         searches += billed if billed is not None else _search_count(resp)
         rounds += _round_count(resp)
+        # Harvest the URLs the search actually returned (grounding truth-set).
+        for b in resp.content:
+            if getattr(b, "type", "") == "web_search_tool_result":
+                items = getattr(b, "content", None) or []
+                for item in (items if isinstance(items, list) else []):
+                    u = getattr(item, "url", None)
+                    if u is None and isinstance(item, dict):
+                        u = item.get("url")
+                    if u:
+                        source_urls.append(str(u))
         t_in, t_out = _tokens(resp)
         tokens_in += t_in
         tokens_out += t_out
@@ -427,5 +443,6 @@ async def run_text_agent(
         return TextAgentResult(
             text=text, searches=searches, restarts=restarts, tool_rounds=rounds,
             elapsed_seconds=elapsed, tokens_in=tokens_in, tokens_out=tokens_out,
+            source_urls=tuple(dict.fromkeys(source_urls)),   # deduped, ordered
         )
     return text
