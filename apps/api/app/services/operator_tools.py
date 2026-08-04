@@ -2542,6 +2542,200 @@ async def prep_brief(company_or_person: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v5.0 Phase 5 — proposals. The invoicing provenance pattern, EXACTLY:
+# every number must be operator-stated (record["user_stated_numbers"]) or
+# from the deal record; a signature-matched approval gate parks the run
+# BEFORE anything is composed or written; changed arguments re-ask.
+# ---------------------------------------------------------------------------
+
+PROPOSAL_PROCEED = "Write the proposal as previewed"
+PROPOSAL_CANCEL = "Cancel the proposal"
+
+
+def _deal_record_numbers(deal: dict) -> list[float]:
+    """Every number the DEAL RECORD itself contains (value, dates, titles) —
+    the second sanctioned number source besides the operator's own words."""
+    text = " ".join(str(deal.get(f) or "") for f in
+                    ("value_usd", "title", "next_action", "next_action_date"))
+    return extract_stated_numbers(text)
+
+
+def _proposal_allowed_numbers(operator, deal: dict, price: float) -> list[float]:
+    allowed = list(operator.record.get("user_stated_numbers", []))
+    allowed += _deal_record_numbers(deal)
+    allowed.append(float(price))
+    return allowed
+
+
+def _proposal_number_gate(md: str, allowed: list[float]) -> tuple[str, int]:
+    """Deterministic artifact gate: any line carrying a number OUTSIDE the
+    sanctioned set is STRIPPED (never softened) — the invoice line-item
+    philosophy applied to prose. List markers and headers are structure."""
+    kept: list[str] = []
+    stripped = 0
+    for line in (md or "").splitlines():
+        s = _re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+        if not s or s.startswith("#"):
+            kept.append(line)
+            continue
+        nums = extract_stated_numbers(s)
+        if all(any(abs(n - a) < 0.005 for a in allowed) for n in nums):
+            kept.append(line)
+        else:
+            stripped += 1
+    return "\n".join(kept).strip() + "\n", stripped
+
+
+def _proposal_sig(deal_id: str, price: float, timeline: str) -> str:
+    return json.dumps({"d": deal_id, "p": round(float(price), 2),
+                       "t": str(timeline or "")}, sort_keys=True)
+
+
+async def _proposal_approval_gate(operator, deal: dict, price: float,
+                                  timeline: str) -> dict | None:
+    rec = operator.record
+    sig = _proposal_sig(deal["id"], price, timeline)
+    if rec.get("proposal_doc_approved") and rec.get("proposal_doc_sig") == sig:
+        return None
+    if rec.get("proposal_doc_declined"):
+        return {"error": ("The operator DECLINED the proposal. Do NOT write it "
+                          "or retry; acknowledge briefly in your receipt."),
+                "reason": "proposal_declined"}
+    rec["proposal_doc_sig"] = sig
+    rec["proposal_doc_approved"] = False
+    rec["proposal_doc_asked"] = True
+    await operator.emit_needs_input(
+        question=(f"Proposal preview — approve before anything is written. "
+                  f"Client: {deal.get('contact_name')}. "
+                  f"Deal: {deal.get('title') or '(untitled)'}. "
+                  f"Price: ${price:,.2f}."
+                  + (f" Timeline: {timeline}." if timeline else "")
+                  + " Write it?"),
+        context_hint="proposal approval — nothing written until you answer",
+        options=[{"label": "Write it", "action": "submit", "value": PROPOSAL_PROCEED},
+                 {"label": "Cancel", "action": "submit", "value": PROPOSAL_CANCEL}],
+        buttons_only=True,   # signature-matched: only the buttons can answer
+    )
+    await operator.emit_step(name="proposal", status="running",
+                             detail=f"Awaiting your approval — {deal.get('contact_name')}, ${price:,.2f}.")
+    return {"error": ("BLOCKED: the proposal needs the operator's approval. A "
+                      "needs-input question has been raised; WAIT for the answer. "
+                      "Do NOT retry or write it another way."),
+            "reason": "proposal_plan_pending"}
+
+
+def _proposal_system() -> str:
+    from ..agents import PROMPTS_DIR as _PD
+    return (_PD / "operator_proposal_prompt.txt").read_text(encoding="utf-8")
+
+
+@planner_tool
+async def draft_proposal(deal: str, price: str = "", timeline: str = "",
+                         guidance: str = "") -> dict:
+    """Draft a consulting proposal (scope, deliverables, timeline, price,
+    terms) for a pipeline deal, as a .docx in the run folder. HARD GATES
+    (code): the price must be operator-stated or the deal record's value —
+    never invented; a preview must be APPROVED (buttons) before anything is
+    composed or written; any number outside the sanctioned set is stripped
+    from the finished document.
+
+    Args:
+        deal: Deal id, or the contact name / deal title to match.
+        price: Proposal price in USD. Blank = the deal record's value.
+        timeline: Timeline in the operator's words ("3 weeks, starts Aug 11").
+        guidance: Optional operator guidance on scope/terms.
+    """
+    operator = current_operator()
+    operator.note_tool("draft_proposal")
+
+    match, candidates = _resolve_deal(deal)
+    if not match:
+        if candidates:
+            return {"error": f"{deal!r} matches several deals — which one?",
+                    "candidates": [_deal_summary(d) for d in candidates]}
+        return {"error": f"No deal matching {deal!r}. Use list_deals to see the pipeline."}
+
+    async def _park_proposal(question: str, reason: str) -> dict:
+        await operator.emit_needs_input(
+            question=question, context_hint="proposal — value needed from you")
+        return {"error": f"BLOCKED: {question} A needs-input question was raised; "
+                         "WAIT for the operator. Never invent a value.",
+                "reason": reason}
+
+    raw_price = str(price or "").strip() or str(match.get("value_usd") or "").strip()
+    if not raw_price:
+        return await _park_proposal(
+            f"What price should the proposal for {match.get('contact_name')} "
+            "quote? (No value on the deal and none stated.)", "price_missing")
+    try:
+        price_f = float(raw_price.replace("$", "").replace(",", ""))
+    except ValueError:
+        return {"error": f"price must be a dollar amount — got {price!r}."}
+
+    # THE invoice provenance rule: the price is either the operator's own
+    # number or the deal record's — anything else was invented. Refuse+ask.
+    deal_value = str(match.get("value_usd") or "").strip()
+    from_deal = bool(deal_value) and abs(float(deal_value) - price_f) < 0.005
+    if not (from_deal or _is_stated(operator, price_f)):
+        return await _park_proposal(
+            f"The price ${price_f:,.2f} isn't something you stated and isn't "
+            f"the deal's recorded value ({('$' + deal_value) if deal_value else 'none set'}). "
+            "What should the proposal quote?", "price_unverified")
+
+    # Timeline numbers obey the same rule (stated or from the deal record).
+    allowed = _proposal_allowed_numbers(operator, match, price_f)
+    bad_timeline = [n for n in extract_stated_numbers(timeline)
+                    if not any(abs(n - a) < 0.005 for a in allowed)]
+    if bad_timeline:
+        return await _park_proposal(
+            f"The timeline mentions {bad_timeline} — numbers you didn't state. "
+            "What's the actual timeline?", "timeline_unverified")
+
+    block = await _proposal_approval_gate(operator, match, price_f, timeline)
+    if block:
+        return block
+
+    # Approved: compose from record facts, then gate the numbers in code.
+    profile = settings_service.load_settings()
+    facts = [
+        f"Client: {match.get('contact_name')}",
+        f"Deal: {match.get('title') or '(untitled)'} — stage {match.get('stage')}",
+        f"Approved price: ${price_f:,.2f}",
+    ]
+    if timeline:
+        facts.append(f"Timeline (operator's words): {timeline}")
+    if match.get("next_action"):
+        facts.append(f"Next action on record: {match['next_action']}"
+                     + (f" ({match['next_action_date']})" if match.get("next_action_date") else ""))
+    for label, key in (("Operator", "operator_name"), ("Company", "company_name")):
+        if (profile.get(key) or "").strip():
+            facts.append(f"{label}: {profile[key].strip()}")
+    if str(guidance or "").strip():
+        facts.append(f"Guidance: {guidance.strip()}")
+
+    text = await run_text_agent(_proposal_system(), "\n".join(facts),
+                                max_tokens=2000)
+    gated, stripped = _proposal_number_gate(text, allowed)
+    if len(gated.strip()) < 40:
+        return {"error": "The proposal composer returned too little usable "
+                         "content after the number gate — try again."}
+
+    md_path = operator.folder / "proposal.md"
+    md_path.write_text(gated, encoding="utf-8")
+    from .export_service import _build_docx_from_markdown
+    docx_path = operator.folder / "proposal.docx"
+    _build_docx_from_markdown(gated).save(str(docx_path))
+    await operator.emit_artifact(name="proposal.md", path=str(md_path), kind="markdown")
+    await operator.emit_artifact(name="proposal.docx", path=str(docx_path), kind="docx")
+    await operator.emit_step(
+        name="proposal", status="completed",
+        detail=(f"Proposal for {match.get('contact_name')} — ${price_f:,.2f}"
+                + (f", {stripped} unsanctioned-number line(s) stripped" if stripped else "")))
+    return {"proposal_docx": str(docx_path), "proposal_md": str(md_path),
+            "price": f"{price_f:.2f}", "stripped_number_lines": stripped}
+
+
+# ---------------------------------------------------------------------------
 # v5.0 Phase 3 — follow-through: grounded follow-up drafts + weekly review.
 # ---------------------------------------------------------------------------
 
@@ -2677,6 +2871,8 @@ PLANNER_TOOLS = [
     weekly_review,
     # v5.0 Phase 4 — prep / research (hard source gate)
     prep_brief,
+    # v5.0 Phase 5 — proposals (invoice-pattern provenance + approval)
+    draft_proposal,
 ]
 
 

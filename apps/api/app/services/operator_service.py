@@ -39,6 +39,8 @@ from .operator_tools import (
     INVOICE_CANCEL,
     INVOICE_PROCEED,
     PLANNER_TOOLS,
+    PROPOSAL_CANCEL,
+    PROPOSAL_PROCEED,
     RESEARCH_PLAN_CANCEL,
     RESEARCH_PLAN_PROCEED,
     detect_deliverable_intent,
@@ -754,6 +756,28 @@ def _apply_invoice_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+def _apply_proposal_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending proposal preview from the operator's resume answer —
+    the ONLY writer of record["proposal_doc_approved"] / ["proposal_doc_declined"]
+    (operator_tools._proposal_approval_gate checks the flags plus a payload
+    signature in code; the planner can't set them). Mirrors the invoice gate."""
+    rec = operator.record
+    if (not rec.get("proposal_doc_asked")
+            or rec.get("proposal_doc_approved") or rec.get("proposal_doc_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == PROPOSAL_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["proposal_doc_approved"] = True
+        return ("The operator APPROVED the previewed proposal. Call "
+                "draft_proposal again with the SAME arguments.")
+    if a == PROPOSAL_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["proposal_doc_declined"] = True
+        return ("The operator DECLINED the proposal. Do not write it; "
+                "acknowledge briefly in your receipt.")
+    rec["proposal_doc_asked"] = False   # unrecognized → re-present on next call
+    return ""
+
+
 def _sanitize_research_model(value: str) -> str:
     """Allowlist the composer's per-run sub-agent model pick (Research and
     Script share the curated list). Anything not on it — junk, an unknown
@@ -930,6 +954,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_grounding_answer(operator, answer),
                 _apply_research_answer(operator, answer),
                 _apply_invoice_answer(operator, answer),
+                _apply_proposal_answer(operator, answer),
             ) if n
         ]
         note = "\n\n".join(notes)
