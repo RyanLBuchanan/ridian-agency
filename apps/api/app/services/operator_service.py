@@ -175,16 +175,30 @@ def _memory_context_snippet() -> str:
 
     # v1.6: the Operator Profile is the difference between generic output
     # and operator-specific moves. Inject it whole (it's small free text).
+    # v5.1: TWO stores feed it — Settings identity (operator_name /
+    # operator_email / company_name) and the Memory → Profile free text.
+    # They are merged here; the EMPTY notice fires ONLY when BOTH are blank.
+    # (The old code read only the memory store, so a filled Settings profile
+    # still produced "Operator profile: EMPTY" in every receipt.)
     try:
         profile = memory_service.get_profile()
         filled = {k: v for k, v in profile.items() if (v or "").strip()}
-        if filled:
+        s = load_settings()
+        identity = [
+            (label, (s.get(key) or "").strip())
+            for label, key in (("Operator", "operator_name"),
+                               ("Email", "operator_email"),
+                               ("Company", "company_name"))
+            if (s.get(key) or "").strip()
+        ]
+        if filled or identity:
             labels = {
                 "operator": "Who", "business": "Business", "offerings": "Sells",
                 "customers": "Customers", "goal": "Quarter goal",
                 "avoid": "Not interested in", "notes": "Notes",
             }
-            lines = [f"  {labels.get(k, k)}: {v.strip()}" for k, v in filled.items()]
+            lines = [f"  {label}: {v}" for label, v in identity]
+            lines += [f"  {labels.get(k, k)}: {v.strip()}" for k, v in filled.items()]
             parts.append("Operator profile:\n" + "\n".join(lines))
         else:
             parts.append(

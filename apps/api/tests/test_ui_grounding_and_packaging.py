@@ -90,6 +90,33 @@ def test_planner_prompt_carries_operator_profile_from_settings(monkeypatch, tmp_
     assert "name not set" in build_planner_system()
 
 
+def test_run_context_merges_settings_identity_no_false_empty(monkeypatch, tmp_path):
+    """v5.1 profile bug: Settings identity and Memory → Profile are two
+    stores; the run context read only the memory one, so a filled Settings
+    profile still produced 'Operator profile: EMPTY' in every receipt.
+    Pin: identity present -> no EMPTY notice, identity in the block; both
+    stores blank -> the EMPTY notice (honestly) remains."""
+    from app.services import operator_service, state_store
+    monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "s.json")
+    monkeypatch.setattr(state_store, "STATE_DIR", tmp_path / "state")
+
+    settings_service.save_settings({
+        "operator_name": "Ryan Buchanan",
+        "operator_email": "ryan@ridiantechnologies.com",
+        "company_name": "Ridian Technologies",
+    })
+    ctx = operator_service._memory_context_snippet()
+    assert "Operator profile: EMPTY" not in ctx
+    assert "Ryan Buchanan" in ctx
+    assert "Ridian Technologies" in ctx
+
+    # Both stores genuinely blank -> the honest EMPTY notice stays.
+    settings_service.save_settings({
+        "operator_name": "", "operator_email": "", "company_name": ""})
+    ctx2 = operator_service._memory_context_snippet()
+    assert "Operator profile: EMPTY" in ctx2
+
+
 # --------------------------------------------------------------------------
 # 2. Taskbar icon asset + packaging config
 # --------------------------------------------------------------------------
