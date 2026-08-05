@@ -121,21 +121,43 @@ def test_run_context_merges_settings_identity_no_false_empty(monkeypatch, tmp_pa
 # 2. Taskbar icon asset + packaging config
 # --------------------------------------------------------------------------
 
-def test_sunrise_waves_ico_is_proper_multires_bmp():
+def test_sunrise_waves_ico_follows_the_android_studio_convention():
+    """v5.1 REPLACES the old all-DIB/no-PNG pin. That pin's premise ("all-PNG
+    icos rendered a blank taskbar") was invalidated by vendor evidence: Git
+    for Windows ships ALL 23 frames as PNG and renders fine — the old
+    incident had a different cause. The convention pinned here is Android
+    Studio's exact layout, byte-verified against a shipping vendor icon:
+    PNG for the 256px frame ONLY, classic 32bpp DIB with a real AND mask
+    and biSizeImage=0 for every smaller frame, DPI sizes 20/24/40 included."""
     data = (_REPO / "desktop" / "assets" / "sunrise-waves.ico").read_bytes()
     _rsv, typ, count = struct.unpack("<HHH", data[:6])
-    assert typ == 1 and count == 6   # v5.1: 64 + 128 added for Explorer scaling
+    assert typ == 1 and count == 9
     sizes = set()
     for i in range(count):
         off = 6 + i * 16
-        w, h, _c, _r, _planes, bpp, size, dataoff = struct.unpack(
+        w, h, _c, _r, planes, bpp, size, dataoff = struct.unpack(
             "<BBBBHHII", data[off:off + 16])
-        sizes.add(w or 256)
-        assert bpp == 32
-        # Classic DIB frames only — Windows guarantees PNG decoding solely
-        # for the 256px frame, and all-PNG icos rendered a blank taskbar.
-        assert data[dataoff:dataoff + 8] != b"\x89PNG\r\n\x1a\n"
-    assert sizes == {256, 128, 64, 48, 32, 16}
+        rw = w or 256
+        sizes.add(rw)
+        assert bpp == 32 and planes == 1
+        frame = data[dataoff:dataoff + size]
+        if rw == 256:
+            # The jumbo frame is PNG — the one place every vendor uses it.
+            assert frame[:8] == b"\x89PNG\r\n\x1a\n"
+            pw, ph = struct.unpack(">II", frame[16:24])
+            assert (pw, ph) == (256, 256)
+            continue
+        # Every smaller frame: complete DIB, mask present, Studio header.
+        assert frame[:8] != b"\x89PNG\r\n\x1a\n"
+        bi_size, bi_w, bi_h, _pl, bi_bpp, bi_comp, bi_imgsize = struct.unpack(
+            "<IiiHHII", frame[:24])
+        assert bi_size == 40 and bi_comp == 0 and bi_bpp == 32
+        assert bi_h == 2 * rw                      # XOR + AND declared...
+        assert bi_imgsize == 0                     # ...biSizeImage=0, like Studio
+        xor = rw * rw * 4
+        and_mask = ((rw + 31) // 32) * 4 * rw
+        assert size == 40 + xor + and_mask         # ...and actually present
+    assert sizes == {16, 20, 24, 32, 40, 48, 64, 128, 256}
 
 
 def test_electron_builder_ships_the_ico_everywhere():
