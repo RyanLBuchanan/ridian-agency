@@ -153,6 +153,11 @@ class TextAgentResult:
     # grounding gates validate the model's citations against THIS set — a
     # fabricated URL is not in it, no matter how plausible it looks.
     source_urls: tuple = ()
+    # v5.1: the query strings the model ACTUALLY typed into web_search
+    # (harvested from server_tool_use blocks), in order. Callers that
+    # mandate a fixed query set verify coverage against THIS, and receipts
+    # can show what was really searched instead of guessing.
+    queries: tuple = ()
 
 
 def _final_text(blocks) -> str:
@@ -285,6 +290,7 @@ async def run_text_agent(
     tokens_out = 0
     restarts = 0
     source_urls: list = []   # URLs the search ACTUALLY returned (all segments)
+    queries_run: list = []   # query strings actually sent to web_search
     live_searches = 0   # stream-observed billed proxy, across segments
     seg_in = 0          # current stream segment, live (message_start/_delta)
     seg_out = 0
@@ -312,8 +318,16 @@ async def run_text_agent(
         billed = _billed_searches(resp)
         searches += billed if billed is not None else _search_count(resp)
         rounds += _round_count(resp)
-        # Harvest the URLs the search actually returned (grounding truth-set).
+        # Harvest the URLs the search actually returned (grounding truth-set)
+        # and the query strings the model actually searched (coverage audit).
         for b in resp.content:
+            if (getattr(b, "type", "") == "server_tool_use"
+                    and getattr(b, "name", "") == "web_search"):
+                inp = getattr(b, "input", None)
+                q = (inp.get("query") if isinstance(inp, dict)
+                     else getattr(inp, "query", None))
+                if q:
+                    queries_run.append(str(q))
             if getattr(b, "type", "") == "web_search_tool_result":
                 items = getattr(b, "content", None) or []
                 for item in (items if isinstance(items, list) else []):
@@ -444,5 +458,6 @@ async def run_text_agent(
             text=text, searches=searches, restarts=restarts, tool_rounds=rounds,
             elapsed_seconds=elapsed, tokens_in=tokens_in, tokens_out=tokens_out,
             source_urls=tuple(dict.fromkeys(source_urls)),   # deduped, ordered
+            queries=tuple(queries_run),
         )
     return text

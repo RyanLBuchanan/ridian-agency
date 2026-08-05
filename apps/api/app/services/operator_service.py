@@ -36,6 +36,8 @@ from .anthropic_runtime import date_line, estimate_cost_usd, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
+    CONTACT_ADMIN_CANCEL,
+    CONTACT_ADMIN_PROCEED,
     INVOICE_CANCEL,
     INVOICE_PROCEED,
     PLANNER_TOOLS,
@@ -778,6 +780,29 @@ def _apply_proposal_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+def _apply_contact_admin_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending contact merge/delete preview from the operator's
+    resume answer — the ONLY writer of record["contact_admin_approved"] /
+    ["contact_admin_declined"] (operator_tools._contact_admin_gate checks
+    the flags plus a payload signature in code; the planner can't set
+    them). Mirrors the invoice gate."""
+    rec = operator.record
+    if (not rec.get("contact_admin_asked")
+            or rec.get("contact_admin_approved") or rec.get("contact_admin_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == CONTACT_ADMIN_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["contact_admin_approved"] = True
+        return ("The operator APPROVED the previewed contact change. Call the "
+                "same tool again with the SAME arguments.")
+    if a == CONTACT_ADMIN_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["contact_admin_declined"] = True
+        return ("The operator DECLINED the contact change. Do not apply it; "
+                "acknowledge briefly in your receipt.")
+    rec["contact_admin_asked"] = False   # unrecognized → re-present on next call
+    return ""
+
+
 def _sanitize_research_model(value: str) -> str:
     """Allowlist the composer's per-run sub-agent model pick (Research and
     Script share the curated list). Anything not on it — junk, an unknown
@@ -955,6 +980,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_research_answer(operator, answer),
                 _apply_invoice_answer(operator, answer),
                 _apply_proposal_answer(operator, answer),
+                _apply_contact_admin_answer(operator, answer),
             ) if n
         ]
         note = "\n\n".join(notes)

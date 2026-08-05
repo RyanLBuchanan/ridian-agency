@@ -42,6 +42,8 @@
       "icon": "assets/sunrise-waves.ico"
     },
     "nsis": {
+      "installerIcon": "assets/sunrise-waves.ico",
+      "uninstallerIcon": "assets/sunrise-waves.ico",
       "oneClick": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

@@ -124,7 +124,7 @@ def test_run_context_merges_settings_identity_no_false_empty(monkeypatch, tmp_pa
 def test_sunrise_waves_ico_is_proper_multires_bmp():
     data = (_REPO / "desktop" / "assets" / "sunrise-waves.ico").read_bytes()
     _rsv, typ, count = struct.unpack("<HHH", data[:6])
-    assert typ == 1 and count == 4
+    assert typ == 1 and count == 6   # v5.1: 64 + 128 added for Explorer scaling
     sizes = set()
     for i in range(count):
         off = 6 + i * 16
@@ -135,7 +135,7 @@ def test_sunrise_waves_ico_is_proper_multires_bmp():
         # Classic DIB frames only — Windows guarantees PNG decoding solely
         # for the 256px frame, and all-PNG icos rendered a blank taskbar.
         assert data[dataoff:dataoff + 8] != b"\x89PNG\r\n\x1a\n"
-    assert sizes == {256, 48, 32, 16}
+    assert sizes == {256, 128, 64, 48, 32, 16}
 
 
 def test_electron_builder_ships_the_ico_everywhere():

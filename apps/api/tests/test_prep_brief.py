@@ -7,7 +7,13 @@ Pins:
      structure (headers, questions, "Nothing found.") passes;
   2. zero retrieved sources = NO brief file, an honest error, full stop;
   3. the tool writes brief.md only from gate-surviving content and reports
-     how many lines were stripped (honest accounting, never silent).
+     how many lines were stripped (honest accounting, never silent);
+  4. (v5.1) the query set is DETERMINISTIC: same target → the same five
+     fixed angles, injected verbatim as REQUIRED SEARCHES — coverage no
+     longer depends on what the research model improvises; queries the
+     model actually ran are reported back, and skipped angles are named;
+  5. (v5.1) record["sources_count"] — what operation_log.json reports —
+     matches the retrieved-source count instead of staying 0.
 """
 import asyncio
 import json
@@ -123,3 +129,60 @@ def test_prep_brief_stops_when_every_line_fails_the_gate(tmp_path, monkeypatch):
     out = _call("prep_brief", company_or_person="X")
     assert "error" in out and "source gate" in out["error"]
     assert not (tmp_path / "brief.md").exists()
+
+
+# --------------------------------------------------------------------------
+# v5.1 — deterministic query set + honest sources_count
+# --------------------------------------------------------------------------
+
+def test_prep_queries_are_deterministic_and_cover_the_five_angles():
+    a = t._prep_queries("CPC Texas")
+    b = t._prep_queries("CPC Texas")
+    assert a == b and len(a) == 5                    # same target → same list
+    joined = " ".join(a).lower()
+    for needle in ("overview", "leadership", "size", "news", "events"):
+        assert needle in joined, f"angle {needle!r} missing from {a}"
+    assert all('"CPC Texas"' in q for q in a)        # target pinned in every query
+
+
+def test_required_queries_ride_the_research_input_verbatim(tmp_path, monkeypatch):
+    _op(tmp_path)
+    seen = {}
+
+    async def capture(system, user_input, **kw):
+        seen["user_input"] = user_input
+        return TextAgentResult(text=_BRIEF, searches=5, restarts=0,
+                               source_urls=_RETRIEVED,
+                               queries=tuple(t._prep_queries("CPC Texas")))
+
+    monkeypatch.setattr(t, "run_text_agent", capture)
+    out = _call("prep_brief", company_or_person="CPC Texas")
+    assert "REQUIRED SEARCHES" in seen["user_input"]
+    for q in t._prep_queries("CPC Texas"):
+        assert q in seen["user_input"]               # injected exactly, in full
+    assert out["required_queries"] == t._prep_queries("CPC Texas")
+    assert out["queries_run"] == t._prep_queries("CPC Texas")
+
+
+def test_skipped_required_angles_are_named_in_the_step(tmp_path, monkeypatch):
+    op = _op(tmp_path)
+    ran = tuple(t._prep_queries("CPC Texas")[:3])    # news + events never ran
+
+    async def fake(system, user_input, **kw):
+        return TextAgentResult(text=_BRIEF, searches=3, restarts=0,
+                               source_urls=_RETRIEVED, queries=ran)
+
+    monkeypatch.setattr(t, "run_text_agent", fake)
+    _call("prep_brief", company_or_person="CPC Texas")
+    detail = op.record["steps"][-1]["detail"]
+    assert "angles not searched as required" in detail
+    assert "recent news" in detail and "events" in detail
+
+
+def test_sources_count_reaches_the_operation_record(tmp_path, monkeypatch):
+    """operation_log.json reads record["sources_count"]; before v5.1 a
+    27-source prep run logged 0."""
+    op = _op(tmp_path)
+    monkeypatch.setattr(t, "run_text_agent", _fake_agent(_BRIEF, 3, _RETRIEVED))
+    _call("prep_brief", company_or_person="CPC Texas")
+    assert op.record["sources_count"] == 2           # the two retrieved URLs

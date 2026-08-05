@@ -151,6 +151,25 @@ def log_touch(deal_id: str, note: str, *, written_by: str,
     return None
 
 
+def reassign_deals(old_contact_id: str, new_contact_id: str,
+                   new_contact_name: str) -> int:
+    """Move every deal (touches ride along — history is never orphaned)
+    from one contact to another. Merge support; returns the count moved.
+    Deliberately does NOT update last_touch_iso: a merge is bookkeeping,
+    not client contact, so staleness reports stay honest."""
+    items = list_deals()
+    moved = 0
+    for d in items:
+        if d.get("contact_id") == old_contact_id:
+            d["contact_id"] = new_contact_id
+            d["contact_name"] = str(new_contact_name or "").strip()
+            d["updated_iso"] = _now_iso()
+            moved += 1
+    if moved:
+        state_store.save(_STORE, items)
+    return moved
+
+
 def deals_needing_followup(days_stale: int = 7, due_within_days: int = 7,
                            today: Optional[_dt.date] = None) -> dict:
     """Read-only report: active deals gone quiet + next actions coming due.

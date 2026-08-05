@@ -2313,6 +2313,169 @@ async def list_contacts(query: str = "") -> dict:
     return {"contacts": rows, "count": len(rows)}
 
 
+# ---------------------------------------------------------------------------
+# v5.1 destructive contact admin: merge + delete. Both irreversibly remove a
+# contact record, so both sit behind the same signature-matched, buttons-only
+# approval gate as invoices/proposals — record["contact_admin_approved"] is
+# written ONLY by operator_service from the operator's own answer, and the
+# approved payload is signature-matched so a changed target re-asks instead
+# of riding an old approval. The preview states exactly what moves and what
+# is deleted BEFORE anything happens.
+
+CONTACT_ADMIN_PROCEED = "Apply the contact change as previewed"
+CONTACT_ADMIN_CANCEL = "Cancel the contact change"
+
+
+def _contact_admin_sig(action: str, payload: dict) -> str:
+    return json.dumps({"a": action, "p": payload}, sort_keys=True, default=str)
+
+
+async def _contact_admin_gate(operator, action: str, payload: dict,
+                              question: str) -> dict | None:
+    """None = approved for exactly this action+payload; else a blocking dict."""
+    rec = operator.record
+    sig = _contact_admin_sig(action, payload)
+    if rec.get("contact_admin_approved") and rec.get("contact_admin_sig") == sig:
+        return None
+    if rec.get("contact_admin_declined"):
+        return {"error": (f"The operator DECLINED the {action}. Do NOT retry or "
+                          "do it another way; acknowledge briefly in your receipt."),
+                "reason": "contact_admin_declined"}
+    rec["contact_admin_sig"] = sig
+    rec["contact_admin_approved"] = False
+    rec["contact_admin_asked"] = True
+    await operator.emit_needs_input(
+        question=question,
+        context_hint=f"contact {action} — nothing changes until you answer",
+        options=[{"label": "Apply it", "action": "submit", "value": CONTACT_ADMIN_PROCEED},
+                 {"label": "Cancel", "action": "submit", "value": CONTACT_ADMIN_CANCEL}],
+        buttons_only=True,   # signature-matched: only the buttons can answer
+    )
+    return {"error": (f"BLOCKED: the {action} needs the operator's approval. A "
+                      "needs-input question has been raised; WAIT for the answer. "
+                      "Do NOT retry or apply it another way."),
+            "reason": "contact_admin_pending"}
+
+
+def _contact_label(c: dict) -> str:
+    bits = [c.get("name") or "?"]
+    if c.get("company"):
+        bits.append(c["company"])
+    if c.get("email"):
+        bits.append(c["email"])
+    return ", ".join(bits)
+
+
+@planner_tool
+async def merge_contacts(keep: str, drop: str) -> dict:
+    """Merge two duplicate contacts: every deal (with its logged touches)
+    moves from the dropped record onto the kept one, blank fields on the
+    kept record are filled from the dropped one, THEN the dropped record is
+    deleted — no orphaned history. DESTRUCTIVE, so it pauses behind a
+    preview approval; on {"reason": "contact_admin_pending"} WAIT for the
+    operator's answer.
+
+    Args:
+        keep: Contact id or name of the record that SURVIVES.
+        drop: Contact id or name of the duplicate to fold in and delete.
+    """
+    operator = current_operator()
+    operator.note_tool("merge_contacts")
+    resolved = {}
+    for role, query in (("keep", keep), ("drop", drop)):
+        match, candidates = _resolve_contact(query)
+        if not match:
+            if candidates:
+                return {"error": f"{query!r} matches several contacts — which one?",
+                        "candidates": [{"id": c.get("id"), "name": c.get("name"),
+                                        "company": c.get("company")} for c in candidates]}
+            return {"error": f"No contact matching {query!r}. Use list_contacts."}
+        resolved[role] = match
+    kept, dropped = resolved["keep"], resolved["drop"]
+    if kept["id"] == dropped["id"]:
+        return {"error": "keep and drop resolved to the SAME contact — nothing to merge."}
+
+    moving = [d for d in pipeline_service.list_deals()
+              if d.get("contact_id") == dropped["id"]]
+    touch_count = sum(len(d.get("touches") or []) for d in moving)
+    fills = {f: dropped[f] for f in memory_service.CONTACT_FIELDS
+             if str(dropped.get(f) or "").strip() and not str(kept.get(f) or "").strip()}
+
+    deal_txt = ("; ".join(f"{d.get('title') or 'untitled'} ({d.get('stage')})"
+                          for d in moving) or "none")
+    fill_txt = (", ".join(f"{k}={v!r}" for k, v in sorted(fills.items())) or "none")
+    block = await _contact_admin_gate(
+        operator, "merge",
+        {"keep": kept["id"], "drop": dropped["id"]},
+        (f"Merge preview — KEEP {_contact_label(kept)} (id {kept['id']}); "
+         f"DELETE {_contact_label(dropped)} (id {dropped['id']}). "
+         f"Deals moving onto the kept record: {deal_txt} "
+         f"({touch_count} logged touches ride along). "
+         f"Blank fields filled from the dropped record: {fill_txt}. "
+         f"The dropped record is then deleted permanently. Apply?"))
+    if block:
+        return block
+
+    moved = pipeline_service.reassign_deals(dropped["id"], kept["id"],
+                                            kept.get("name", ""))
+    if fills:
+        memory_service.update_contact(kept["id"], fills)
+    memory_service.delete_contact(dropped["id"])
+    await operator.emit_step(
+        name="contacts", status="completed",
+        detail=(f"Merged {dropped.get('name')} into {kept.get('name')} — "
+                f"{moved} deal(s), {touch_count} touch(es) moved."))
+    refreshed, _ = _resolve_contact(kept["id"])
+    return {"merged": {"kept": refreshed or kept, "deleted_id": dropped["id"],
+                       "deleted_name": dropped.get("name")},
+            "moved_deals": moved, "moved_touches": touch_count,
+            "filled_fields": sorted(fills)}
+
+
+@planner_tool
+async def delete_contact(contact: str) -> dict:
+    """Delete a contact record permanently. REFUSES while the contact has
+    an open deal (lead/contacted/meeting/proposal) — close or move the deal
+    first. DESTRUCTIVE, so it pauses behind a preview approval; on
+    {"reason": "contact_admin_pending"} WAIT for the operator's answer.
+
+    Args:
+        contact: Contact id or name to delete.
+    """
+    operator = current_operator()
+    operator.note_tool("delete_contact")
+    match, candidates = _resolve_contact(contact)
+    if not match:
+        if candidates:
+            return {"error": f"{contact!r} matches several contacts — which one?",
+                    "candidates": [{"id": c.get("id"), "name": c.get("name"),
+                                    "company": c.get("company")} for c in candidates]}
+        return {"error": f"No contact matching {contact!r}. Use list_contacts."}
+    linked = [d for d in pipeline_service.list_deals()
+              if d.get("contact_id") == match["id"]]
+    open_deals = [d for d in linked
+                  if d.get("stage") in pipeline_service.ACTIVE_STAGES]
+    if open_deals:
+        return {"error": (f"{match.get('name')} has {len(open_deals)} OPEN deal(s) "
+                          "in the pipeline — not deleting the contact. Close the "
+                          "deal (won/lost), move it with merge_contacts, or leave "
+                          "the contact in place."),
+                "open_deals": [_deal_summary(d) for d in open_deals]}
+    closed_txt = (f" {len(linked)} closed deal(s) stay in the pipeline under the "
+                  f"name only." if linked else "")
+    block = await _contact_admin_gate(
+        operator, "delete", {"delete": match["id"]},
+        (f"Delete preview — permanently remove the contact "
+         f"{_contact_label(match)} (id {match['id']}). No open deals.{closed_txt} "
+         f"This cannot be undone. Apply?"))
+    if block:
+        return block
+    memory_service.delete_contact(match["id"])
+    await operator.emit_step(name="contacts", status="completed",
+                             detail=f"Deleted contact {match.get('name')}.")
+    return {"deleted": {"id": match["id"], "name": match.get("name")}}
+
+
 @planner_tool
 async def add_deal(contact: str, title: str = "", stage: str = "lead",
                    value_usd: str = "", next_action: str = "",
@@ -2497,6 +2660,27 @@ def _prep_system() -> str:
     return (_PD / "operator_prep_prompt.txt").read_text(encoding="utf-8")
 
 
+# v5.1: the query set is DETERMINISTIC — five fixed angles built in code
+# from the target, not improvised by the research model per run. Before
+# this, two runs on the same target could search completely different
+# things and one would collapse to "Nothing found" on angles it simply
+# never queried. Five required + WEB_SEARCH_TOOL max_uses 8 leaves the
+# model up to three follow-ups AFTER the fixed set.
+_PREP_ANGLES = (
+    ("org overview", '"{s}" company overview services'),
+    ("leadership", '"{s}" leadership CEO founder'),
+    ("size", '"{s}" staff employees team size'),
+    ("recent news", '"{s}" recent news announcements'),
+    ("events", '"{s}" upcoming events workshop'),
+)
+
+
+def _prep_queries(subject: str) -> list[str]:
+    """The fixed research angles for a prep brief, same target → same list."""
+    s = str(subject or "").strip()
+    return [tpl.format(s=s) for _, tpl in _PREP_ANGLES]
+
+
 @planner_tool
 async def prep_brief(company_or_person: str) -> dict:
     """Meeting-prep brief on a company or person from LIVE web search:
@@ -2516,9 +2700,14 @@ async def prep_brief(company_or_person: str) -> dict:
         return {"error": "company_or_person is required."}
     await operator.emit_step(name="prep_brief", status="running",
                              detail=f"Researching {subject}…")
+    required = _prep_queries(subject)
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(required, 1))
     try:
         res = await run_text_agent(
-            _prep_system(), f"Prep brief subject: {subject}",
+            _prep_system(),
+            (f"Prep brief subject: {subject}\n\n"
+             f"REQUIRED SEARCHES — run every one of these, EXACTLY as "
+             f"written, in order, BEFORE any searches of your own:\n{numbered}"),
             use_web_search=True, return_stats=True,
             model=_effective_research_model(operator),
             effort=_effective_effort(operator) or None,
@@ -2552,14 +2741,27 @@ async def prep_brief(company_or_person: str) -> dict:
     path = operator.folder / "brief.md"
     path.write_text(gated, encoding="utf-8")
     await operator.emit_artifact(name="brief.md", path=str(path), kind="markdown")
+    source_total = len(set(_norm_url(u) for u in retrieved))
+    # The operation log reads record["sources_count"]; before v5.1 prep_brief
+    # never set it, so a 27-source run logged sources_count: 0. max() so a
+    # run that used another research tool too never has its count reduced.
+    operator.record["sources_count"] = max(
+        int(operator.record.get("sources_count") or 0), source_total)
+    ran = [q.lower() for q in res.queries]
+    missed = [label for (label, _), q in zip(_PREP_ANGLES, required)
+              if q.lower() not in ran] if ran else []
     await operator.emit_step(
         name="prep_brief", status="completed",
         detail=(f"Brief on {subject}: {res.searches} searches, "
-                f"{len(set(_norm_url(u) for u in retrieved))} sources"
-                + (f", {stripped} uncited line(s) stripped" if stripped else "")))
+                f"{source_total} sources"
+                + (f", {stripped} uncited line(s) stripped" if stripped else "")
+                + (f" — angles not searched as required: {', '.join(missed)}"
+                   if missed else "")))
     return {"brief_path": str(path),
             "stripped_uncited_lines": stripped,
             "searches": res.searches,
+            "required_queries": required,
+            "queries_run": list(res.queries),
             "sources": sorted(set(_norm_url(u) for u in retrieved))}
 
 
@@ -2967,6 +3169,9 @@ PLANNER_TOOLS = [
     draft_proposal,
     # v5.0 Phase 6 — invoice from deal (marks the deal won on create)
     invoice_deal,
+    # v5.1 — destructive contact admin, approval-gated
+    merge_contacts,
+    delete_contact,
 ]
 
 
