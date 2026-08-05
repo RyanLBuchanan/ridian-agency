@@ -2341,6 +2341,16 @@ async def _contact_admin_gate(operator, action: str, payload: dict,
         return {"error": (f"The operator DECLINED the {action}. Do NOT retry or "
                           "do it another way; acknowledge briefly in your receipt."),
                 "reason": "contact_admin_declined"}
+    # ONE destructive contact change at a time: a second change staged while
+    # the first is still awaiting its answer would re-point the signature and
+    # leave the approval binding to neither. Refuse the newcomer instead.
+    if (rec.get("contact_admin_asked") and not rec.get("contact_admin_approved")
+            and rec.get("contact_admin_sig") != sig):
+        return {"error": ("Another destructive contact change is already awaiting "
+                          "the operator's approval — ONE at a time. WAIT for that "
+                          "answer; stage this change afterwards (or the operator "
+                          "can cancel the pending one first)."),
+                "reason": "contact_admin_conflict"}
     rec["contact_admin_sig"] = sig
     rec["contact_admin_approved"] = False
     rec["contact_admin_asked"] = True
@@ -2421,9 +2431,13 @@ async def merge_contacts(keep: str, drop: str) -> dict:
     if fills:
         memory_service.update_contact(kept["id"], fills)
     memory_service.delete_contact(dropped["id"])
+    # The receipt names ids: two distinct records CAN share a display name
+    # (that's what duplicates are), and "Merged Patrick into Patrick" read
+    # like a self-merge until the ids made it unambiguous.
     await operator.emit_step(
         name="contacts", status="completed",
-        detail=(f"Merged {dropped.get('name')} into {kept.get('name')} — "
+        detail=(f"Merged {_contact_label(dropped)} (id {dropped['id']}) into "
+                f"{_contact_label(kept)} (id {kept['id']}) — "
                 f"{moved} deal(s), {touch_count} touch(es) moved."))
     refreshed, _ = _resolve_contact(kept["id"])
     return {"merged": {"kept": refreshed or kept, "deleted_id": dropped["id"],

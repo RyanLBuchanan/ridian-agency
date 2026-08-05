@@ -142,6 +142,56 @@ def test_merge_same_record_refuses(tmp_path):
     assert len(memory_service.list_contacts()) == 2
 
 
+def test_merge_same_id_via_different_queries_refuses(tmp_path):
+    """Self-merge guard binds to the RESOLVED id, not the query text:
+    the id and the name are different strings for the same record."""
+    _seed_duplicates(tmp_path)
+    cid = _contact("Sandy Alvarez")["id"]
+    out = _call("merge_contacts", keep=cid, drop="Sandy Alvarez")
+    assert "SAME contact" in out["error"]
+    assert len(memory_service.list_contacts()) == 2
+
+
+def test_merge_receipt_disambiguates_same_display_names(tmp_path):
+    """Two DISTINCT records can share a name — the success receipt must
+    carry ids so it never reads like a self-merge."""
+    op = _op(tmp_path)
+    _call("add_contact", name="Patrick", company="Acme")
+    _call("add_contact", name="Patrick", company="Beta Corp", email="p@beta.test")
+    acme = next(c for c in memory_service.list_contacts() if c["company"] == "Acme")
+    beta = next(c for c in memory_service.list_contacts() if c["company"] == "Beta Corp")
+    _call("merge_contacts", keep=acme["id"], drop=beta["id"])
+    operator_service._apply_contact_admin_answer(op, t.CONTACT_ADMIN_PROCEED)
+    out = _call("merge_contacts", keep=acme["id"], drop=beta["id"])
+    assert out["merged"]["deleted_id"] == beta["id"]
+    detail = next(s for s in op.record["steps"] if s["name"] == "contacts")["detail"]
+    assert acme["id"] in detail and beta["id"] in detail
+    assert "Acme" in detail and "Beta Corp" in detail
+
+
+def test_second_pending_change_refuses_and_first_approval_still_binds(tmp_path):
+    """Staging a second destructive change while one awaits its answer is
+    refused outright — the pending approval stays bound to the FIRST."""
+    op = _seed_duplicates(tmp_path)
+    _call("add_contact", name="Casey Reed")           # no deals — deletable
+    first = _call("merge_contacts", keep="Sandy Alvarez", drop="Sandy A.")
+    assert first.get("reason") == "contact_admin_pending"
+
+    second = _call("delete_contact", contact="Casey Reed")
+    assert second.get("reason") == "contact_admin_conflict"
+    assert any(c["name"] == "Casey Reed" for c in memory_service.list_contacts())
+
+    # The approval binds to the merge that asked — and ONLY to it.
+    _approve(op)
+    out = _call("merge_contacts", keep="Sandy Alvarez", drop="Sandy A.")
+    assert out["moved_deals"] == 1
+    assert not any(c["name"] == "Sandy A." for c in memory_service.list_contacts())
+    # Casey was never authorized for deletion by that approval.
+    still = _call("delete_contact", contact="Casey Reed")
+    assert still.get("reason") == "contact_admin_pending"     # re-asks fresh
+    assert any(c["name"] == "Casey Reed" for c in memory_service.list_contacts())
+
+
 # --------------------------------------------------------------------------
 # Delete: open-deal refusal + the same gate
 # --------------------------------------------------------------------------

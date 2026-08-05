@@ -182,6 +182,90 @@ def test_resolve_cost_ceiling_parsing(monkeypatch):
     assert _with("not-a-number") == 1.00       # junk fails CLOSED, not open
 
 
+def test_resolve_monthly_budget_parsing(monkeypatch):
+    def _with(value):
+        monkeypatch.setattr(operator_service, "load_settings",
+                            lambda: {"operator_monthly_budget_usd": value})
+        return operator_service.resolve_monthly_budget()
+
+    monkeypatch.setattr(operator_service, "load_settings", lambda: {})
+    assert operator_service.resolve_monthly_budget() == 50.00   # default ON
+    assert _with("") == 50.00
+    assert _with("off") is None
+    assert _with("75") == 75.00
+    assert _with("$40.50") == 40.50
+    assert _with("junk") == 50.00              # junk fails CLOSED
+
+
+def test_month_to_date_spend_sums_only_this_month(tmp_path, monkeypatch):
+    from datetime import datetime
+    from app.services import operation_log_service, state_store
+    monkeypatch.setattr(state_store, "STATE_DIR", tmp_path / "state")
+    state_store.save("operations", [
+        {"id": "a", "completed_at": "2026-08-01T09:00:00", "spend_usd": 1.10},
+        {"id": "b", "completed_at": "2026-08-04T15:30:00+00:00", "spend_usd": 0.40},
+        {"id": "c", "completed_at": "2026-07-28T09:00:00", "spend_usd": 9.99},
+        {"id": "d", "completed_at": "", "started_at": "2026-08-02T10:00:00",
+         "spend_usd": 0.25},
+        {"id": "e", "completed_at": "garbage", "spend_usd": 5.00},
+    ])
+    total = operation_log_service.month_to_date_spend(
+        now=datetime(2026, 8, 5, 12, 0, 0))
+    assert total == pytest.approx(1.75)        # a + b + d; July and junk excluded
+
+
+# --------------------------------------------------------------------------
+# The ceiling-stop message reports ACTUAL budget state (v5.1)
+# --------------------------------------------------------------------------
+
+def test_ceiling_message_reports_month_to_date_and_remaining():
+    msg = operator_service._ceiling_stop_message(1.17, 1.00, 12.34, 50.00)
+    assert "≈$1.17" in msg and "$1.00 per-run limit" in msg
+    assert "Month-to-date: $12.34 of the $50.00 monthly budget" in msg
+    assert "$37.66 remaining" in msg
+    # Plenty of monthly headroom → raising the ceiling is a fair suggestion.
+    assert "raise the per-run ceiling" in msg
+
+
+def test_ceiling_message_monthly_binding_never_suggests_disabling():
+    """THE required pin: monthly cap nearly reached → say so plainly, and
+    neither raising nor disabling the per-run ceiling is on offer."""
+    msg = operator_service._ceiling_stop_message(1.02, 1.00, 49.50, 50.00)
+    assert "Month-to-date: $49.50 of the $50.00 monthly budget" in msg
+    assert "$0.50 remaining" in msg
+    assert "binding constraint" in msg
+    low = msg.lower()
+    assert "'off'" not in low and "disab" not in low and "turn off" not in low
+    assert "raise the per-run ceiling" not in low
+    assert "raise it" not in low
+
+
+def test_ceiling_message_monthly_exhausted():
+    msg = operator_service._ceiling_stop_message(0.75, 1.00, 50.10, 50.00)
+    assert "$0.00 remaining" in msg
+    assert "exhausted" in msg
+    low = msg.lower()
+    assert "'off'" not in low and "disab" not in low
+    assert "raise the per-run ceiling" not in low
+
+
+def test_ceiling_stop_uses_live_month_state(tmp_path, monkeypatch):
+    """_absorb_planner_spend builds the message from the log's month-to-date
+    PLUS this run's own spend (the run isn't in the log yet)."""
+    from app.services import operation_log_service
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.setattr(operation_log_service, "month_to_date_spend", lambda: 10.00)
+    monkeypatch.setattr(operator_service, "resolve_monthly_budget", lambda: 50.00)
+    op = _ctx(tmp_path, {"cost_ceiling_usd": 0.05, "spend_usd": 0.0})
+    stop = asyncio.run(_absorb_planner_spend(op, _planner_msg(13_000, 500)))
+    assert stop is True
+    detail = next(s for s in op.record["steps"]
+                  if s["name"] == "cost_ceiling")["detail"]
+    # 10.00 logged + 0.0775 this run
+    assert "Month-to-date: $10.08 of the $50.00 monthly budget" in detail
+    assert "remaining" in detail
+
+
 # --------------------------------------------------------------------------
 # The plan names the fence — before any spend
 # --------------------------------------------------------------------------

@@ -201,6 +201,7 @@ const SETTINGS_FIELDS = [
   'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
+  'operator_monthly_budget_usd',
   'quickbooks_client_id',
   'quickbooks_environment',
   'appearance',

@@ -48,6 +48,27 @@ def new_operation_id() -> str:
     return "op_" + uuid.uuid4().hex[:12]
 
 
+def month_to_date_spend(now: Optional[datetime] = None) -> float:
+    """Sum of logged per-run spend_usd for the current calendar month.
+
+    Timestamps in the log are mixed (UTC-aware from this module, naive
+    local from operator_service snapshots); year/month are compared as
+    recorded, so runs within hours of a month boundary can land on either
+    side — pennies-level tolerance, fine for a budget message. ``now`` is
+    injectable for deterministic tests."""
+    now = now or datetime.now()
+    total = 0.0
+    for r in state_store.load_list(_OPS_NAME):
+        ts = str(r.get("completed_at") or r.get("started_at") or "")
+        try:
+            d = datetime.fromisoformat(ts)
+        except ValueError:
+            continue
+        if (d.year, d.month) == (now.year, now.month):
+            total += float(r.get("spend_usd", 0.0) or 0.0)
+    return round(total, 4)
+
+
 def append_operation(record: dict) -> dict:
     """Append a finished operation record. Newest entries first."""
     items = state_store.load_list(_OPS_NAME)

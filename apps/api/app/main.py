@@ -181,6 +181,9 @@ class SettingsView(BaseModel):
     # blank means the sandbox default (quickbooks_service.get_environment).
     quickbooks_environment: str = ""
     operator_run_cost_ceiling_usd: str = ""
+    # v5.1: monthly spend budget the ceiling-stop message reports against.
+    # Blank = the $50 default (operator_service.resolve_monthly_budget).
+    operator_monthly_budget_usd: str = ""
     # v1.4: when True (default), every operator run auto-uploads its artifact
     # folder to Google Drive at the end of the run, no manual click required.
     # Stored as "true"/"false" string in local_settings.json.
@@ -223,6 +226,7 @@ class SettingsUpdate(BaseModel):
     quickbooks_client_secret: str | None = None
     quickbooks_environment: str | None = None
     operator_run_cost_ceiling_usd: str | None = None
+    operator_monthly_budget_usd: str | None = None
     appearance: str | None = None
 
 

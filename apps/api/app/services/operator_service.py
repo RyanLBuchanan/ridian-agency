@@ -703,6 +703,67 @@ def resolve_cost_ceiling() -> float | None:
     return round(value, 2)
 
 
+_DEFAULT_MONTHLY_BUDGET_USD = 50.00
+
+
+def resolve_monthly_budget() -> float | None:
+    """The operator's MONTHLY spend budget from Settings: a float, or None
+    for none set. Same parsing contract as resolve_cost_ceiling — blank is
+    the default (budgeted out of the box), "off" is the deliberate switch,
+    junk falls back to the default."""
+    raw = (load_settings().get("operator_monthly_budget_usd") or "").strip().lower()
+    if not raw:
+        return _DEFAULT_MONTHLY_BUDGET_USD
+    if raw in _CEILING_OFF_VALUES:
+        return None
+    try:
+        value = float(raw.lstrip("$"))
+    except ValueError:
+        log.warning("monthly_budget.unparseable value=%r — using the $%.2f default",
+                    raw, _DEFAULT_MONTHLY_BUDGET_USD)
+        return _DEFAULT_MONTHLY_BUDGET_USD
+    if value <= 0:
+        return None
+    return round(value, 2)
+
+
+def _ceiling_stop_message(run_spend: float, ceiling: float,
+                          month_spent: float, monthly_cap: float | None) -> str:
+    """The ceiling-stop message, built from ACTUAL budget state (pure —
+    pinned by tests). The old text suggested raising the per-run ceiling
+    'or setting it to off' unconditionally, which was dishonest whenever
+    the monthly budget was the real constraint: a raised ceiling would
+    just hit the monthly wall at higher cost. Rules:
+      - always report this run's spend, the per-run limit, month-to-date
+        against the monthly budget, and what remains;
+      - suggest raising the per-run ceiling ONLY when the remaining
+        monthly budget can actually absorb more than the ceiling;
+      - when the monthly budget is binding or exhausted, say so plainly
+        and never suggest raising or disabling the per-run ceiling."""
+    head = (f"Run stopped at the per-run cost ceiling — ≈${run_spend:.2f} "
+            f"spent of the ${ceiling:.2f} per-run limit.")
+    if monthly_cap is None:
+        return (head + " No monthly budget is set. If this run should go "
+                "further, raise the per-run ceiling in Settings and run again.")
+    remaining = max(0.0, round(monthly_cap - month_spent, 4))
+    state = (f" Month-to-date: ${month_spent:.2f} of the ${monthly_cap:.2f} "
+             f"monthly budget — ${remaining:.2f} remaining.")
+    if remaining <= 0.005:
+        return (head + state + " The monthly budget is exhausted, so raising "
+                "the per-run ceiling would not help — the next run stops at "
+                "the monthly wall instead. Wait for the new month, or revisit "
+                "the monthly budget in Settings if it no longer reflects what "
+                "you want to spend.")
+    if remaining <= ceiling:
+        return (head + state + " The monthly budget is the binding constraint "
+                "here, not the per-run ceiling: less than one run's ceiling "
+                f"remains. Leave the ceiling as it is — whatever runs next "
+                f"this month has ${remaining:.2f} to work with.")
+    return (head + state + " The monthly budget can absorb a longer run: "
+            f"raise the per-run ceiling in Settings (up to ${remaining:.2f} "
+            "remains this month) and run again.")
+
+
 async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
     """Fold one planner turn's token cost into the run's spend and enforce the
     ceiling at the turn boundary. Returns True when the run must STOP.
@@ -727,9 +788,12 @@ async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
         return False
     if getattr(message, "stop_reason", "") == "end_turn":
         return False
-    msg = (f"Run stopped at the cost ceiling — ≈${rec['spend_usd']:.2f} spent "
-           f"of the ${ceiling:.2f} limit. Raise it in Settings (or set it to "
-           f"'off') and run again.")
+    # Month-to-date INCLUDES this run: it isn't in the log yet (the record
+    # is finalized after the run ends), so add its spend explicitly.
+    month_spent = round(
+        operation_log_service.month_to_date_spend() + rec["spend_usd"], 4)
+    msg = _ceiling_stop_message(rec["spend_usd"], ceiling, month_spent,
+                                resolve_monthly_budget())
     rec["errors"].append(msg)
     await operator.emit_step(name="cost_ceiling", status="failed", detail=msg)
     await operator.emit_error(msg)

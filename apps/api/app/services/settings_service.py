@@ -67,6 +67,11 @@ SETTABLE_KEYS: tuple[str, ...] = (
     # "off" = no ceiling, deliberately. Parsed by
     # operator_service.resolve_cost_ceiling at operation intake.
     "operator_run_cost_ceiling_usd",
+    # v5.1: the MONTHLY spend budget the ceiling message reports against.
+    # Blank = the $50.00 default; "off" = no monthly budget. Parsed by
+    # operator_service.resolve_monthly_budget; month-to-date comes from the
+    # operation log's per-run spend_usd ledger.
+    "operator_monthly_budget_usd",
     "appearance",
 )
 
