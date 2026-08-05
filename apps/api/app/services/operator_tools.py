@@ -1901,7 +1901,25 @@ INVOICE_CANCEL = "Cancel the invoice"
 
 _STATED_NUM_RE = _re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\$?\d+(?:\.\d+)?")
 
-_ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item"})
+# v5.0 Phase 6 adds "deal-record": a line citing a pipeline deal may carry
+# that deal's STORED value — verified fresh from the store at gate time
+# (_amount_matches_deal), never from the planner's claim.
+_ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item", "deal-record"})
+
+
+def _amount_matches_deal(deal_id: str, amount) -> bool:
+    """Deterministic deal-record provenance: True ONLY when the deal exists
+    and its stored value_usd equals the amount. The store is re-read here —
+    a fabricated amount matches nothing no matter what the line claims."""
+    try:
+        v = float(amount)
+    except (TypeError, ValueError):
+        return False
+    for d in pipeline_service.list_deals():
+        if d.get("id") == deal_id:
+            val = str(d.get("value_usd") or "").strip()
+            return bool(val) and abs(float(val) - v) < 0.005
+    return False
 
 
 def extract_stated_numbers(text: str) -> list[float]:
@@ -2098,17 +2116,21 @@ async def create_quickbooks_invoice(
             sources["qty"] = "user-stated"
             ln["_amount"] = round(float(ln["qty"]) * float(ln["unit_price"]), 2)
         else:
-            # Free-form line: the amount must be a number the operator typed.
+            # Free-form line: the amount must be a number the operator typed —
+            # or (v5.0 Phase 6) the RECORDED value of the deal the line cites.
             if ln.get("amount") is None:
                 return await _park(
                     f"What amount should I invoice for "
                     f"\"{ln.get('description', 'this line')}\"?", "line_value_missing")
-            if not _is_stated(operator, ln["amount"]):
+            if _is_stated(operator, ln["amount"]):
+                sources["amount"] = "user-stated"
+            elif ln.get("deal_id") and _amount_matches_deal(ln["deal_id"], ln["amount"]):
+                sources["amount"] = "deal-record"
+            else:
                 return await _park(
                     f"Confirm the amount for \"{ln.get('description', 'this line')}\" "
                     f"— {ln['amount']} wasn't something you stated.",
                     "line_value_unverified")
-            sources["amount"] = "user-stated"
             ln["_amount"] = float(ln["amount"])
         if ln["_amount"] <= 0:
             return {"error": "every line needs a positive amount.", "reason": "bad_args"}
@@ -2840,6 +2862,76 @@ async def weekly_review() -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# v5.0 Phase 6 — invoice from deal: the pipeline wired to invoicing.
+# "Invoice Sandy for the discovery engagement" pulls the deal, stages the
+# QBO invoice through EVERY existing invoicing gate (real-customer
+# resolution, line provenance with the deal-record source, signature-
+# matched approval, single gated unsent write), and marks the deal won
+# only after the invoice actually exists.
+# ---------------------------------------------------------------------------
+
+@planner_tool
+async def invoice_deal(deal: str, description: str = "") -> dict:
+    """Invoice a pipeline deal in QuickBooks. Pulls the deal, stages an
+    UNSENT invoice for the deal's RECORDED value (deal-record provenance —
+    no invented numbers), pauses for the standard invoice preview approval,
+    creates it on approval, then marks the deal WON with a logged touch
+    naming the invoice. All invoicing gates apply unchanged; on
+    {"reason": "invoice_plan_pending"} WAIT for the operator's answer.
+
+    Args:
+        deal: Deal id, or the contact name / deal title to match.
+        description: Optional invoice line description (default: deal title).
+    """
+    operator = current_operator()
+    operator.note_tool("invoice_deal")
+
+    match, candidates = _resolve_deal(deal)
+    if not match:
+        if candidates:
+            return {"error": f"{deal!r} matches several deals — which one?",
+                    "candidates": [_deal_summary(d) for d in candidates]}
+        return {"error": f"No deal matching {deal!r}. Use list_deals to see the pipeline."}
+    if match.get("stage") == "lost":
+        return {"error": (f"The deal for {match.get('contact_name')} is marked "
+                          "LOST — not invoicing it. If that's wrong, reopen it "
+                          "with update_deal first.")}
+    value = str(match.get("value_usd") or "").strip()
+    if not value:
+        await operator.emit_needs_input(
+            question=(f"What should the invoice for {match.get('contact_name')} "
+                      "charge? The deal has no recorded value — set one with "
+                      "update_deal or state the amount."),
+            context_hint="invoice from deal — value needed from you")
+        return {"error": "BLOCKED: the deal has no recorded value. A needs-input "
+                         "question was raised; WAIT for the operator.",
+                "reason": "deal_value_missing"}
+
+    line = {"description": (str(description or "").strip()
+                            or match.get("title") or "Consulting engagement"),
+            "amount": float(value),
+            "deal_id": match["id"]}
+    raw = await create_quickbooks_invoice.call(
+        {"customer": match.get("contact_name", ""), "lines": [line]})
+    result = json.loads(raw) if isinstance(raw, str) else raw
+    if result.get("error"):
+        return result       # parked / approval-pending / declined — unchanged
+
+    # The invoice EXISTS — now, and only now, the deal becomes won.
+    pipeline_service.update_deal(match["id"], {"stage": "won"})
+    pipeline_service.log_touch(
+        match["id"],
+        (f"Invoiced ${float(value):,.2f} — QuickBooks invoice "
+         f"{result.get('doc_number') or result.get('id')} (unsent)."),
+        written_by="pipeline", source_op=operator.record.get("id", ""))
+    refreshed, _ = _resolve_deal(match["id"])
+    await operator.emit_step(
+        name="pipeline", status="completed",
+        detail=f"Deal won — {match.get('contact_name')}, ${float(value):,.2f} invoiced.")
+    return {**result, "deal": _deal_summary(refreshed or match)}
+
+
 PLANNER_TOOLS = [
     web_research,
     read_url,
@@ -2873,6 +2965,8 @@ PLANNER_TOOLS = [
     prep_brief,
     # v5.0 Phase 5 — proposals (invoice-pattern provenance + approval)
     draft_proposal,
+    # v5.0 Phase 6 — invoice from deal (marks the deal won on create)
+    invoice_deal,
 ]
 
 
