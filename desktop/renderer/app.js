@@ -5668,18 +5668,19 @@ async function _opHandlePdfFile(file) {
   }
 }
 
+// v6.0 Phase 6: PDF, .docx, .txt and .md all intake through one endpoint.
 async function _opStageSourcePdf(file) {
   _opSetStatus(`Reading ${file.name}…`);
   try {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    const res = await fetch(`${BACKEND}/sources/stage-pdf`, { method: 'POST', body: fd });
+    const res = await fetch(`${BACKEND}/sources/stage-document`, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
     _opShowSourceChip(`📎 ${file.name} — ${data.chars} chars${data.truncated ? ' (truncated)' : ''} · Ridian will build only from this`);
     _opSetStatus('Source attached. Type your command and Ridian will build only from it.', 'ok');
   } catch (err) {
-    _opSetStatus(`Couldn't attach PDF: ${err && err.message ? err.message : err}`, 'err');
+    _opSetStatus(`Couldn't attach document: ${err && err.message ? err.message : err}`, 'err');
   }
 }
 
@@ -6576,6 +6577,41 @@ if (_pdfInput) {
     if (f) _opHandlePdfFile(f);
   });
 }
+/* v6.0 Phase 6: drag-and-drop document intake onto the composer. Same
+   handler as the file picker, so a paused run's grounding question is
+   answered by a drop exactly as it is by a pick. */
+(function _wireDocumentDrop() {
+  const zone = document.querySelector('.operator-command-wrap') || document.querySelector('.operator-main');
+  if (!zone) return;
+  const ACCEPT = /\.(pdf|docx|txt|md)$/i;
+  const over = (on) => zone.classList.toggle('is-drop-target', on);
+  ['dragenter', 'dragover'].forEach((evt) => {
+    zone.addEventListener(evt, (e) => {
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      over(true);
+    });
+  });
+  ['dragleave', 'dragend'].forEach((evt) => {
+    zone.addEventListener(evt, (e) => { if (e.target === zone) over(false); });
+  });
+  zone.addEventListener('drop', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    over(false);
+    const file = e.dataTransfer.files[0];
+    if (!ACCEPT.test(file.name)) {
+      _opSetStatus(`I can read PDF, .docx, .txt and .md — not ${file.name}.`, 'err');
+      return;
+    }
+    _opHandlePdfFile(file);
+  });
+  // A file dropped anywhere ELSE must not make the browser navigate to it.
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+})();
+
 const _sourceChipClear = document.getElementById('operator-source-chip-clear');
 if (_sourceChipClear) _sourceChipClear.addEventListener('click', _opClearSource);
 const _answerChipClear = document.getElementById('operator-answer-chip-clear');

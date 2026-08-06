@@ -46,6 +46,7 @@ from . import (
     brief_service,
     browser_service,
     calendar_service,
+    document_service,
     gmail_service,
     inbox_service,
     google_drive_service,
@@ -1934,7 +1935,11 @@ _STATED_NUM_RE = _re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\$?\d+(?:\.\d+)?"
 # v5.0 Phase 6 adds "deal-record": a line citing a pipeline deal may carry
 # that deal's STORED value — verified fresh from the store at gate time
 # (_amount_matches_deal), never from the planner's claim.
-_ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item", "deal-record"})
+# v6.0 Phase 6 adds "document": a number that appears in a document THIS RUN
+# actually ingested (read_document → record["document_numbers"]) — a client's
+# own RFP figure. Absent from every ingested document, it still refuses.
+_ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item", "deal-record",
+                                   "document"})
 
 
 def _amount_matches_deal(deal_id: str, amount) -> bool:
@@ -2156,10 +2161,15 @@ async def create_quickbooks_invoice(
                 sources["amount"] = "user-stated"
             elif ln.get("deal_id") and _amount_matches_deal(ln["deal_id"], ln["amount"]):
                 sources["amount"] = "deal-record"
+            elif _is_from_document(operator, ln["amount"]):
+                sources["amount"] = "document"
+                ln["_source_note"] = _document_label(operator, ln["amount"])
             else:
                 return await _park(
                     f"Confirm the amount for \"{ln.get('description', 'this line')}\" "
-                    f"— {ln['amount']} wasn't something you stated.",
+                    f"— {ln['amount']} wasn't something you stated"
+                    + (", and it isn't in any document I've read"
+                       if _document_numbers(operator) else "") + ".",
                     "line_value_unverified")
             ln["_amount"] = float(ln["amount"])
         if ln["_amount"] <= 0:
@@ -2831,6 +2841,9 @@ def _deal_record_numbers(deal: dict) -> list[float]:
 def _proposal_allowed_numbers(operator, deal: dict, price: float) -> list[float]:
     allowed = list(operator.record.get("user_stated_numbers", []))
     allowed += _deal_record_numbers(deal)
+    # v6.0 Phase 6: figures from a document this run actually ingested (the
+    # client's own RFP) are sanctioned — same standing as the deal record.
+    allowed += _document_numbers(operator)
     allowed.append(float(price))
     return allowed
 
@@ -2940,15 +2953,19 @@ async def draft_proposal(deal: str, price: str = "", timeline: str = "",
     except ValueError:
         return {"error": f"price must be a dollar amount — got {price!r}."}
 
-    # THE invoice provenance rule: the price is either the operator's own
-    # number or the deal record's — anything else was invented. Refuse+ask.
+    # THE invoice provenance rule: the price is the operator's own number,
+    # the deal record's, or (v6.0 Phase 6) one that appears in a document
+    # this run ingested — anything else was invented. Refuse+ask.
     deal_value = str(match.get("value_usd") or "").strip()
     from_deal = bool(deal_value) and abs(float(deal_value) - price_f) < 0.005
-    if not (from_deal or _is_stated(operator, price_f)):
+    from_doc = _is_from_document(operator, price_f)
+    if not (from_deal or from_doc or _is_stated(operator, price_f)):
         return await _park_proposal(
             f"The price ${price_f:,.2f} isn't something you stated and isn't "
-            f"the deal's recorded value ({('$' + deal_value) if deal_value else 'none set'}). "
-            "What should the proposal quote?", "price_unverified")
+            f"the deal's recorded value ({('$' + deal_value) if deal_value else 'none set'})"
+            + (", and it isn't in any document I've read"
+               if _document_numbers(operator) else "")
+            + ". What should the proposal quote?", "price_unverified")
 
     # Timeline numbers obey the same rule (stated or from the deal record).
     allowed = _proposal_allowed_numbers(operator, match, price_f)
@@ -3334,6 +3351,87 @@ async def find_conflicts(range: str = "week") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 6 — document intake. Ingested text is grounded context AND a
+# provenance source stamped "document": numbers that appear in the client's
+# own RFP become citable by the invoice/proposal gates (see
+# _document_numbers). Numbers absent from every ingested document still
+# refuse — ingestion widens the sanctioned set, it never disables the gate.
+# ---------------------------------------------------------------------------
+
+def _document_numbers(operator) -> list[float]:
+    """Every number the run's INGESTED DOCUMENTS contain. Same extractor as
+    the operator's typed numbers, so the contract is identical: an exact
+    value match against text that really exists in a file we read."""
+    return list(operator.record.get("document_numbers") or [])
+
+
+def _is_from_document(operator, value) -> bool:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return any(abs(v - n) < 0.005 for n in _document_numbers(operator))
+
+
+def _document_label(operator, value) -> str:
+    """Which ingested document a number came from — for previews/receipts."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return ""
+    for doc in operator.record.get("documents") or []:
+        if any(abs(v - n) < 0.005 for n in (doc.get("numbers") or [])):
+            return str(doc.get("name", ""))
+    return ""
+
+
+@planner_tool
+async def read_document(path: str) -> dict:
+    """Read a PDF, .docx, .txt or .md file into this run as GROUNDED context.
+    The extracted text is saved to the run's source.md and its numbers
+    become citable provenance (stamped "document"), so a proposal or
+    invoice may use a figure that appears in the client's own document.
+    Refuses honestly: a wrong-format file, an image-only/scanned PDF, or
+    anything with no extractable text is rejected, never guessed at.
+
+    Args:
+        path: Full path to the file to read.
+    """
+    operator = current_operator()
+    operator.note_tool("read_document")
+    try:
+        doc = await asyncio.to_thread(document_service.extract_path, path)
+    except document_service.DocumentError as exc:
+        await operator.emit_step(name="document", status="failed",
+                                 detail=f"{exc.detail}")
+        return {"error": exc.detail, "reason": exc.reason}
+
+    numbers = extract_stated_numbers(doc["text"])
+    rec = operator.record
+    entry = {"name": doc["name"], "path": doc.get("path", ""), "kind": doc["kind"],
+             "chars": doc["chars"], "sha256": doc["sha256"],
+             "truncated": doc["truncated"], "numbers": numbers}
+    rec.setdefault("documents", []).append(entry)
+    known = rec.setdefault("document_numbers", [])
+    for n in numbers:
+        if not any(abs(n - k) < 0.005 for k in known):
+            known.append(n)
+
+    # Same grounding provenance a fetched URL or attached PDF provides.
+    from .operator_service import _ground_with_text
+    _ground_with_text(operator, doc["text"], f"Document: {doc['name']}")
+
+    await operator.emit_step(
+        name="document", status="completed",
+        detail=(f"Read {doc['name']} ({doc['kind']}, {doc['chars']} chars"
+                + (", truncated" if doc["truncated"] else "")
+                + f") — {len(numbers)} number(s) now citable."))
+    return {"name": doc["name"], "kind": doc["kind"], "chars": doc["chars"],
+            "truncated": doc["truncated"], "sha256": doc["sha256"],
+            "numbers_found": len(numbers), "text": doc["text"]}
+
+
+# ---------------------------------------------------------------------------
 # v6.0 Phase 5 — inbox triage, READ ONLY. inbox_service has no send/modify/
 # trash path (introspection-pinned). Replying is still draft_gmail's job,
 # behind its recipient-provenance and approval gates — triage never drafts.
@@ -3510,6 +3608,8 @@ PLANNER_TOOLS = [
     find_conflicts,
     # v6.0 Phase 5 — inbox triage (READ ONLY; no send/modify/trash exists)
     triage_inbox,
+    # v6.0 Phase 6 — document intake ("document" provenance source)
+    read_document,
 ]
 
 

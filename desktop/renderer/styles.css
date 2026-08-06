@@ -5396,3 +5396,6 @@ body {
 .approval-stale { color: var(--warn, #d9a03f); font-weight: 600; font-size: 11px; letter-spacing: 0.03em; }
 .approval-status { font-size: 12px; color: var(--text-dim, #8a8f98); }
 .brief-pipeline { color: var(--accent, #4f8cff); font-weight: 600; font-size: 11px; letter-spacing: 0.03em; }
+
+/* v6.0 Phase 6: drag-and-drop document intake target */
+.operator-command-wrap.is-drop-target { outline: 2px dashed var(--accent, #4f8cff); outline-offset: 3px; border-radius: 10px; }

@@ -1255,19 +1255,44 @@ async def sources_stage_pdf(file: UploadFile = File(...)) -> dict:
     return {"ok": True, "pages": extracted["pages"], "truncated": extracted["truncated"], **info}
 
 
+@app.post("/sources/stage-document")
+async def sources_stage_document(file: UploadFile = File(...)) -> dict:
+    """v6.0 Phase 6: intake a PDF / .docx / .txt / .md by drag-and-drop or
+    file picker and stage its text as the grounding source for the next
+    run. Refuses wrong formats, image-only PDFs, and text-less files
+    honestly — the machine ``reason`` rides along for the renderer."""
+    from .services import document_service
+    data = await file.read()
+    name = file.filename or "document"
+    try:
+        doc = document_service.extract_bytes(data, name)
+    except document_service.DocumentError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail=f"{exc.detail} [{exc.reason}]")
+    info = operator_service.stage_source(doc["text"], f"Attached {doc['kind'].upper()}: {doc['name']}")
+    return {"ok": True, "kind": doc["kind"], "name": doc["name"],
+            "pages": doc.get("pages", 0), "truncated": doc["truncated"],
+            "sha256": doc["sha256"], **info}
+
+
 @app.post("/operations/{operation_id}/upload-source")
 async def operations_upload_source(operation_id: str, file: UploadFile = File(...)) -> StreamingResponse:
-    """Answer a grounding-gate question with an uploaded PDF: extract its text
-    and RESUME the operation grounded in it. Image-only PDFs are refused with a
-    400 (no SSE) so the run stays awaiting and honest."""
+    """Answer a grounding-gate question with an uploaded document: extract its
+    text and RESUME the operation grounded in it. v6.0 Phase 6: PDF, .docx,
+    .txt and .md are all accepted. Image-only PDFs and text-less files are
+    refused with a 400 (no SSE) so the run stays awaiting and honest."""
+    from .services import document_service
     data = await file.read()
+    name = file.filename or "upload.pdf"
     try:
-        extracted = pdf_service.validate_and_extract(data, file.filename or "upload.pdf")
-    except pdf_service.PdfError as exc:
-        raise HTTPException(status_code=exc.status, detail=exc.detail)
+        extracted = document_service.extract_bytes(data, name)
+    except document_service.DocumentError as exc:
+        raise HTTPException(status_code=exc.status,
+                            detail=f"{exc.detail} [{exc.reason}]")
 
-    operator_service.save_source_pdf(operation_id, data, file.filename or "source.pdf")
-    answer = f"[Attached PDF: {file.filename or 'upload.pdf'}]\n\n{extracted['text']}"
+    operator_service.save_source_pdf(operation_id, data, name)
+    answer = (f"[Attached {extracted['kind'].upper()}: {extracted['name']}]"
+              f"\n\n{extracted['text']}")
 
     return _operation_sse(lambda emit: operator_service.continue_operation(
         operation_id=operation_id, answer=answer, emit=emit,
