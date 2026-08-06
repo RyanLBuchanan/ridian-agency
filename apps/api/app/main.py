@@ -1020,6 +1020,34 @@ async def morning_brief_get() -> dict:
     return await asyncio.to_thread(brief_service.build_brief)
 
 
+@app.get("/audit")
+async def audit_get(date_from: str = "", date_to: str = "", type: str = "",
+                    outcome: str = "", limit: int = 200) -> dict:
+    """v6.0 Phase 8: every gated action, filterable. READ-ONLY."""
+    from .services import audit_service
+    return await asyncio.to_thread(
+        audit_service.build_audit, date_from=date_from, date_to=date_to,
+        type_filter=type, outcome=outcome, limit=limit)
+
+
+@app.get("/audit/export.csv")
+async def audit_export_csv(date_from: str = "", date_to: str = "",
+                           type: str = "", outcome: str = "") -> Response:
+    """The same filtered audit log as CSV, for download from the view."""
+    from .services import audit_service
+
+    def build() -> str:
+        audit = audit_service.build_audit(
+            date_from=date_from, date_to=date_to, type_filter=type,
+            outcome=outcome)
+        return audit_service.to_csv(audit["entries"])
+
+    return Response(content=await asyncio.to_thread(build),
+                    media_type="text/csv",
+                    headers={"Content-Disposition":
+                             'attachment; filename="audit_log.csv"'})
+
+
 class ApprovalAnswerRequest(BaseModel):
     id: str = Field(..., description="Approval id from GET /approvals.")
     value: str = Field(..., description="One of the staged options' values — buttons only.")

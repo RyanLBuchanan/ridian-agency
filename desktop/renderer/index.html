@@ -299,6 +299,13 @@
                     <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
                   </button>
                 </div>
+                <button id="rail-audit-btn" type="button" class="rail-settings">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <path d="M14 2v6h6M9 15l2 2 4-4"/>
+                  </svg>
+                  <span>Audit log</span>
+                </button>
                 <button id="rail-approvals-btn" type="button" class="rail-settings">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -824,6 +831,46 @@
               </div><!-- /operator-main -->
 
               <!-- ============================================================ -->
+              <!-- AUDIT LOG: full-page READ-ONLY view (v6.0 Phase 8) over the -->
+              <!-- approvals ledger + operation logs. Filter + export CSV.     -->
+              <section id="audit-view" class="settings-view hidden" aria-label="Audit log">
+                <header class="settings-head">
+                  <button id="audit-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <h2 class="settings-title">Audit log</h2>
+                  <span id="audit-summary" class="brief-date"></span>
+                </header>
+                <div class="audit-filters">
+                  <label class="audit-filter"><span>From</span>
+                    <input id="audit-from" type="date" class="settings-input settings-input-compact" /></label>
+                  <label class="audit-filter"><span>To</span>
+                    <input id="audit-to" type="date" class="settings-input settings-input-compact" /></label>
+                  <label class="audit-filter"><span>Type</span>
+                    <select id="audit-type" class="settings-input settings-input-compact">
+                      <option value="">All types</option>
+                      <option value="invoice">Invoice</option>
+                      <option value="proposal">Proposal</option>
+                      <option value="contact_admin">Contact admin</option>
+                      <option value="backup_restore">Backup restore</option>
+                      <option value="research">Research</option>
+                      <option value="gated_action">Other gated</option>
+                    </select></label>
+                  <label class="audit-filter"><span>Outcome</span>
+                    <select id="audit-outcome" class="settings-input settings-input-compact">
+                      <option value="">All outcomes</option>
+                      <option value="approved">Approved</option>
+                      <option value="declined">Declined</option>
+                      <option value="pending">Pending</option>
+                      <option value="unknown">Unknown</option>
+                    </select></label>
+                  <button id="audit-export-btn" type="button" class="btn btn-ghost btn-compact">Export CSV</button>
+                </div>
+                <div id="audit-scroll" class="settings-scroll">
+                  <div id="audit-body" class="brief-body">
+                    <p class="brief-loading">Loading…</p>
+                  </div>
+                </div>
+              </section>
+
               <!-- APPROVAL INBOX: full-page view (v6.0 Phase 3). Approving    -->
               <!-- here posts the staged option value through the SAME signed  -->
               <!-- gate path as answering in the thread.                       -->

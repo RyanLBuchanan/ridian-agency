@@ -7706,6 +7706,115 @@ function handleApprovalsKeydown(e) {
   if (e.key === 'Escape') { e.preventDefault(); closeApprovals(); }
 }
 
+/* ============================================================ */
+/*            AUDIT LOG VIEW (v6.0 Phase 8, read-only)           */
+/* ============================================================ */
+// Every gated action: what was staged, approved or declined, when, what it
+// cost, what it created. Filterable, exportable. This view only ever GETs.
+
+function _auditQuery() {
+  const p = new URLSearchParams();
+  const from = document.getElementById('audit-from');
+  const to = document.getElementById('audit-to');
+  const type = document.getElementById('audit-type');
+  const outcome = document.getElementById('audit-outcome');
+  if (from && from.value) p.set('date_from', from.value);
+  if (to && to.value) p.set('date_to', to.value);
+  if (type && type.value) p.set('type', type.value);
+  if (outcome && outcome.value) p.set('outcome', outcome.value);
+  return p.toString();
+}
+
+async function loadAuditLog() {
+  const body = document.getElementById('audit-body');
+  const summary = document.getElementById('audit-summary');
+  if (!body) return;
+  body.innerHTML = '<p class="brief-loading">Loading…</p>';
+  try {
+    const res = await fetch(`${BACKEND}/audit?${_auditQuery()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (summary) {
+      const parts = Object.entries(data.by_outcome || {})
+        .map(([k, v]) => `${v} ${k}`).join(' · ');
+      summary.textContent = `${data.count} action(s)${parts ? ' — ' + parts : ''} · $${Number(data.total_cost_usd || 0).toFixed(2)}`;
+    }
+    if (!data.entries.length) {
+      body.innerHTML = '<p class="brief-note">No gated actions match these filters.</p>';
+      return;
+    }
+    body.innerHTML = data.entries.map((e) => `
+      <div class="brief-item audit-item">
+        <span class="brief-item-main">
+          <span class="audit-outcome audit-${_briefEsc(e.outcome)}">${_briefEsc(e.outcome.toUpperCase())}</span>
+          <span class="audit-type">${_briefEsc(e.type)}</span>
+          ${_briefEsc(e.question || e.action || '(no preview recorded)')}
+        </span>
+        <span class="brief-item-meta">
+          ${_briefEsc(e.command || e.operation_id)}
+          · staged ${_briefEsc(e.staged_at || 'unknown')}${e.answered_at ? ' · answered ' + _briefEsc(e.answered_at) : ''}
+          · $${Number(e.cost_usd || 0).toFixed(2)}${e.created ? ' · created ' + _briefEsc(e.created) : ''}
+          ${e.outcome_source === 'inferred' ? '<span class="audit-inferred">outcome inferred, not recorded</span>' : ''}
+        </span>
+      </div>`).join('');
+  } catch (err) {
+    body.innerHTML = `<p class="brief-note brief-unavailable">Could not load the audit log: ${_briefEsc(err && err.message ? err.message : err)}</p>`;
+  }
+}
+
+function openAuditLog() {
+  const view = document.getElementById('audit-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  if (main) main.classList.add('hidden');
+  view.classList.remove('hidden');
+  document.addEventListener('keydown', handleAuditKeydown);
+  loadAuditLog();
+}
+
+function closeAuditLog() {
+  const view = document.getElementById('audit-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  view.classList.add('hidden');
+  if (main) main.classList.remove('hidden');
+  document.removeEventListener('keydown', handleAuditKeydown);
+}
+
+function handleAuditKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeAuditLog(); }
+}
+
+['audit-from', 'audit-to', 'audit-type', 'audit-outcome'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', loadAuditLog);
+});
+const _auditExportBtn = document.getElementById('audit-export-btn');
+if (_auditExportBtn) {
+  _auditExportBtn.addEventListener('click', async () => {
+    const status = document.getElementById('audit-summary');
+    try {
+      const res = await fetch(`${BACKEND}/audit/export.csv?${_auditQuery()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'audit_log.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      if (status) status.textContent = `Export failed: ${err && err.message ? err.message : err}`;
+    }
+  });
+}
+const _railAuditBtn = document.getElementById('rail-audit-btn');
+if (_railAuditBtn) _railAuditBtn.addEventListener('click', openAuditLog);
+const _auditCloseBtn = document.getElementById('audit-close-btn');
+if (_auditCloseBtn) _auditCloseBtn.addEventListener('click', closeAuditLog);
+
 const _railApprovalsBtn = document.getElementById('rail-approvals-btn');
 if (_railApprovalsBtn) _railApprovalsBtn.addEventListener('click', openApprovals);
 const _approvalsCloseBtn = document.getElementById('approvals-close-btn');

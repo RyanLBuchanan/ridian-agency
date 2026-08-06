@@ -43,6 +43,7 @@ import re as _re
 
 from ..agents import load_prompt, model_supports_effort, research_model, script_model
 from . import (
+    audit_service,
     brief_service,
     browser_service,
     calendar_service,
@@ -3351,6 +3352,64 @@ async def find_conflicts(range: str = "week") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 8 — audit log. READ-ONLY over the approvals ledger + the
+# operation logs; writes nothing anywhere.
+# ---------------------------------------------------------------------------
+
+@planner_tool
+async def audit_log(date_from: str = "", date_to: str = "", type: str = "",
+                    outcome: str = "", limit: int = 50) -> dict:
+    """Every gated action ever taken — what was staged, whether it was
+    approved or declined, when, what it cost, and what it created.
+    READ-ONLY. Outcomes recorded in the approvals ledger are marked
+    "recorded"; older runs may carry "inferred" or "unknown" outcomes,
+    which must be reported as such rather than as fact.
+
+    Args:
+        date_from: Only entries staged on/after this ISO date (YYYY-MM-DD).
+        date_to: Only entries staged on/before this ISO date.
+        type: invoice | proposal | contact_admin | backup_restore |
+            research | gated_action. Blank = every type.
+        outcome: approved | declined | pending | unknown. Blank = all.
+        limit: Maximum entries to return (default 50).
+    """
+    operator = current_operator()
+    operator.note_tool("audit_log")
+    return await asyncio.to_thread(
+        audit_service.build_audit, date_from=date_from, date_to=date_to,
+        type_filter=type, outcome=outcome, limit=limit)
+
+
+@planner_tool
+async def export_audit_csv(date_from: str = "", date_to: str = "",
+                           type: str = "", outcome: str = "") -> dict:
+    """Export the audit log to audit_log.csv in this run's outputs folder.
+    Same filters as audit_log. READ-ONLY on all state.
+
+    Args:
+        date_from: Only entries staged on/after this ISO date (YYYY-MM-DD).
+        date_to: Only entries staged on/before this ISO date.
+        type: Optional type filter.
+        outcome: Optional outcome filter.
+    """
+    operator = current_operator()
+    operator.note_tool("export_audit_csv")
+    audit = await asyncio.to_thread(
+        audit_service.build_audit, date_from=date_from, date_to=date_to,
+        type_filter=type, outcome=outcome)
+    path = operator.folder / "audit_log.csv"
+    path.write_text(audit_service.to_csv(audit["entries"]), encoding="utf-8")
+    await operator.emit_artifact(name="audit_log.csv", path=str(path), kind="csv")
+    await operator.emit_step(
+        name="audit", status="completed",
+        detail=(f"Exported {audit['count']} gated action(s) "
+                f"(${audit['total_cost_usd']:.2f} total) to audit_log.csv."))
+    return {"path": str(path), "count": audit["count"],
+            "by_outcome": audit["by_outcome"],
+            "total_cost_usd": audit["total_cost_usd"]}
+
+
+# ---------------------------------------------------------------------------
 # v6.0 Phase 6 — document intake. Ingested text is grounded context AND a
 # provenance source stamped "document": numbers that appear in the client's
 # own RFP become citable by the invoice/proposal gates (see
@@ -3610,6 +3669,9 @@ PLANNER_TOOLS = [
     triage_inbox,
     # v6.0 Phase 6 — document intake ("document" provenance source)
     read_document,
+    # v6.0 Phase 8 — audit log (READ-ONLY over existing ledgers)
+    audit_log,
+    export_audit_csv,
 ]
 
 

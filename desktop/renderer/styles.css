@@ -5399,3 +5399,17 @@ body {
 
 /* v6.0 Phase 6: drag-and-drop document intake target */
 .operator-command-wrap.is-drop-target { outline: 2px dashed var(--accent, #4f8cff); outline-offset: 3px; border-radius: 10px; }
+
+/* ============================================================ */
+/*            AUDIT LOG VIEW (v6.0 Phase 8)                      */
+/* ============================================================ */
+.audit-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 4px 2px 12px; border-bottom: 1px solid var(--border, #2a2d34); margin-bottom: 12px; }
+.audit-filter { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim, #8a8f98); }
+.audit-item { gap: 4px; }
+.audit-outcome { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; margin-right: 6px; }
+.audit-approved { background: #1f6f43; color: #eafff2; }
+.audit-declined { background: #7a2c26; color: #ffecea; }
+.audit-pending { background: #7a5a1e; color: #fff6e2; }
+.audit-unknown { background: #3a3f48; color: #d6dae1; }
+.audit-type { font-size: 11px; color: var(--text-dim, #8a8f98); margin-right: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+.audit-inferred { display: inline-block; margin-left: 6px; color: var(--warn, #d9a03f); font-style: italic; }
