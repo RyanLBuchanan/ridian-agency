@@ -50,6 +50,10 @@ log = logging.getLogger("ridian.google")
 #                     drive.file's implicit coverage by the Sheets API.
 #   presentations   — same rationale, for Google Slides via the Slides API
 #                     (create_slide_deck).
+#   calendar.readonly — v6.0 Phase 4: READ the operator's calendar. The
+#                     read-only variant is deliberate; there is no event
+#                     creation anywhere in the app, and calendar_service has
+#                     no write path (pinned by introspection).
 #
 # Adding a scope requires every previously-connected user to reconnect Google
 # once so the new scope is consented (delete google_token.json + re-consent).
@@ -60,6 +64,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 from .runtime_paths import data_dir, guard_real_state_write

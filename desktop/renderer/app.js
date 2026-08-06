@@ -3178,6 +3178,7 @@ function openSettings() {
   _setKeyDot('settings-dot-openai', null);
   _setKeyDot('settings-dot-drive', null);
   _setKeyDot('settings-dot-gmail', null);
+  _setKeyDot('settings-dot-calendar', null);
   _googleRowsRefresh();
   // Status lines must reflect the CURRENT state on every open — a failure
   // message from a previous attempt must never greet the user as if it
@@ -6415,9 +6416,8 @@ _wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/t
    sign-in covers both; each row verifies ITS service with a real API call
    (dots are Test-proven only, same contract as the key rows). */
 async function _googleRowTest(kind) {
-  const dotId = kind === 'drive' ? 'settings-dot-drive' : 'settings-dot-gmail';
-  const statusEl = document.getElementById(
-    kind === 'drive' ? 'settings-drive-status' : 'settings-gmail-status');
+  const dotId = `settings-dot-${kind}`;
+  const statusEl = document.getElementById(`settings-${kind}-status`);
   _setKeyDot(dotId, null);
   if (statusEl) { statusEl.className = ''; statusEl.textContent = 'Testing against the live API…'; }
   try {
@@ -6437,10 +6437,15 @@ async function _googleRowTest(kind) {
   }
 }
 
+// v6.0 Phase 4: Calendar joins Drive + Gmail — one Google sign-in, three
+// rows, each verified by its own real API call.
+const GOOGLE_ROWS = ['drive', 'gmail', 'calendar'];
+
 async function _googleRowsRefresh() {
-  const driveConn = document.getElementById('settings-drive-conn');
-  const gmailConn = document.getElementById('settings-gmail-conn');
-  if (!driveConn && !gmailConn) return;
+  const buttons = GOOGLE_ROWS
+    .map((k) => [k, document.getElementById(`settings-${k}-conn`)])
+    .filter(([, btn]) => btn);
+  if (!buttons.length) return;
   try {
     const s = await fetch(`${BACKEND}/google/status`).then((r) => (r.ok ? r.json() : null));
     if (!s) return;
@@ -6448,9 +6453,9 @@ async function _googleRowsRefresh() {
     const note = s.connected
       ? `Connected as ${s.email || 'your account'} — Test to verify.`
       : 'Not connected.';
-    for (const [btn, noteId] of [[driveConn, 'settings-drive-note'], [gmailConn, 'settings-gmail-note']]) {
-      if (btn) btn.textContent = label;
-      const n = document.getElementById(noteId);
+    for (const [kind, btn] of buttons) {
+      btn.textContent = label;
+      const n = document.getElementById(`settings-${kind}-note`);
       if (n) n.textContent = note;
     }
   } catch (_) { /* backend not up */ }
@@ -6465,29 +6470,26 @@ async function _googleConnToggle(statusId) {
     connected = !!(s && s.connected);
   } catch (_) { /* treat as not connected */ }
   if (connected) {
-    if (!window.confirm('Disconnect Google? Drive AND Gmail share one sign-in — both disconnect, and the saved token is deleted from this machine.')) return;
+    if (!window.confirm('Disconnect Google? Drive, Gmail AND Calendar share one sign-in — all disconnect, and the saved token is deleted from this machine.')) return;
     try { await fetch(`${BACKEND}/google/disconnect`, { method: 'POST' }); } catch (_) {}
-    _setKeyDot('settings-dot-drive', null);
-    _setKeyDot('settings-dot-gmail', null);
+    GOOGLE_ROWS.forEach((k) => _setKeyDot(`settings-dot-${k}`, null));
     report('Disconnected.');
     _googleRowsRefresh();
     return;
   }
   _googleTwoPhaseConnect(report, () => {
     _googleRowsRefresh();
-    _googleRowTest('drive');   // verified dots via one real call per service
-    _googleRowTest('gmail');
+    // Verified dots via one real call per service.
+    GOOGLE_ROWS.forEach((k) => _googleRowTest(k));
   });
 }
 
-const _driveTestBtn = document.getElementById('settings-test-drive');
-if (_driveTestBtn) _driveTestBtn.addEventListener('click', () => _googleRowTest('drive'));
-const _gmailTestBtn = document.getElementById('settings-test-gmail');
-if (_gmailTestBtn) _gmailTestBtn.addEventListener('click', () => _googleRowTest('gmail'));
-const _driveConnBtn = document.getElementById('settings-drive-conn');
-if (_driveConnBtn) _driveConnBtn.addEventListener('click', () => _googleConnToggle('settings-drive-status'));
-const _gmailConnBtn = document.getElementById('settings-gmail-conn');
-if (_gmailConnBtn) _gmailConnBtn.addEventListener('click', () => _googleConnToggle('settings-gmail-status'));
+GOOGLE_ROWS.forEach((kind) => {
+  const testBtn = document.getElementById(`settings-test-${kind}`);
+  if (testBtn) testBtn.addEventListener('click', () => _googleRowTest(kind));
+  const connBtn = document.getElementById(`settings-${kind}-conn`);
+  if (connBtn) connBtn.addEventListener('click', () => _googleConnToggle(`settings-${kind}-status`));
+});
 
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {
@@ -7458,6 +7460,11 @@ async function loadMorningBrief() {
     const s = brief.sections;
     if (dateEl) dateEl.textContent = brief.generated_for || '';
     body.innerHTML = [
+      _briefSection('Today’s calendar', s.today_events, (items) => items.map((e) => `
+        <div class="brief-item">
+          <span class="brief-item-main">${_briefEsc(e.summary)}</span>
+          <span class="brief-item-meta">${e.all_day ? 'All day' : _briefEsc(String(e.start || '').replace('T', ' ').slice(0, 16))}${e.location ? ' · ' + _briefEsc(e.location) : ''}</span>
+        </div>`).join('')),
       _briefSection('Due today', s.due_today, _briefDealRows),
       _briefSection('Due this week', s.due_this_week, _briefDealRows),
       _briefSection('Gone quiet (no touch in 7+ days)', s.stale_deals, _briefDealRows),

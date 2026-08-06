@@ -135,9 +135,13 @@ def test_empty_sections_are_present_and_say_so(tmp_path, monkeypatch):
     _op(tmp_path)
     monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
                         lambda limit=20: [])
+    # v6.0 Phase 4 added today_events; with no Google connection it reports
+    # UNAVAILABLE (unknown), which is the honest state — not "nothing today".
+    monkeypatch.setattr(brief_service.calendar_service, "todays_events",
+                        lambda today=None: [])
     sections = brief_service.build_brief(today=TODAY)["sections"]
-    assert set(sections) == {"due_today", "due_this_week", "stale_deals",
-                             "unpaid_invoices", "awaiting_approval"}
+    assert set(sections) == {"today_events", "due_today", "due_this_week",
+                             "stale_deals", "unpaid_invoices", "awaiting_approval"}
     for name, sec in sections.items():
         assert sec["empty"] is True, name
         assert sec["items"] == [], name

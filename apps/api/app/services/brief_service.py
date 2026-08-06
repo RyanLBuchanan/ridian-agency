@@ -5,6 +5,7 @@ unavailable — an empty section states that nothing is there, and a
 section whose source is unreachable (QuickBooks not connected) says so
 instead of masquerading as zero:
 
+  - today's calendar events (v6.0 Phase 4, read-only)
   - next actions due today (incl. overdue) and due this week
   - active deals with no touch in 7+ days
   - unpaid QuickBooks invoices (balance > 0)
@@ -20,7 +21,7 @@ import datetime as _dt
 import logging
 from typing import Optional
 
-from . import pipeline_service, quickbooks_service, state_store
+from . import calendar_service, pipeline_service, quickbooks_service, state_store
 
 log = logging.getLogger("ridian.brief")
 
@@ -102,9 +103,20 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
             "started_at": op.get("started_at", ""),
         })
 
+    try:
+        events = calendar_service.todays_events(today=today)
+        calendar = _section(events, "Nothing on the calendar today.")
+    except Exception as exc:  # noqa: BLE001 — the note carries the reason
+        log.info("brief.calendar_unavailable %s", type(exc).__name__)
+        detail = getattr(exc, "detail", None) or str(exc)
+        calendar = _section(
+            [], "", unavailable=(f"Calendar unreachable ({detail}) — today's "
+                                 "events unknown, NOT none."))
+
     return {
         "generated_for": today.isoformat(),
         "sections": {
+            "today_events": calendar,
             "due_today": _section(
                 due_today, "Nothing due today — no next actions dated today "
                            "or overdue."),

@@ -713,6 +713,26 @@ async def google_test_gmail() -> KeyTestResponse:
     return KeyTestResponse(**await asyncio.to_thread(probe))
 
 
+@app.post("/google/test-calendar", response_model=KeyTestResponse)
+async def google_test_calendar() -> KeyTestResponse:
+    """One REAL Calendar call (calendars.get on 'primary') proving READ
+    access works. The app holds calendar.readonly — there is no write."""
+    def probe() -> dict:
+        from .services import calendar_service
+        cal = calendar_service.get_primary_calendar()   # real API call
+        if cal:
+            who = cal.get("summary") or cal.get("id") or "your calendar"
+            return {"ok": True, "source": "google_token",
+                    "detail": f"Calendar reads — verified live on {who}."}
+        if not calendar_service.is_calendar_ready():
+            return {"ok": False, "source": "google_token",
+                    "detail": "Calendar read access is not granted — Connect "
+                              "(or Reconnect) Google to grant it."}
+        return {"ok": False, "source": "google_token",
+                "detail": "Calendar did not respond — try again."}
+    return KeyTestResponse(**await asyncio.to_thread(probe))
+
+
 @app.get("/settings", response_model=SettingsView)
 async def settings_get() -> SettingsView:
     """Return the operator-visible settings. Never includes smtp_password."""

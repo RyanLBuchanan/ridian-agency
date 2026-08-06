@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import csv
+import datetime as _dt
 import functools
 import io
 import json
@@ -44,6 +45,7 @@ from ..agents import load_prompt, model_supports_effort, research_model, script_
 from . import (
     brief_service,
     browser_service,
+    calendar_service,
     gmail_service,
     google_drive_service,
     google_workspace_service,
@@ -3265,6 +3267,72 @@ async def export_crm_csv() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 4 — calendar, READ ONLY. calendar_service has no write path
+# (introspection-pinned); the granted scope is calendar.readonly. No tool
+# here creates, moves, or cancels anything.
+# ---------------------------------------------------------------------------
+
+def _calendar_error(exc) -> dict:
+    detail = getattr(exc, "detail", None) or str(exc)
+    return {"error": detail, "reason": "calendar_unavailable"}
+
+
+@planner_tool
+async def list_events(range: str = "week") -> dict:
+    """List calendar events in a window. READ-ONLY (no event can be
+    created, moved, or cancelled — the app holds a read-only scope).
+
+    Args:
+        range: "today", "tomorrow", "week", "next week", "month", an ISO
+            date (2026-08-06), or an ISO span (2026-08-06..2026-08-12).
+            Blank means the next 7 days.
+    """
+    operator = current_operator()
+    operator.note_tool("list_events")
+    try:
+        return await asyncio.to_thread(calendar_service.list_events, range)
+    except Exception as exc:  # noqa: BLE001
+        return _calendar_error(exc)
+
+
+@planner_tool
+async def whats_my_day() -> dict:
+    """Today's calendar at a glance: every event today, plus how many are
+    still ahead and any conflicts among them. READ-ONLY.
+    """
+    operator = current_operator()
+    operator.note_tool("whats_my_day")
+    try:
+        day = await asyncio.to_thread(calendar_service.list_events, "today")
+    except Exception as exc:  # noqa: BLE001
+        return _calendar_error(exc)
+    now_iso = _dt.datetime.now().isoformat(timespec="minutes")
+    upcoming = [e for e in day["events"]
+                if not e["all_day"] and (e.get("start") or "") >= now_iso]
+    return {**day, "now": now_iso, "upcoming_count": len(upcoming),
+            "conflicts": calendar_service.find_overlaps(day["events"])}
+
+
+@planner_tool
+async def find_conflicts(range: str = "week") -> dict:
+    """Find double-booked calendar slots — pairs of timed events that
+    overlap. All-day events never count as conflicts. READ-ONLY.
+
+    Args:
+        range: Same window syntax as list_events (default: next 7 days).
+    """
+    operator = current_operator()
+    operator.note_tool("find_conflicts")
+    try:
+        window = await asyncio.to_thread(calendar_service.list_events, range)
+    except Exception as exc:  # noqa: BLE001
+        return _calendar_error(exc)
+    conflicts = calendar_service.find_overlaps(window["events"])
+    return {"range": window["range"], "conflicts": conflicts,
+            "count": len(conflicts), "events_checked": window["count"]}
+
+
+# ---------------------------------------------------------------------------
 # v6.0 Phase 2 — the morning brief: one assembled read-only view.
 # ---------------------------------------------------------------------------
 
@@ -3397,6 +3465,10 @@ PLANNER_TOOLS = [
     export_crm_csv,
     # v6.0 Phase 2 — morning brief (read-only)
     morning_brief,
+    # v6.0 Phase 4 — calendar (READ ONLY; no create/move/cancel exists)
+    list_events,
+    whats_my_day,
+    find_conflicts,
 ]
 
 
