@@ -7507,6 +7507,114 @@ if (_railBriefBtn) _railBriefBtn.addEventListener('click', openMorningBrief);
 const _briefCloseBtn = document.getElementById('brief-close-btn');
 if (_briefCloseBtn) _briefCloseBtn.addEventListener('click', closeMorningBrief);
 
+/* ============================================================ */
+/*            APPROVAL INBOX VIEW (v6.0 Phase 3)                 */
+/* ============================================================ */
+// Approving here posts the STAGED option value to /approvals/answer —
+// the backend runs it through the same signed gate path as an in-thread
+// answer, so a tampered payload refuses server-side.
+
+async function loadApprovals() {
+  const body = document.getElementById('approvals-body');
+  if (!body) return;
+  body.innerHTML = '<p class="brief-loading">Loading…</p>';
+  let data;
+  try {
+    const res = await fetch(`${BACKEND}/approvals`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (err) {
+    body.innerHTML = `<p class="brief-note brief-unavailable">Could not load approvals: ${_briefEsc(err && err.message ? err.message : err)}</p>`;
+    return;
+  }
+  _updateApprovalsBadge(data.count);
+  if (!data.approvals.length) {
+    body.innerHTML = '<p class="brief-note">Nothing is awaiting your approval.</p>';
+    return;
+  }
+  body.innerHTML = data.approvals.map((a) => `
+    <div class="brief-item approval-item" data-approval-id="${_briefEsc(a.id)}">
+      <span class="brief-item-main">${a.stale ? '<span class="approval-stale">STALE 7+ DAYS</span> ' : ''}${_briefEsc(a.question || a.tool)}</span>
+      <span class="brief-item-meta">From: ${_briefEsc(a.command || a.operation_id)} · staged ${_briefEsc(a.staged_at)}</span>
+      <span class="approval-actions">
+        ${(a.options || []).map((o) => `<button type="button" class="btn btn-compact approval-answer-btn" data-value="${_briefEsc(o.value)}">${_briefEsc(o.label)}</button>`).join(' ')}
+      </span>
+      <span class="approval-status" role="status" aria-live="polite"></span>
+    </div>`).join('');
+  body.querySelectorAll('.approval-answer-btn').forEach((btn) => {
+    btn.addEventListener('click', () => _answerApproval(btn));
+  });
+}
+
+async function _answerApproval(btn) {
+  const item = btn.closest('.approval-item');
+  const statusEl = item.querySelector('.approval-status');
+  item.querySelectorAll('.approval-answer-btn').forEach((b) => { b.disabled = true; });
+  statusEl.textContent = 'Working…';
+  try {
+    const res = await fetch(`${BACKEND}/approvals/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: item.getAttribute('data-approval-id'), value: btn.getAttribute('data-value') }),
+    });
+    const out = await res.json();
+    if (out.error) {
+      statusEl.textContent = out.error;
+      item.querySelectorAll('.approval-answer-btn').forEach((b) => { b.disabled = false; });
+      return;
+    }
+    statusEl.textContent = out.approved ? 'Approved — executed.' : 'Cancelled.';
+    setTimeout(loadApprovals, 900);
+  } catch (err) {
+    statusEl.textContent = `Failed: ${err && err.message ? err.message : err}`;
+    item.querySelectorAll('.approval-answer-btn').forEach((b) => { b.disabled = false; });
+  }
+}
+
+function _updateApprovalsBadge(count) {
+  const badge = document.getElementById('rail-approvals-count');
+  if (!badge) return;
+  badge.textContent = String(count || 0);
+  badge.classList.toggle('hidden', !count);
+}
+
+async function refreshApprovalsBadge() {
+  try {
+    const res = await fetch(`${BACKEND}/approvals`);
+    if (res.ok) _updateApprovalsBadge((await res.json()).count);
+  } catch (_err) { /* badge only — never intrusive */ }
+}
+
+function openApprovals() {
+  const view = document.getElementById('approvals-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  if (main) main.classList.add('hidden');
+  view.classList.remove('hidden');
+  document.addEventListener('keydown', handleApprovalsKeydown);
+  loadApprovals();
+}
+
+function closeApprovals() {
+  const view = document.getElementById('approvals-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  view.classList.add('hidden');
+  if (main) main.classList.remove('hidden');
+  document.removeEventListener('keydown', handleApprovalsKeydown);
+}
+
+function handleApprovalsKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeApprovals(); }
+}
+
+const _railApprovalsBtn = document.getElementById('rail-approvals-btn');
+if (_railApprovalsBtn) _railApprovalsBtn.addEventListener('click', openApprovals);
+const _approvalsCloseBtn = document.getElementById('approvals-close-btn');
+if (_approvalsCloseBtn) _approvalsCloseBtn.addEventListener('click', closeApprovals);
+refreshApprovalsBadge();
+setInterval(refreshApprovalsBadge, 60000);
+
 // New-project: the + reveals an inline name input (window.prompt doesn't
 // exist in Electron); Enter creates, Escape/blur cancels.
 const _railNewProjectBtn = document.getElementById('rail-new-project');

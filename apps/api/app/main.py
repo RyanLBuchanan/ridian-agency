@@ -1000,6 +1000,27 @@ async def morning_brief_get() -> dict:
     return await asyncio.to_thread(brief_service.build_brief)
 
 
+class ApprovalAnswerRequest(BaseModel):
+    id: str = Field(..., description="Approval id from GET /approvals.")
+    value: str = Field(..., description="One of the staged options' values — buttons only.")
+
+
+@app.get("/approvals")
+async def approvals_list() -> dict:
+    """v6.0 Phase 3: every staged-but-unanswered approval, stale-flagged."""
+    from .services import approval_inbox_service
+    pending = await asyncio.to_thread(approval_inbox_service.list_pending)
+    return {"approvals": pending, "count": len(pending)}
+
+
+@app.post("/approvals/answer")
+async def approvals_answer(payload: ApprovalAnswerRequest) -> dict:
+    """Approve or cancel a staged item — the same signed gate path as
+    answering in the thread; a tampered payload refuses."""
+    from .services import approval_inbox_service
+    return await approval_inbox_service.answer_approval(payload.id, payload.value)
+
+
 # ---------------------------------------------------------------------------
 # Operator v1 — natural-command operations + live SSE timeline
 # ---------------------------------------------------------------------------

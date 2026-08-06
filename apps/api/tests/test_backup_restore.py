@@ -143,11 +143,17 @@ def test_declined_restore_leaves_state_byte_untouched(tmp_path):
     snap_id = _call("backup_now")["backup"]["id"]
     _call("add_contact", name="Casey Reed")
     before = _state_bytes()
-    _call("restore_backup", timestamp=snap_id)
+    _call("restore_backup", timestamp=snap_id)       # stages the ask
+    # v6.0 Phase 3: the ASK itself is recorded in the approvals ledger — the
+    # only file the staging may touch. Every BUSINESS store stays identical.
+    after_ask = _state_bytes()
+    assert set(after_ask) - set(before) <= {"approvals.json"}
+    assert {k: v for k, v in after_ask.items() if k != "approvals.json"} == before
     operator_service._apply_restore_answer(op, t.RESTORE_CANCEL)
     out = _call("restore_backup", timestamp=snap_id)
     assert out.get("reason") == "restore_declined"
-    assert _state_bytes() == before                  # byte-identical
+    # The decline + re-call write NOTHING at all.
+    assert _state_bytes() == after_ask               # byte-identical
 
 
 def test_restore_approval_is_bound_to_one_snapshot(tmp_path):

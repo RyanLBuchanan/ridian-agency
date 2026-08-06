@@ -28,6 +28,7 @@ business-shaped rather than infrastructure-shaped.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import csv
 import functools
 import io
@@ -71,6 +72,12 @@ from .operator_context import (
 log = logging.getLogger("ridian.operator.tools")
 
 
+# v6.0 Phase 3: tools call tools (invoice_deal -> create_quickbooks_invoice),
+# and only the OUTERMOST call is the plannable, re-executable staged action —
+# the depth counter keeps nested pendings out of the approval inbox.
+_TOOL_CALL_DEPTH = contextvars.ContextVar("ridian_tool_depth", default=0)
+
+
 def planner_tool(fn):
     """Register an async tool with the Anthropic tool runner.
 
@@ -78,10 +85,26 @@ def planner_tool(fn):
     (the SDK generates the input schema from both — same behavior as the old
     ``@function_tool``). Bodies keep returning dicts; the wrapper JSON-encodes
     them into the tool_result string the model reads.
+
+    v6.0 Phase 3: any outermost call that returns {"reason": "*_pending"} has
+    just staged an approval — the wrapper persists that staged call (tool +
+    exact kwargs + the gate's signature flags) to the approval inbox, so the
+    item survives the thread. Staging failures never break the tool result.
     """
     @functools.wraps(fn)
     async def wrapper(**kwargs):
-        result = await fn(**kwargs)
+        token = _TOOL_CALL_DEPTH.set(_TOOL_CALL_DEPTH.get() + 1)
+        try:
+            result = await fn(**kwargs)
+        finally:
+            _TOOL_CALL_DEPTH.reset(token)
+        if (isinstance(result, dict) and _TOOL_CALL_DEPTH.get() == 0
+                and str(result.get("reason", "")).endswith("_pending")):
+            try:
+                from . import approval_inbox_service
+                approval_inbox_service.stage_from_tool(fn.__name__, kwargs, result)
+            except Exception:  # noqa: BLE001 — staging must never eat the result
+                log.exception("approval_inbox.stage_failed tool=%s", fn.__name__)
         if isinstance(result, str):
             return result
         return json.dumps(result, default=str)

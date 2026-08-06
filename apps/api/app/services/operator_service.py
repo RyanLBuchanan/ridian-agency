@@ -1072,6 +1072,13 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_restore_answer(operator, answer),
             ) if n
         ]
+        # v6.0 Phase 3: an answer given IN-THREAD resolves the staged inbox
+        # entry too — the inbox never shows an already-answered item.
+        try:
+            from . import approval_inbox_service
+            approval_inbox_service.sync_from_record(record)
+        except Exception:  # noqa: BLE001 — sync must never break the resume
+            log.exception("approval_inbox.sync_failed id=%s", operation_id)
         note = "\n\n".join(notes)
         user_content = (
             (note + "\n\n" if note else "")
