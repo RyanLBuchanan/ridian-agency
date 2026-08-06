@@ -40,6 +40,8 @@ from .operator_tools import (
     CONTACT_ADMIN_PROCEED,
     INVOICE_CANCEL,
     INVOICE_PROCEED,
+    RESTORE_CANCEL,
+    RESTORE_PROCEED,
     PLANNER_TOOLS,
     PROPOSAL_CANCEL,
     PROPOSAL_PROCEED,
@@ -867,6 +869,28 @@ def _apply_contact_admin_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+def _apply_restore_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending backup-restore preview from the operator's resume
+    answer — the ONLY writer of record["restore_approved"] /
+    ["restore_declined"] (operator_tools._restore_gate checks the flags
+    plus the snapshot-id signature in code; the planner can't set them)."""
+    rec = operator.record
+    if (not rec.get("restore_asked")
+            or rec.get("restore_approved") or rec.get("restore_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == RESTORE_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["restore_approved"] = True
+        return ("The operator APPROVED the previewed restore. Call "
+                "restore_backup again with the SAME timestamp.")
+    if a == RESTORE_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["restore_declined"] = True
+        return ("The operator DECLINED the restore. Do not restore; "
+                "acknowledge briefly in your receipt.")
+    rec["restore_asked"] = False   # unrecognized → re-present on next call
+    return ""
+
+
 def _sanitize_research_model(value: str) -> str:
     """Allowlist the composer's per-run sub-agent model pick (Research and
     Script share the curated list). Anything not on it — junk, an unknown
@@ -1045,6 +1069,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_invoice_answer(operator, answer),
                 _apply_proposal_answer(operator, answer),
                 _apply_contact_admin_answer(operator, answer),
+                _apply_restore_answer(operator, answer),
             ) if n
         ]
         note = "\n\n".join(notes)

@@ -28,7 +28,9 @@ business-shaped rather than infrastructure-shaped.
 from __future__ import annotations
 
 import asyncio
+import csv
 import functools
+import io
 import json
 import logging
 from pathlib import Path
@@ -47,6 +49,7 @@ from . import (
     pipeline_service,
     quickbooks_service,
     settings_service,
+    state_store,
     tts_service,
     url_fetch_service,
 )
@@ -3079,6 +3082,165 @@ async def weekly_review() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 1 — backup & restore. Every state write already snapshots
+# first (state_store.save); these tools expose the backups. restore_backup
+# REPLACES all current state, so it sits behind the standard signature-
+# matched, buttons-only approval gate: record["restore_approved"] is
+# written ONLY by operator_service from the operator's own answer, and the
+# approval is signed to ONE snapshot id — a different id re-asks.
+# ---------------------------------------------------------------------------
+
+RESTORE_PROCEED = "Restore the backup as previewed"
+RESTORE_CANCEL = "Cancel the restore"
+
+
+def _stores_text(stores: dict) -> str:
+    return (", ".join(f"{k}: {v}" for k, v in sorted(stores.items()))
+            or "nothing")
+
+
+async def _restore_gate(operator, snap_id: str, question: str) -> dict | None:
+    """None = approved for exactly this snapshot; else a blocking dict."""
+    rec = operator.record
+    if rec.get("restore_approved") and rec.get("restore_sig") == snap_id:
+        return None
+    if rec.get("restore_declined"):
+        return {"error": ("The operator DECLINED the restore. Do NOT retry or "
+                          "restore another way; acknowledge briefly."),
+                "reason": "restore_declined"}
+    if (rec.get("restore_asked") and not rec.get("restore_approved")
+            and rec.get("restore_sig") != snap_id):
+        return {"error": ("Another restore is already awaiting the operator's "
+                          "approval — ONE at a time. WAIT for that answer."),
+                "reason": "restore_conflict"}
+    rec["restore_sig"] = snap_id
+    rec["restore_approved"] = False
+    rec["restore_asked"] = True
+    await operator.emit_needs_input(
+        question=question,
+        context_hint="backup restore — nothing changes until you answer",
+        options=[{"label": "Restore it", "action": "submit", "value": RESTORE_PROCEED},
+                 {"label": "Cancel", "action": "submit", "value": RESTORE_CANCEL}],
+        buttons_only=True,   # signature-matched: only the buttons can answer
+    )
+    return {"error": ("BLOCKED: the restore needs the operator's approval. A "
+                      "needs-input question has been raised; WAIT for the "
+                      "answer. Do NOT retry or restore another way."),
+            "reason": "restore_pending"}
+
+
+@planner_tool
+async def backup_now() -> dict:
+    """Take a manual timestamped backup of ALL state (contacts, deals,
+    memory, profile, operation history) right now. Backups also happen
+    automatically before every write; the newest 30 are kept.
+    """
+    operator = current_operator()
+    operator.note_tool("backup_now")
+    snap_id = state_store.snapshot(reason="manual (operator asked)")
+    if snap_id is None:
+        return {"error": "Nothing to back up yet — no state has been written."}
+    meta = state_store.get_snapshot(snap_id) or {"id": snap_id}
+    await operator.emit_step(
+        name="backup", status="completed",
+        detail=f"Backup {snap_id} — {_stores_text(meta.get('stores', {}))}.")
+    return {"backup": meta, "kept": len(state_store.list_snapshots())}
+
+
+@planner_tool
+async def list_backups() -> dict:
+    """List retained state backups (newest first): id, when, why it was
+    taken, and per-store record counts. READ-ONLY.
+    """
+    operator = current_operator()
+    operator.note_tool("list_backups")
+    snaps = state_store.list_snapshots()
+    return {"backups": snaps, "count": len(snaps),
+            "keep_limit": state_store.SNAPSHOT_KEEP}
+
+
+@planner_tool
+async def restore_backup(timestamp: str) -> dict:
+    """Restore ALL state from a backup, REPLACING current contacts, deals,
+    memory, and profile with the snapshot's contents. DESTRUCTIVE: pauses
+    for the standard preview approval naming exactly what the snapshot
+    contains and what will be overwritten. A pre-restore backup of the
+    current state is taken first. On {"reason": "restore_pending"} WAIT
+    for the operator's answer.
+
+    Args:
+        timestamp: Backup id, exactly as shown by list_backups.
+    """
+    operator = current_operator()
+    operator.note_tool("restore_backup")
+    snap_id = str(timestamp or "").strip()
+    meta = state_store.get_snapshot(snap_id)
+    if meta is None:
+        return {"error": (f"No backup {snap_id!r}. Use list_backups to see "
+                          "what's available."),
+                "available": [s["id"] for s in state_store.list_snapshots()][:10]}
+    current = state_store._store_counts(state_store._state_files())
+    block = await _restore_gate(
+        operator, snap_id,
+        (f"Restore preview — backup {snap_id} "
+         f"(taken {meta.get('created_iso') or 'unknown'}, "
+         f"reason: {meta.get('reason') or 'unknown'}) contains "
+         f"[{_stores_text(meta.get('stores', {}))}]. Restoring will "
+         f"OVERWRITE the current state [{_stores_text(current)}] entirely. "
+         f"A pre-restore backup of today's state is taken first. Restore?"))
+    if block:
+        return block
+    result = state_store.restore_snapshot(snap_id)
+    await operator.emit_step(
+        name="backup", status="completed",
+        detail=(f"Restored backup {snap_id} ({len(result['stores'])} stores). "
+                f"Pre-restore backup: {result['pre_restore_backup']}."))
+    return result
+
+
+@planner_tool
+async def export_crm_csv() -> dict:
+    """Export the contact and deal stores to contacts.csv and deals.csv in
+    this run's outputs folder. Read-only on state; touches ride along in
+    the deals CSV as a JSON column.
+    """
+    operator = current_operator()
+    operator.note_tool("export_crm_csv")
+    contacts = memory_service.list_contacts()
+    deals = pipeline_service.list_deals()
+
+    def _write(name: str, rows: list[dict], fields: list[str],
+               json_fields: tuple = ()) -> Path:
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore",
+                           lineterminator="\n")
+        w.writeheader()
+        for r in rows:
+            row = {k: r.get(k, "") for k in fields}
+            for jf in json_fields:
+                row[jf] = json.dumps(r.get(jf, []), sort_keys=True)
+            w.writerow(row)
+        path = operator.folder / name
+        path.write_text(buf.getvalue(), encoding="utf-8")
+        return path
+
+    c_fields = ["id", *memory_service.CONTACT_FIELDS,
+                "written_by", "source_op", "created_iso", "updated_iso"]
+    d_fields = ["id", *pipeline_service.DEAL_FIELDS, "created_iso",
+                "updated_iso", "last_touch_iso", "written_by", "source_op",
+                "touches"]
+    c_path = _write("contacts.csv", contacts, c_fields)
+    d_path = _write("deals.csv", deals, d_fields, json_fields=("touches",))
+    await operator.emit_artifact(name="contacts.csv", path=str(c_path), kind="csv")
+    await operator.emit_artifact(name="deals.csv", path=str(d_path), kind="csv")
+    await operator.emit_step(
+        name="backup", status="completed",
+        detail=f"Exported {len(contacts)} contacts, {len(deals)} deals to CSV.")
+    return {"contacts_csv": str(c_path), "deals_csv": str(d_path),
+            "contacts": len(contacts), "deals": len(deals)}
+
+
+# ---------------------------------------------------------------------------
 # v5.0 Phase 6 — invoice from deal: the pipeline wired to invoicing.
 # "Invoice Sandy for the discovery engagement" pulls the deal, stages the
 # QBO invoice through EVERY existing invoicing gate (real-customer
@@ -3186,6 +3348,11 @@ PLANNER_TOOLS = [
     # v5.1 — destructive contact admin, approval-gated
     merge_contacts,
     delete_contact,
+    # v6.0 Phase 1 — backup & restore (restore approval-gated)
+    backup_now,
+    list_backups,
+    restore_backup,
+    export_crm_csv,
 ]
 
 
