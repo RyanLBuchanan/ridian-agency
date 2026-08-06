@@ -41,6 +41,7 @@ import re as _re
 
 from ..agents import load_prompt, model_supports_effort, research_model, script_model
 from . import (
+    brief_service,
     browser_service,
     gmail_service,
     google_drive_service,
@@ -3241,6 +3242,24 @@ async def export_crm_csv() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 2 — the morning brief: one assembled read-only view.
+# ---------------------------------------------------------------------------
+
+@planner_tool
+async def morning_brief() -> dict:
+    """The operator's morning brief, assembled READ-ONLY from real records:
+    next actions due today (incl. overdue) and this week, active deals with
+    no touch in 7+ days, unpaid QuickBooks invoices, and anything awaiting
+    the operator's approval. Every section is present; empty sections say
+    so honestly, and an unreachable source says UNKNOWN rather than zero.
+    """
+    operator = current_operator()
+    operator.note_tool("morning_brief")
+    brief = await asyncio.to_thread(brief_service.build_brief)
+    return brief
+
+
+# ---------------------------------------------------------------------------
 # v5.0 Phase 6 — invoice from deal: the pipeline wired to invoicing.
 # "Invoice Sandy for the discovery engagement" pulls the deal, stages the
 # QBO invoice through EVERY existing invoicing gate (real-customer
@@ -3353,6 +3372,8 @@ PLANNER_TOOLS = [
     list_backups,
     restore_backup,
     export_crm_csv,
+    # v6.0 Phase 2 — morning brief (read-only)
+    morning_brief,
 ]
 
 

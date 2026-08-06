@@ -5372,3 +5372,17 @@ body {
       overflow:hidden never engaged — text painted past the button, under
       the badge, and once caused the rail's horizontal scrollbar. */
 .rail-thread-cmd { max-width: 100%; }
+
+/* ============================================================ */
+/*            MORNING BRIEF VIEW (v6.0 Phase 2)                  */
+/* ============================================================ */
+.brief-date { margin-left: auto; font-size: 12px; color: var(--text-dim, #8a8f98); }
+.brief-body { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
+.brief-section h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim, #8a8f98); }
+.brief-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--border, #2a2d34); border-radius: 8px; margin-bottom: 6px; }
+.brief-item-main { font-size: 13.5px; }
+.brief-item-meta { font-size: 12px; color: var(--text-dim, #8a8f98); }
+.brief-note { font-size: 13px; color: var(--text-dim, #8a8f98); font-style: italic; margin: 0; }
+.brief-unavailable { color: var(--warn, #d9a03f); font-style: normal; }
+.brief-overdue { color: var(--err, #e5534b); font-weight: 600; font-size: 11px; letter-spacing: 0.03em; }
+.brief-loading { color: var(--text-dim, #8a8f98); }

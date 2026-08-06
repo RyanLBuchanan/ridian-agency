@@ -993,6 +993,13 @@ async def dashboard_get() -> dict:
     return dashboard_service.build_dashboard()
 
 
+@app.get("/morning-brief")
+async def morning_brief_get() -> dict:
+    """v6.0 Phase 2: the assembled read-only brief for the workspace view."""
+    from .services import brief_service
+    return await asyncio.to_thread(brief_service.build_brief)
+
+
 # ---------------------------------------------------------------------------
 # Operator v1 — natural-command operations + live SSE timeline
 # ---------------------------------------------------------------------------

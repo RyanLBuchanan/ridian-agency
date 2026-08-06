@@ -299,6 +299,13 @@
                     <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
                   </button>
                 </div>
+                <button id="rail-brief-btn" type="button" class="rail-settings">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+                  </svg>
+                  <span>Morning brief</span>
+                </button>
                 <button id="rail-settings-btn" type="button" class="rail-settings">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="3"/>
@@ -809,6 +816,21 @@
               </div><!-- /operator-main -->
 
               <!-- ============================================================ -->
+              <!-- MORNING BRIEF: full-page read-only view (v6.0 Phase 2),     -->
+              <!-- same grid cell + open/close pattern as Settings.            -->
+              <section id="brief-view" class="settings-view hidden" aria-label="Morning brief">
+                <header class="settings-head">
+                  <button id="brief-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <h2 class="settings-title">Morning brief</h2>
+                  <span id="brief-date" class="brief-date"></span>
+                </header>
+                <div id="brief-scroll" class="settings-scroll">
+                  <div id="brief-body" class="brief-body">
+                    <p class="brief-loading">Loading…</p>
+                  </div>
+                </div>
+              </section>
+
               <!-- SETTINGS: full-page view in the chat pane grid cell.         -->
               <!-- Not a modal: the rail stays, back returns to the chat.       -->
               <!-- Four primary rows, one control style; everything else under  -->

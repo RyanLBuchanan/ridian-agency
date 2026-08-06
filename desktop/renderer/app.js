@@ -7416,6 +7416,97 @@ if (_railSearch) _railSearch.addEventListener('input', _railRenderThreads);
 const _railSettingsBtn = document.getElementById('rail-settings-btn');
 if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
 
+/* ============================================================ */
+/*            MORNING BRIEF VIEW (v6.0 Phase 2, read-only)       */
+/* ============================================================ */
+// Same full-page-view pattern as Settings: swaps with .operator-main in
+// the grid cell, Escape/back returns to chat. Purely a READ of
+// GET /morning-brief — this view never posts anything.
+
+function _briefEsc(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s == null ? '' : s);
+  return div.innerHTML;
+}
+
+function _briefDealRows(items) {
+  return items.map((d) => `
+    <div class="brief-item">
+      <span class="brief-item-main">${d.overdue ? '<span class="brief-overdue">OVERDUE</span> ' : ''}${_briefEsc(d.contact)} — ${_briefEsc(d.title || 'untitled')}</span>
+      <span class="brief-item-meta">${_briefEsc(d.next_action || '')}${d.next_action_date ? ' · due ' + _briefEsc(d.next_action_date) : ''}${d.last_touch ? ' · last touch ' + _briefEsc(String(d.last_touch).slice(0, 10)) : ' · never touched'}</span>
+    </div>`).join('');
+}
+
+function _briefSection(title, section, rowFn) {
+  const body = section.unavailable
+    ? `<p class="brief-note brief-unavailable">${_briefEsc(section.note)}</p>`
+    : (section.empty
+        ? `<p class="brief-note">${_briefEsc(section.note)}</p>`
+        : rowFn(section.items));
+  return `<section class="brief-section"><h3>${_briefEsc(title)}</h3>${body}</section>`;
+}
+
+async function loadMorningBrief() {
+  const body = document.getElementById('brief-body');
+  const dateEl = document.getElementById('brief-date');
+  if (!body) return;
+  body.innerHTML = '<p class="brief-loading">Loading…</p>';
+  try {
+    const res = await fetch(`${BACKEND}/morning-brief`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const brief = await res.json();
+    const s = brief.sections;
+    if (dateEl) dateEl.textContent = brief.generated_for || '';
+    body.innerHTML = [
+      _briefSection('Due today', s.due_today, _briefDealRows),
+      _briefSection('Due this week', s.due_this_week, _briefDealRows),
+      _briefSection('Gone quiet (no touch in 7+ days)', s.stale_deals, _briefDealRows),
+      _briefSection('Unpaid invoices', s.unpaid_invoices, (items) => items.map((i) => `
+        <div class="brief-item">
+          <span class="brief-item-main">${_briefEsc(i.customer)} — $${Number(i.balance || 0).toFixed(2)} of $${Number(i.total || 0).toFixed(2)}</span>
+          <span class="brief-item-meta">Invoice ${_briefEsc(i.doc_number || i.id)} · ${_briefEsc(i.date || '')}${i.email_status === 'NotSet' ? ' · unsent' : ''}</span>
+        </div>`).join('')),
+      _briefSection('Awaiting your approval', s.awaiting_approval, (items) => items.map((p) => `
+        <div class="brief-item">
+          <span class="brief-item-main">${_briefEsc(p.question || p.command)}</span>
+          <span class="brief-item-meta">From: ${_briefEsc(p.command)} · staged ${_briefEsc(p.started_at)}</span>
+        </div>`).join('')),
+    ].join('');
+  } catch (err) {
+    body.innerHTML = `<p class="brief-note brief-unavailable">Could not load the brief: ${_briefEsc(err && err.message ? err.message : err)}</p>`;
+  }
+}
+
+function openMorningBrief() {
+  const view = document.getElementById('brief-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  if (main) main.classList.add('hidden');
+  view.classList.remove('hidden');
+  document.addEventListener('keydown', handleBriefKeydown);
+  const scroll = document.getElementById('brief-scroll');
+  if (scroll) scroll.scrollTop = 0;
+  loadMorningBrief();
+}
+
+function closeMorningBrief() {
+  const view = document.getElementById('brief-view');
+  const main = document.querySelector('.operator-main');
+  if (!view) return;
+  view.classList.add('hidden');
+  if (main) main.classList.remove('hidden');
+  document.removeEventListener('keydown', handleBriefKeydown);
+}
+
+function handleBriefKeydown(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeMorningBrief(); }
+}
+
+const _railBriefBtn = document.getElementById('rail-brief-btn');
+if (_railBriefBtn) _railBriefBtn.addEventListener('click', openMorningBrief);
+const _briefCloseBtn = document.getElementById('brief-close-btn');
+if (_briefCloseBtn) _briefCloseBtn.addEventListener('click', closeMorningBrief);
+
 // New-project: the + reveals an inline name input (window.prompt doesn't
 // exist in Electron); Enter creates, Escape/blur cancels.
 const _railNewProjectBtn = document.getElementById('rail-new-project');
