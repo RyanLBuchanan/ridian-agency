@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ridian — command</title>
+  <link rel="stylesheet" href="commandbar.css" />
+</head>
+<body>
+  <div class="bar">
+    <span class="bar-mark" aria-hidden="true">◑</span>
+    <input
+      id="cb-input"
+      type="text"
+      class="bar-input"
+      placeholder="Tell Ridian what to do…   (Enter to run, Esc to close)"
+      autocomplete="off"
+      spellcheck="false"
+      aria-label="Command for Ridian"
+    />
+    <button id="cb-mic" type="button" class="bar-mic" title="Hold to dictate" aria-label="Hold to dictate">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="12" rx="3"/>
+        <path d="M5 10a7 7 0 0 0 14 0M12 19v3"/>
+      </svg>
+    </button>
+  </div>
+  <div id="cb-status" class="bar-status" role="status" aria-live="polite"></div>
+  <script src="commandbar.js"></script>
+</body>
+</html>

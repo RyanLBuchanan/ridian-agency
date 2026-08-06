@@ -3,11 +3,13 @@
 // The renderer talks to the existing FastAPI backend at http://127.0.0.1:8000
 // over plain fetch — no IPC needed.
 
-const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session,
+        globalShortcut, ipcMain } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { registerGlobalHotkey, DEFAULT_ACCELERATOR } = require('./hotkey');
 
 // v4.4 state-guard: RIDIAN_PORT lets a sandboxed harness run the whole app
 // (supervisor, CSP, renderer origin) on a scratch port so its probes can
@@ -252,6 +254,95 @@ function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow = win;
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+  return win;
+}
+
+// ---------------------------------------------------------------------------
+// v6.0 Phase 7 — global hotkey + compact command bar
+// ---------------------------------------------------------------------------
+// Ctrl+Shift+R from anywhere in Windows opens a small always-on-top bar. A
+// command typed or spoken there starts a run and raises the main window.
+// Registration failure is LOUD (a dialog + a status the renderer can read),
+// never a silent no-op.
+
+let mainWindow = null;
+let commandBar = null;
+let hotkeyStatus = { ok: false, accelerator: DEFAULT_ACCELERATOR,
+                     reason: 'pending', detail: '' };
+
+function createCommandBar() {
+  if (commandBar && !commandBar.isDestroyed()) return commandBar;
+  commandBar = new BrowserWindow({
+    width: 720, height: 92, frame: false, show: false, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, transparent: true,
+    fullscreenable: false, minimizable: false, maximizable: false,
+    ...ICON_OPTION,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-commandbar.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  commandBar.loadFile(path.join(__dirname, 'renderer', 'commandbar.html'));
+  commandBar.on('blur', () => { if (commandBar && commandBar.isVisible()) commandBar.hide(); });
+  commandBar.on('closed', () => { commandBar = null; });
+  return commandBar;
+}
+
+function toggleCommandBar() {
+  const bar = createCommandBar();
+  if (bar.isVisible()) { bar.hide(); return; }
+  bar.center();
+  bar.show();
+  bar.focus();
+  bar.webContents.send('commandbar:shown');
+}
+
+function raiseMainWindow() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return win;
+}
+
+function wireCommandBarIpc() {
+  ipcMain.on('commandbar:close', () => { if (commandBar) commandBar.hide(); });
+  ipcMain.on('commandbar:submit', (_event, text) => {
+    const command = String(text || '').trim();
+    if (!command) return;
+    if (commandBar) commandBar.hide();
+    const win = raiseMainWindow();
+    const send = () => win.webContents.send('ridian:run-command', command);
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
+    else send();
+  });
+  // The renderer asks whether the hotkey actually registered, so Settings can
+  // tell the truth instead of implying a shortcut that does nothing.
+  ipcMain.handle('hotkey:status', () => hotkeyStatus);
+}
+
+function installGlobalHotkey() {
+  hotkeyStatus = registerGlobalHotkey({
+    globalShortcut,
+    accelerator: process.env.RIDIAN_HOTKEY || DEFAULT_ACCELERATOR,
+    onTrigger: toggleCommandBar,
+  });
+  if (!hotkeyStatus.ok) {
+    // LOUD by contract: the user must never think a dead shortcut is live.
+    dialog.showErrorBox(
+      'Ridian Operator — global shortcut unavailable',
+      `${hotkeyStatus.detail}\n\n`
+      + 'Everything else works normally; only the global command bar shortcut '
+      + 'is affected. Set a different combination with the RIDIAN_HOTKEY '
+      + 'environment variable (e.g. RIDIAN_HOTKEY="Control+Alt+R") and '
+      + 'restart Ridian.',
+    );
+  }
+  return hotkeyStatus;
 }
 
 // Tight CSP — local renderer assets only, with one allowed network origin.
@@ -291,6 +382,8 @@ app.whenReady().then(async () => {
   const backendOk = await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
   if (!backendOk) { app.quit(); return; }          // stranger on the port — refused
   createWindow();
+  wireCommandBarIpc();
+  installGlobalHotkey();   // shows an error dialog if the combination is taken
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -301,4 +394,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', stopBackend);   // the hidden backend dies with the app
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();   // never leave the combination held
+  stopBackend();                    // the hidden backend dies with the app
+});

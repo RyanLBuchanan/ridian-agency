@@ -6238,8 +6238,58 @@ if (OPERATOR.proposalsDismissAll) {
 }
 
 // v1.7.1: mic (inset in composer), per-reply Read-aloud, settings auto-read
+// v6.0 Phase 7: PUSH-TO-TALK. Holding the mic records and releasing
+// transcribes; a short press still latches (click to start, click to stop) so
+// the keyboard/accessibility path and long dictations both keep working.
 const _micBtn = document.getElementById('operator-mic-btn');
-if (_micBtn) _micBtn.addEventListener('click', _opMicToggle);
+if (_micBtn) {
+  const HOLD_MS = 350;   // longer than this = a hold, not a click
+  let holdTimer = null;
+  let isHold = false;
+
+  const beginHold = (e) => {
+    if (e && e.button !== undefined && e.button !== 0) return;
+    if (_micState.recorder && _micState.recorder.state === 'recording') return;
+    isHold = false;
+    holdTimer = setTimeout(() => { isHold = true; }, HOLD_MS);
+    _opMicToggle();                      // start recording immediately
+  };
+  const endHold = () => {
+    clearTimeout(holdTimer);
+    // Released AFTER the hold threshold → push-to-talk: stop and transcribe.
+    // Released quickly → latched: leave it recording until the next click.
+    if (isHold && _micState.recorder && _micState.recorder.state === 'recording') {
+      _micState.recorder.stop();
+    }
+    isHold = false;
+  };
+
+  _micBtn.addEventListener('pointerdown', beginHold);
+  _micBtn.addEventListener('pointerup', endHold);
+  _micBtn.addEventListener('pointerleave', endHold);
+  _micBtn.addEventListener('pointercancel', endHold);
+  // Keyboard activation (Enter/Space) fires click with no pointer sequence.
+  _micBtn.addEventListener('click', (e) => {
+    if (e.detail === 0) _opMicToggle();   // 0 = keyboard, not a mouse click
+  });
+}
+
+/* v6.0 Phase 7: a command from the global command bar starts a run here. */
+if (window.ridian && typeof window.ridian.onRunCommand === 'function') {
+  window.ridian.onRunCommand((text) => {
+    const command = String(text || '').trim();
+    if (!command || !OPERATOR.command) return;
+    if (operatorState.running) {
+      // Never silently drop it: leave the text in the composer and say why.
+      OPERATOR.command.value = command;
+      _opSetStatus('Ridian is still working — your command is in the box, '
+                   + 'send it when the current run finishes.', 'err');
+      return;
+    }
+    OPERATOR.command.value = command;
+    _opSubmit(new Event('submit'));
+  });
+}
 
 // Receipt speaker: the SESSION mute (per-chat; resets on new chat/run).
 // Muting also stops any reply currently being read.

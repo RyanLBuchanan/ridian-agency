@@ -22,6 +22,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-commandbar.js",
+      "hotkey.js",
       "renderer/**/*",
       "assets/**/*"
     ],

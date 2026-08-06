@@ -1,0 +1,32 @@
+/* Compact global command bar (v6.0 Phase 7). Frameless, always-on-top. */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; background: transparent;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  overflow: hidden; user-select: none;
+}
+.bar {
+  display: flex; align-items: center; gap: 10px;
+  margin: 8px; padding: 0 12px; height: 52px;
+  background: #14161a; color: #f2f4f7;
+  border: 1px solid #2a2d34; border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  -webkit-app-region: drag;
+}
+.bar-mark { color: #4f8cff; font-size: 17px; }
+.bar-input {
+  flex: 1; height: 100%; background: transparent; border: 0; outline: none;
+  color: inherit; font-size: 15px; -webkit-app-region: no-drag; user-select: text;
+}
+.bar-input::placeholder { color: #7b818c; }
+.bar-mic {
+  display: grid; place-items: center; width: 30px; height: 30px;
+  background: transparent; border: 1px solid #2a2d34; border-radius: 8px;
+  color: #b8bec9; cursor: pointer; -webkit-app-region: no-drag;
+}
+.bar-mic:hover { color: #f2f4f7; border-color: #3a3f48; }
+.bar-mic.is-recording { color: #fff; background: #c0392b; border-color: #c0392b; }
+.bar-status {
+  margin: 0 20px; font-size: 12px; color: #b8bec9; min-height: 16px;
+}
+.bar-status.is-err { color: #ff8a80; }
