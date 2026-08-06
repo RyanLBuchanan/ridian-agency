@@ -7465,6 +7465,11 @@ async function loadMorningBrief() {
           <span class="brief-item-main">${_briefEsc(e.summary)}</span>
           <span class="brief-item-meta">${e.all_day ? 'All day' : _briefEsc(String(e.start || '').replace('T', ' ').slice(0, 16))}${e.location ? ' · ' + _briefEsc(e.location) : ''}</span>
         </div>`).join('')),
+      _briefSection('Needs your reply', s.needs_reply, (items) => items.map((m) => `
+        <div class="brief-item">
+          <span class="brief-item-main">${(m.contact && m.contact.in_pipeline) ? '<span class="brief-pipeline">PIPELINE</span> ' : ''}${_briefEsc(m.subject)}</span>
+          <span class="brief-item-meta">${_briefEsc(m.contact ? `${m.contact.name} <${m.last_from}>` : m.last_from)}${m.days_quiet != null ? ` · ${m.days_quiet}d ago` : ''}</span>
+        </div>`).join('')),
       _briefSection('Due today', s.due_today, _briefDealRows),
       _briefSection('Due this week', s.due_this_week, _briefDealRows),
       _briefSection('Gone quiet (no touch in 7+ days)', s.stale_deals, _briefDealRows),

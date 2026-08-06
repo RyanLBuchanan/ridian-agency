@@ -47,6 +47,7 @@ from . import (
     browser_service,
     calendar_service,
     gmail_service,
+    inbox_service,
     google_drive_service,
     google_workspace_service,
     memory_service,
@@ -3333,6 +3334,44 @@ async def find_conflicts(range: str = "week") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# v6.0 Phase 5 — inbox triage, READ ONLY. inbox_service has no send/modify/
+# trash path (introspection-pinned). Replying is still draft_gmail's job,
+# behind its recipient-provenance and approval gates — triage never drafts.
+# ---------------------------------------------------------------------------
+
+@planner_tool
+async def triage_inbox(days_quiet: int = 7, max_threads: int = 25) -> dict:
+    """Triage recent inbox mail. READ-ONLY: reads thread HEADERS only (never
+    message bodies) and cannot send, reply, label, archive, or delete
+    anything. Returns four buckets — threads that need a reply from the
+    operator, threads waiting on someone else, threads gone quiet, and
+    threads involving a known contact (pipeline mail is listed first
+    everywhere). To actually reply, use draft_gmail, which stays behind its
+    own recipient-provenance and approval gates.
+
+    Args:
+        days_quiet: A thread with no message in this many days counts as
+            gone quiet (default 7).
+        max_threads: How many recent inbox threads to examine (default 25).
+    """
+    operator = current_operator()
+    operator.note_tool("triage_inbox")
+    try:
+        result = await asyncio.to_thread(
+            inbox_service.triage, quiet_after_days=days_quiet,
+            max_threads=max_threads)
+    except Exception as exc:  # noqa: BLE001
+        detail = getattr(exc, "detail", None) or str(exc)
+        return {"error": detail, "reason": "inbox_unavailable"}
+    await operator.emit_step(
+        name="inbox_triage", status="completed",
+        detail=(f"{result['checked']} threads: {len(result['needs_reply'])} need "
+                f"a reply, {len(result['waiting_on'])} waiting on others, "
+                f"{len(result['gone_quiet'])} gone quiet."))
+    return result
+
+
+# ---------------------------------------------------------------------------
 # v6.0 Phase 2 — the morning brief: one assembled read-only view.
 # ---------------------------------------------------------------------------
 
@@ -3469,6 +3508,8 @@ PLANNER_TOOLS = [
     list_events,
     whats_my_day,
     find_conflicts,
+    # v6.0 Phase 5 — inbox triage (READ ONLY; no send/modify/trash exists)
+    triage_inbox,
 ]
 
 

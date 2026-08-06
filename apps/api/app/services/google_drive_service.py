@@ -54,6 +54,14 @@ log = logging.getLogger("ridian.google")
 #                     read-only variant is deliberate; there is no event
 #                     creation anywhere in the app, and calendar_service has
 #                     no write path (pinned by introspection).
+#   gmail.readonly  — v6.0 Phase 5: READ threads for inbox triage.
+#                     gmail.compose manages drafts and CANNOT list or read
+#                     mail, so triage genuinely needs a read grant. The
+#                     narrower gmail.metadata was rejected deliberately: it
+#                     forbids the `q` search parameter, so triage could not
+#                     scope itself to recent inbox threads and would have to
+#                     walk the whole mailbox. inbox_service has no modify /
+#                     send / trash path (pinned by introspection).
 #
 # Adding a scope requires every previously-connected user to reconnect Google
 # once so the new scope is consented (delete google_token.json + re-consent).
@@ -65,6 +73,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/presentations",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 from .runtime_paths import data_dir, guard_real_state_write
