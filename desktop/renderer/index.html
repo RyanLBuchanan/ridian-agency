@@ -913,98 +913,115 @@
                 </header>
                 <form id="settings-form" class="settings-scroll" autocomplete="off">
 
-                  <div class="settings-row">
-                    <span id="settings-dot-anthropic" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">Anthropic</span>
-                    <input name="anthropic_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
-                    <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test</button>
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-anthropic-key-hint"></span>
-                    <span id="settings-test-anthropic-status" role="status" aria-live="polite"></span>
-                  </div>
-
-                  <div class="settings-row">
-                    <span id="settings-dot-openai" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">OpenAI</span>
-                    <input name="openai_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
-                    <button id="settings-test-openai" type="button" class="btn btn-ghost btn-compact">Test</button>
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-openai-key-hint"></span>
-                    <span id="settings-test-openai-status" role="status" aria-live="polite"></span>
+                  <!-- v6.1: every row is a SELF-CONTAINED .settings-block -->
+                  <!-- owning its controls and its own status line. Same     -->
+                  <!-- shape for all of them — QuickBooks is not special.    -->
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-anthropic" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Anthropic</span>
+                      <input name="anthropic_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
+                      <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-anthropic-key-hint"></span>
+                      <span id="settings-test-anthropic-status" role="status" aria-live="polite"></span>
+                    </div>
                   </div>
 
-                  <div class="settings-row">
-                    <span id="settings-dot-qbo" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">QuickBooks</span>
-                    <select name="quickbooks_environment" class="settings-input settings-input-compact">
-                      <option value="sandbox">Sandbox</option>
-                      <option value="production">Production</option>
-                    </select>
-                    <button id="settings-qb-connect" type="button" class="btn btn-ghost btn-compact">Connect</button>
-                    <button id="settings-qb-disconnect" type="button" class="btn btn-ghost btn-compact">Disconnect</button>
-                  </div>
-                  <div class="settings-row settings-row-sub">
-                    <span class="settings-dot is-blank" aria-hidden="true"></span>
-                    <span class="settings-row-label"></span>
-                    <input name="quickbooks_client_id" type="text" autocomplete="off" placeholder="Client ID" class="settings-input" />
-                    <input name="quickbooks_client_secret" type="password" autocomplete="new-password" placeholder="Client Secret" class="settings-input" />
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-qbo-secret-hint"></span>
-                    <span id="settings-qb-status" role="status" aria-live="polite"></span>
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-openai" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">OpenAI</span>
+                      <input name="openai_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
+                      <button id="settings-test-openai" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-openai-key-hint"></span>
+                      <span id="settings-test-openai-status" role="status" aria-live="polite"></span>
+                    </div>
                   </div>
 
-                  <div class="settings-row">
-                    <span id="settings-dot-drive" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">Drive</span>
-                    <span id="settings-drive-note" class="settings-row-inline"></span>
-                    <button id="settings-test-drive" type="button" class="btn btn-ghost btn-compact">Test</button>
-                    <button id="settings-drive-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-drive-status" role="status" aria-live="polite"></span>
-                  </div>
-
-                  <div class="settings-row">
-                    <span id="settings-dot-gmail" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">Gmail</span>
-                    <span id="settings-gmail-note" class="settings-row-inline"></span>
-                    <button id="settings-test-gmail" type="button" class="btn btn-ghost btn-compact">Test</button>
-                    <button id="settings-gmail-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-gmail-status" role="status" aria-live="polite"></span>
-                  </div>
-
-                  <div class="settings-row">
-                    <span id="settings-dot-calendar" class="settings-dot" aria-hidden="true"></span>
-                    <span class="settings-row-label">Calendar</span>
-                    <span id="settings-calendar-note" class="settings-row-inline"></span>
-                    <button id="settings-test-calendar" type="button" class="btn btn-ghost btn-compact">Test</button>
-                    <button id="settings-calendar-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
-                  </div>
-                  <div class="settings-row-note">
-                    <span id="settings-calendar-status" role="status" aria-live="polite"></span>
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-qbo" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">QuickBooks</span>
+                      <select name="quickbooks_environment" class="settings-input settings-input-compact">
+                        <option value="sandbox">Sandbox</option>
+                        <option value="production">Production</option>
+                      </select>
+                      <button id="settings-qb-connect" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                      <button id="settings-qb-disconnect" type="button" class="btn btn-ghost btn-compact">Disconnect</button>
+                    </div>
+                    <div class="settings-row settings-row-sub">
+                      <span class="settings-dot is-blank" aria-hidden="true"></span>
+                      <span class="settings-row-label"></span>
+                      <input name="quickbooks_client_id" type="text" autocomplete="off" placeholder="Client ID" class="settings-input" />
+                      <input name="quickbooks_client_secret" type="password" autocomplete="new-password" placeholder="Client Secret" class="settings-input" />
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-qbo-secret-hint"></span>
+                      <span id="settings-qb-status" role="status" aria-live="polite"></span>
+                    </div>
                   </div>
 
-                  <div class="settings-row">
-                    <span class="settings-dot is-blank" aria-hidden="true"></span>
-                    <span class="settings-row-label">Voice</span>
-                    <label class="settings-toggle">
-                      <input type="checkbox" id="settings-voice-replies" />
-                      <span>Read replies aloud</span>
-                    </label>
-                    <select name="openai_tts_voice" class="settings-input settings-input-compact">
-                      <option value="">nova (default)</option>
-                      <option value="alloy">alloy</option>
-                      <option value="echo">echo</option>
-                      <option value="fable">fable</option>
-                      <option value="onyx">onyx</option>
-                      <option value="nova">nova</option>
-                      <option value="shimmer">shimmer</option>
-                    </select>
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-drive" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Drive</span>
+                      <span id="settings-drive-note" class="settings-row-inline"></span>
+                      <button id="settings-test-drive" type="button" class="btn btn-ghost btn-compact">Test</button>
+                      <button id="settings-drive-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-drive-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-gmail" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Gmail</span>
+                      <span id="settings-gmail-note" class="settings-row-inline"></span>
+                      <button id="settings-test-gmail" type="button" class="btn btn-ghost btn-compact">Test</button>
+                      <button id="settings-gmail-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-gmail-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-calendar" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Calendar</span>
+                      <span id="settings-calendar-note" class="settings-row-inline"></span>
+                      <button id="settings-test-calendar" type="button" class="btn btn-ghost btn-compact">Test</button>
+                      <button id="settings-calendar-conn" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-calendar-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span class="settings-dot is-blank" aria-hidden="true"></span>
+                      <span class="settings-row-label">Voice</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" id="settings-voice-replies" />
+                        <span>Read replies aloud</span>
+                      </label>
+                      <select name="openai_tts_voice" class="settings-input settings-input-compact">
+                        <option value="">nova (default)</option>
+                        <option value="alloy">alloy</option>
+                        <option value="echo">echo</option>
+                        <option value="fable">fable</option>
+                        <option value="onyx">onyx</option>
+                        <option value="nova">nova</option>
+                        <option value="shimmer">shimmer</option>
+                      </select>
+                    </div>
                   </div>
 
                   <details id="settings-advanced" class="settings-advanced">

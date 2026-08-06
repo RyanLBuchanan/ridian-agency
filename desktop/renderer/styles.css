@@ -4740,24 +4740,59 @@ body {
   flex-direction: column;
   gap: 10px;
 }
+/* v6.1 SETTINGS ROW CONTAINMENT — the fix for rows colliding.
+   The bug: rows and their status notes were SIBLING flex children of the
+   scrolling column, and .settings-row-note carried an explicit
+   `min-height: 1em`. An explicit min-height REPLACES a flex item's
+   automatic minimum content size, which licensed the flex algorithm to
+   compress a note to one line's worth of box whenever the column ran out
+   of room. A note whose text wrapped to two lines (QuickBooks' long
+   "Connected to sandbox (company …)" at normal widths) then spilled its
+   second line out of its own box and over the next row — made worse by
+   the note's -4px top margin, which had already eaten the gap.
+
+   The rule, identical for EVERY row (no QuickBooks special case):
+   one row = one .settings-block that owns its controls AND its status
+   text, and nothing in the settings column may shrink below its content.
+   Height therefore always follows content, and a block's text is
+   structurally incapable of reaching a sibling block. */
+.settings-scroll > * {
+  flex: 0 0 auto;   /* never compress a block below what it contains */
+  min-height: 0;
+}
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
 .settings-row {
   display: grid;
   grid-template-columns: 14px 110px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 .settings-row-sub {
   grid-template-columns: 14px 110px minmax(0, 1fr) minmax(0, 1fr);
-  margin-top: -2px;
 }
 .settings-row-note {
-  margin: -4px 0 4px 134px;   /* aligns under the control column */
+  /* Indented under the control column, but as padding inside the block —
+     never a negative margin reaching into a neighbour's space. */
+  padding-left: 134px;
   font-size: var(--fs-xs);
   color: var(--color-muted);
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  min-height: 1em;
+  /* Long unbroken ids (company 9341457602986271) wrap instead of forcing
+     the row wider than the pane. */
+  overflow-wrap: anywhere;
+}
+.settings-row-note:empty { display: none; }
+/* Narrow panes: the indent costs more than it aligns. */
+@media (max-width: 900px) {
+  .settings-row-note { padding-left: 24px; }
 }
 .settings-row-note .is-ok { color: var(--color-success); }
 /* Verified-state dot: neutral = unverified (never green just for "saved"),
