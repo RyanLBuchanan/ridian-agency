@@ -3159,15 +3159,63 @@ async function loadSettingsIntoForm() {
   }
 }
 
+/* ============================================================ */
+/*   WORKSPACE VIEW MANAGER (v6.1) — exactly one view at a time  */
+/* ============================================================ */
+// Settings, Morning brief, Approvals and Audit are FULL-PAGE views that
+// each claim the chat pane's grid cell (.settings-view sets grid-column 2 /
+// grid-row 1). They used to open and close independently, which let two
+// contradictory states exist:
+//
+//   open Brief -> open Settings   => BOTH views visible, stacked in one cell
+//   ...then close Settings        => the close restored .operator-main while
+//                                    the Brief was STILL open. With cell
+//                                    (2,1) already taken by the Brief, the
+//                                    chat pane auto-placed into an implicit
+//                                    row 2 / column 1 — a 240px-wide composer
+//                                    under the rail — and the implicit row
+//                                    stole height from row 1, squeezing the
+//                                    Brief so only its first sections fit.
+//
+// One manager now owns the whole switch: every view is hidden, the requested
+// one is shown, and the chat pane is visible only when no view is. Views can
+// never disagree about who owns the cell.
+const WORKSPACE_VIEW_IDS = ['settings-view', 'brief-view', 'approvals-view',
+                            'audit-view'];
+let _activeWorkspaceView = null;
+
+function _showWorkspaceView(id) {
+  const main = document.querySelector('.operator-main');
+  for (const viewId of WORKSPACE_VIEW_IDS) {
+    const el = document.getElementById(viewId);
+    if (el) el.classList.toggle('hidden', viewId !== id);
+  }
+  if (main) main.classList.toggle('hidden', id !== null);
+  _activeWorkspaceView = id;
+  // One Escape handler for all four views — no per-view listener can leak
+  // and close a view that is no longer the one on screen.
+  document.removeEventListener('keydown', _workspaceViewKeydown);
+  if (id) document.addEventListener('keydown', _workspaceViewKeydown);
+}
+
+function _workspaceViewKeydown(e) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  switch (_activeWorkspaceView) {
+    case 'settings-view': closeSettings(); break;
+    case 'brief-view': closeMorningBrief(); break;
+    case 'approvals-view': closeApprovals(); break;
+    case 'audit-view': closeAuditLog(); break;
+    default: _showWorkspaceView(null);
+  }
+}
+
 // v4.9: Settings is a FULL-PAGE view in the chat pane's grid cell — not a
 // modal. The rail stays; back returns to the chat.
 function openSettings() {
   const view = document.getElementById('settings-view');
-  const main = document.querySelector('.operator-main');
   if (!view) return;
-  if (main) main.classList.add('hidden');
-  view.classList.remove('hidden');
-  document.addEventListener('keydown', handleSettingsKeydown);
+  _showWorkspaceView('settings-view');
   // Always open at the top. (The old modal auto-focused a mid-form field,
   // which scrolled it open mid-list — no autofocus, explicit scrollTop.)
   const scroll = view.querySelector('.settings-scroll');
@@ -3218,17 +3266,8 @@ function handleTipsKeydown(e) {
 }
 
 function closeSettings() {
-  const view = document.getElementById('settings-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  view.classList.add('hidden');
-  if (main) main.classList.remove('hidden');
-  document.removeEventListener('keydown', handleSettingsKeydown);
+  _showWorkspaceView(null);
   setSettingsStatus('');
-}
-
-function handleSettingsKeydown(e) {
-  if (e.key === 'Escape') { e.preventDefault(); closeSettings(); }
 }
 
 // Returns true when the save persisted, false on any failure — so flows
@@ -7576,28 +7615,15 @@ async function loadMorningBrief() {
 }
 
 function openMorningBrief() {
-  const view = document.getElementById('brief-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  if (main) main.classList.add('hidden');
-  view.classList.remove('hidden');
-  document.addEventListener('keydown', handleBriefKeydown);
+  if (!document.getElementById('brief-view')) return;
+  _showWorkspaceView('brief-view');
   const scroll = document.getElementById('brief-scroll');
   if (scroll) scroll.scrollTop = 0;
   loadMorningBrief();
 }
 
 function closeMorningBrief() {
-  const view = document.getElementById('brief-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  view.classList.add('hidden');
-  if (main) main.classList.remove('hidden');
-  document.removeEventListener('keydown', handleBriefKeydown);
-}
-
-function handleBriefKeydown(e) {
-  if (e.key === 'Escape') { e.preventDefault(); closeMorningBrief(); }
+  _showWorkspaceView(null);
 }
 
 const _railBriefBtn = document.getElementById('rail-brief-btn');
@@ -7684,26 +7710,13 @@ async function refreshApprovalsBadge() {
 }
 
 function openApprovals() {
-  const view = document.getElementById('approvals-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  if (main) main.classList.add('hidden');
-  view.classList.remove('hidden');
-  document.addEventListener('keydown', handleApprovalsKeydown);
+  if (!document.getElementById('approvals-view')) return;
+  _showWorkspaceView('approvals-view');
   loadApprovals();
 }
 
 function closeApprovals() {
-  const view = document.getElementById('approvals-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  view.classList.add('hidden');
-  if (main) main.classList.remove('hidden');
-  document.removeEventListener('keydown', handleApprovalsKeydown);
-}
-
-function handleApprovalsKeydown(e) {
-  if (e.key === 'Escape') { e.preventDefault(); closeApprovals(); }
+  _showWorkspaceView(null);
 }
 
 /* ============================================================ */
@@ -7763,26 +7776,13 @@ async function loadAuditLog() {
 }
 
 function openAuditLog() {
-  const view = document.getElementById('audit-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  if (main) main.classList.add('hidden');
-  view.classList.remove('hidden');
-  document.addEventListener('keydown', handleAuditKeydown);
+  if (!document.getElementById('audit-view')) return;
+  _showWorkspaceView('audit-view');
   loadAuditLog();
 }
 
 function closeAuditLog() {
-  const view = document.getElementById('audit-view');
-  const main = document.querySelector('.operator-main');
-  if (!view) return;
-  view.classList.add('hidden');
-  if (main) main.classList.remove('hidden');
-  document.removeEventListener('keydown', handleAuditKeydown);
-}
-
-function handleAuditKeydown(e) {
-  if (e.key === 'Escape') { e.preventDefault(); closeAuditLog(); }
+  _showWorkspaceView(null);
 }
 
 ['audit-from', 'audit-to', 'audit-type', 'audit-outcome'].forEach((id) => {

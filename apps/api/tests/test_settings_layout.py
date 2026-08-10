@@ -71,21 +71,64 @@ def test_the_shrink_and_negative_margin_traps_are_gone():
 # Geometry: measured in a real browser engine at real widths
 # --------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _electron_available(),
-                    reason="electron/npx not available for layout measurement")
-def test_no_text_collides_at_any_width():
-    """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
-    painted elements from different rows share pixels."""
+@pytest.fixture(scope="module")
+def harness_output() -> str:
+    """Run the Chromium layout harness ONCE for every geometric pin."""
+    if not _electron_available():
+        pytest.skip("electron/npx not available for layout measurement")
     proc = subprocess.run(
         [_NPX, "electron", str(_HARNESS)], cwd=str(_DESKTOP),
-        capture_output=True, text=True, timeout=600,
-        env=_sandbox_env())
+        capture_output=True, text=True, timeout=600, env=_sandbox_env())
     output = f"{proc.stdout}\n{proc.stderr}"
-    assert "LAYOUT OK" in output, output[-3000:]
-    assert proc.returncode == 0, output[-3000:]
-    # Every width really was measured, and every row really was present.
+    assert proc.returncode == 0, output[-4000:]
+    assert "LAYOUT OK" in output, output[-4000:]
+    return output
+
+
+def test_no_text_collides_at_any_width(harness_output):
+    """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
+    painted elements from different rows share pixels."""
     for width in (1280, 1100, 1000, 940, 880):
-        assert f"{width}px: 7 blocks" in output, output[-3000:]
+        assert f"{width}px: 7 blocks" in harness_output, harness_output[-3000:]
+
+
+def test_morning_brief_claims_the_chat_pane_cell(harness_output):
+    """v6.1: the brief renders ALL seven sections and takes the chat pane's
+    grid cell at every width — the chat pane yields (display:none) instead
+    of fighting it for the cell."""
+    brief = harness_output.split("Morning brief view", 1)[1].split("View switching", 1)[0]
+    for width in (1280, 1100, 1000, 940, 880):
+        line = next(l for l in brief.splitlines() if l.startswith(f"{width}px:"))
+        assert "7 sections" in line, line
+        assert "main display=none" in line, line
+
+
+def test_switching_views_never_leaves_two_owners_of_the_cell(harness_output):
+    """THE reported bug: open Brief -> open Settings -> close Settings used
+    to leave the Brief open AND restore the chat pane, auto-placing the
+    composer into an implicit 240px column under the rail."""
+    seq = harness_output.split("View switching", 1)[1].split("--- Settings", 1)[0]
+    assert "afterBrief: views=[brief-view] main=none" in seq, seq
+    # Opening Settings over the Brief closes the Brief — never both.
+    assert "afterSettings: views=[settings-view] main=none" in seq, seq
+    # Closing the last view restores a FULL-WIDTH chat pane in its own cell.
+    after_close = next(l for l in seq.splitlines() if "afterClose" in l)
+    assert "views=[]" in after_close, after_close
+    assert "main=flex" in after_close, after_close
+    width = int(after_close.split("main=flex", 1)[1].split("px", 1)[0].strip())
+    assert width > 400, f"chat pane collapsed: {after_close}"
+
+
+def test_all_four_views_route_through_one_manager():
+    """Structural pin: no view may hide/show .operator-main on its own."""
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    assert "function _showWorkspaceView" in app_js
+    assert "WORKSPACE_VIEW_IDS" in app_js
+    for fn in ("openSettings", "openMorningBrief", "openApprovals", "openAuditLog",
+               "closeSettings", "closeMorningBrief", "closeApprovals", "closeAuditLog"):
+        body = app_js.split(f"function {fn}(", 1)[1].split("\n}", 1)[0]
+        assert "_showWorkspaceView" in body, f"{fn} does not use the view manager"
+        assert "operator-main" not in body, f"{fn} still touches .operator-main directly"
 
 
 def _sandbox_env() -> dict:
