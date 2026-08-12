@@ -6784,19 +6784,21 @@ async function loadOperatorContextStrip() {
   let anyContent = false;
 
   // Memory chip: one fetch hits the existing /memory/summary endpoint.
-  try {
-    const res = await fetch(`${BACKEND}/memory/summary`);
-    if (res.ok) {
-      const m = await res.json();
-      const parts = [];
-      if (m.contacts) parts.push(`${m.contacts} contacts`);
-      if (m.facts) parts.push(`${m.facts} facts`);
-      if (m.open_follow_ups) parts.push(`${m.open_follow_ups} follow-ups`);
-      const text = parts.length ? parts.join(' · ') : 'empty — click to add';
-      if (els2.memoryValue) els2.memoryValue.textContent = text;
-      anyContent = true;
-    }
-  } catch (_) { /* offline — leave chip blank */ }
+  // v6.1: retried until the backend answers. "empty — click to add" is a
+  // CLAIM about the store, so it is only ever shown once the backend has
+  // actually reported zeros; an unreachable backend says so instead.
+  const m = await _railFetchWithRetry(`${BACKEND}/memory/summary`);
+  if (m === null) {
+    if (els2.memoryValue) els2.memoryValue.textContent = 'unavailable';
+  } else {
+    const parts = [];
+    if (m.contacts) parts.push(`${m.contacts} contacts`);
+    if (m.facts) parts.push(`${m.facts} facts`);
+    if (m.open_follow_ups) parts.push(`${m.open_follow_ups} follow-ups`);
+    const text = parts.length ? parts.join(' · ') : 'empty — click to add';
+    if (els2.memoryValue) els2.memoryValue.textContent = text;
+    anyContent = true;
+  }
 
   // Last-run chip: read the operations log, show the most recent operator run.
   try {
@@ -7047,6 +7049,16 @@ function _railRenderThreads() {
   }
   if (q) ops = ops.filter((op) => (op.command || '').toLowerCase().includes(q));
   list.innerHTML = '';
+  // v6.1: only a backend that has ANSWERED may produce an empty state.
+  if (_railThreadsState !== RAIL_STATE.READY) {
+    const li = document.createElement('li');
+    const loading = _railThreadsState === RAIL_STATE.LOADING;
+    li.className = loading ? 'rail-threads-loading' : 'rail-threads-unavailable';
+    li.textContent = loading ? 'Loading…'
+      : "Can't reach the backend — chats unknown, not none.";
+    list.appendChild(li);
+    return;
+  }
   if (!ops.length) {
     const li = document.createElement('li');
     li.className = 'rail-threads-empty';
@@ -7343,15 +7355,47 @@ async function _folderArtifactsOpenFolder(run) {
   }
 }
 
+/* v6.1 COLD START — "still loading" is not "empty".
+   On a fresh launch the renderer paints before the backend it just spawned
+   is listening, so the first /operations/recent fetch throws. The old code
+   swallowed that and returned, leaving the markup's hardcoded "No chats
+   yet." on screen — a claim the backend had never made. Nothing re-fetched
+   until a run finished, which is why running any command "fixed" it.
+
+   Now each rail data source carries an explicit state: 'loading' until the
+   backend answers, 'ready' once it has (only then may an empty state
+   appear), or 'unavailable' after the retries are exhausted — the same
+   unknown-is-not-zero contract the morning brief uses. */
+const RAIL_STATE = { LOADING: 'loading', READY: 'ready', UNAVAILABLE: 'unavailable' };
+let _railThreadsState = RAIL_STATE.LOADING;
+let _railProjectsState = RAIL_STATE.LOADING;
+
+// Backend boot is normally under a second; keep retrying past that before
+// admitting defeat, with a widening gap so a slow start still resolves.
+const _RAIL_RETRY_MS = [300, 600, 1200, 2000, 3000, 5000, 8000, 10000];
+
+async function _railFetchWithRetry(url) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+    } catch (_) { /* backend not listening yet */ }
+    if (attempt >= _RAIL_RETRY_MS.length) return null;   // genuinely unavailable
+    await new Promise((r) => setTimeout(r, _RAIL_RETRY_MS[attempt]));
+  }
+}
+
 async function _railThreadsFill() {
-  try {
-    const res = await fetch(`${BACKEND}/operations/recent?limit=30`);
-    if (!res.ok) return;
-    const data = await res.json();
-    _railOps = (data && data.operations) || [];
+  const data = await _railFetchWithRetry(`${BACKEND}/operations/recent?limit=30`);
+  if (data === null) {
+    _railThreadsState = RAIL_STATE.UNAVAILABLE;
     _railRenderThreads();
-    _railRenderProjects();   // per-project chat counts derive from _railOps
-  } catch (_) { /* backend not up yet — the poll below retries */ }
+    return;
+  }
+  _railOps = data.operations || [];
+  _railThreadsState = RAIL_STATE.READY;   // the backend has now SPOKEN
+  _railRenderThreads();
+  _railRenderProjects();   // per-project chat counts derive from _railOps
 }
 
 // New chat: abort any in-flight run, clear the thread, fresh composer.
@@ -7402,6 +7446,16 @@ function _railRenderProjects() {
   const list = document.getElementById('rail-projects');
   if (!list) return;
   list.innerHTML = '';
+  // v6.1: same contract — no "No projects yet." until the backend says so.
+  if (_railProjectsState !== RAIL_STATE.READY) {
+    const li = document.createElement('li');
+    const loading = _railProjectsState === RAIL_STATE.LOADING;
+    li.className = loading ? 'rail-threads-loading' : 'rail-threads-unavailable';
+    li.textContent = loading ? 'Loading…'
+      : "Can't reach the backend — projects unknown, not none.";
+    list.appendChild(li);
+    return;
+  }
   // "All chats" pseudo-entry — active when no project is selected.
   const all = document.createElement('li');
   all.className = 'rail-thread' + (!_activeProjectId ? ' is-active' : '');
@@ -7508,11 +7562,15 @@ function _railShowSubfolderInput(parent, afterLi) {
 }
 
 async function _railProjectsFill() {
+  const data = await _railFetchWithRetry(`${BACKEND}/operator/projects`);
+  if (data === null) {
+    _railProjectsState = RAIL_STATE.UNAVAILABLE;
+    _railRenderProjects();
+    return;
+  }
+  _railProjectsState = RAIL_STATE.READY;
   try {
-    const res = await fetch(`${BACKEND}/operator/projects`);
-    if (!res.ok) return;
-    const data = await res.json();
-    _railProjects = (data && data.projects) || [];
+    _railProjects = data.projects || [];
     // A stale persisted selection (project deleted / fresh state) falls back
     // to All chats rather than filtering everything to nothing.
     if (_activeProjectId && !_railProjects.some((p) => p.id === _activeProjectId)) {

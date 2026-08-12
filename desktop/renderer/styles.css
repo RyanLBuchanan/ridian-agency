@@ -5448,3 +5448,7 @@ body {
 .audit-unknown { background: #3a3f48; color: #d6dae1; }
 .audit-type { font-size: 11px; color: var(--text-dim, #8a8f98); margin-right: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
 .audit-inferred { display: inline-block; margin-left: 6px; color: var(--warn, #d9a03f); font-style: italic; }
+
+/* v6.1 rail cold start: loading is not empty, unreachable is not zero. */
+.rail-threads-loading { font-size: var(--fs-xs); color: var(--color-muted); padding: 4px 2px; font-style: italic; }
+.rail-threads-unavailable { font-size: var(--fs-xs); color: var(--warn, #d9a03f); padding: 4px 2px; }

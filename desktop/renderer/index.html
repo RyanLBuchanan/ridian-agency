@@ -267,11 +267,14 @@
                   spellcheck="false"
                 />
                 <ul id="rail-projects" class="rail-projects">
-                  <li class="rail-threads-empty">No projects yet.</li>
+                  <!-- v6.1: the rail NEVER opens by asserting emptiness. It
+                       starts neutral and only claims "none" once the backend
+                       has actually answered. -->
+                  <li class="rail-threads-loading">Loading…</li>
                 </ul>
                 <div class="operator-rail-title">Chats</div>
                 <ul id="rail-threads" class="rail-threads">
-                  <li class="rail-threads-empty">No chats yet.</li>
+                  <li class="rail-threads-loading">Loading…</li>
                 </ul>
                 </div><!-- /rail-scroll -->
                 <!-- Pinned footer: always on screen — the first-run banner's
@@ -287,7 +290,7 @@
                     title="Edit memory"
                   >
                     <span class="operator-context-chip-label">Memory</span>
-                    <span class="operator-context-chip-value" id="operator-context-memory-value">—</span>
+                    <span class="operator-context-chip-value" id="operator-context-memory-value">Loading…</span>
                   </button>
                   <button
                     type="button"
