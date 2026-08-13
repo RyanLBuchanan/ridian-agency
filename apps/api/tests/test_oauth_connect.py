@@ -44,6 +44,21 @@ def _port_is_held(port: int) -> bool:
 
 
 def _callback(port: int, query: str) -> None:
+    # v6.3: the QBO listener serves TLS (self-signed localhost cert) —
+    # connect via https with verification off, exactly as a browser does
+    # after the one-time interstitial. 127.0.0.1 explicitly: urllib won't
+    # fall back across address families the way browsers do, and the
+    # listener binds IPv4.
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    urllib.request.urlopen(f"https://127.0.0.1:{port}/callback?{query}",
+                           timeout=5, context=ctx)
+
+
+def _google_callback(port: int, query: str) -> None:
+    # Google's loopback listener remains plain HTTP.
     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?{query}", timeout=5)
 
 
@@ -68,6 +83,8 @@ def _reset_flow_state(monkeypatch, tmp_path):
     monkeypatch.setattr(qbs, "_flow_state", {"in_progress": False, "error": ""})
     monkeypatch.setattr(gds, "_flow_state", {"in_progress": False, "error": ""})
     monkeypatch.setattr(qbs, "TOKEN_PATH", tmp_path / "qb_token.json")
+    monkeypatch.setattr(qbs, "TLS_CERT_PATH", tmp_path / "cb_cert.pem")
+    monkeypatch.setattr(qbs, "TLS_KEY_PATH", tmp_path / "cb_key.pem")
     monkeypatch.setattr(gds, "TOKEN_PATH", tmp_path / "google_token.json")
     monkeypatch.setattr(gds, "CREDENTIALS_PATH", tmp_path / "google_credentials.json")
     monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "settings.json")
@@ -289,7 +306,7 @@ def test_google_begin_binds_port_and_callback_completes(fake_google_flow):
     assert f"localhost:{gds.GOOGLE_REDIRECT_PORT}" in begun["auth_url"]
     assert _port_is_held(gds.GOOGLE_REDIRECT_PORT)
 
-    _callback(gds.GOOGLE_REDIRECT_PORT, "code=xyz789&state=state123")
+    _google_callback(gds.GOOGLE_REDIRECT_PORT, "code=xyz789&state=state123")
     assert _wait(lambda: not gds._flow_state["in_progress"])
     assert gds._flow_state["error"] == ""
     assert fake_google_flow.fetched == {"code": "xyz789"}
@@ -298,7 +315,7 @@ def test_google_begin_binds_port_and_callback_completes(fake_google_flow):
 
 def test_google_empty_callback_surfaces_error(fake_google_flow):
     gds.begin_oauth()
-    _callback(gds.GOOGLE_REDIRECT_PORT, "error=access_denied")
+    _google_callback(gds.GOOGLE_REDIRECT_PORT, "error=access_denied")
     assert _wait(lambda: not gds._flow_state["in_progress"])
     assert "did not complete" in gds._flow_state["error"]
 

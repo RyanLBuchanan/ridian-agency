@@ -41,6 +41,9 @@ desktop/out/
 .DS_Store
 
 apps/api/quickbooks_token.json
+# v6.3: per-machine self-signed cert for the HTTPS OAuth callback listener
+apps/api/qbo_callback_cert.pem
+apps/api/qbo_callback_key.pem
 
 desktop/dist/
 desktop/backend-location.json
