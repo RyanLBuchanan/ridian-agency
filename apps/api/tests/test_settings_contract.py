@@ -74,7 +74,11 @@ def test_omitted_secret_field_keeps_stored_secret(monkeypatch, tmp_path):
     assert r.status_code == 200
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert on_disk["quickbooks_client_id"] == "NEW_ID"
-    assert on_disk["quickbooks_client_secret"] == "OLD_SECRET"
+    # v6.2: the secret is DPAPI-encrypted on disk — kept means it still
+    # round-trips to the same plaintext, and plaintext never sits on disk.
+    assert on_disk["quickbooks_client_secret"].startswith("dpapi1:")
+    assert "OLD_SECRET" not in path.read_text(encoding="utf-8")
+    assert settings_service.load_settings()["quickbooks_client_secret"] == "OLD_SECRET"
 
 
 def test_blank_secret_field_keeps_stored_secret(monkeypatch, tmp_path):
@@ -90,7 +94,10 @@ def test_blank_secret_field_keeps_stored_secret(monkeypatch, tmp_path):
     })
     assert r.status_code == 200
     on_disk = json.loads(path.read_text(encoding="utf-8"))
-    assert on_disk["quickbooks_client_secret"] == "OLD_SECRET"
+    # v6.2: the QBO secret is DPAPI-encrypted on disk; blank still means keep.
+    assert on_disk["quickbooks_client_secret"].startswith("dpapi1:")
+    loaded = settings_service.load_settings()
+    assert loaded["quickbooks_client_secret"] == "OLD_SECRET"
     assert on_disk["smtp_password"] == "OLD_PW"
 
 

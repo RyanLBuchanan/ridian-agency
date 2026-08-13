@@ -47,6 +47,12 @@ def _callback(port: int, query: str) -> None:
     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?{query}", timeout=5)
 
 
+def _state_of(begun: dict) -> str:
+    """v6.2: state is random per flow — callbacks must echo the real one."""
+    from urllib.parse import parse_qs, urlparse
+    return parse_qs(urlparse(begun["auth_url"]).query)["state"][0]
+
+
 def _wait(pred, timeout: float = 5.0) -> bool:
     end = time.time() + timeout
     while time.time() < end:
@@ -118,13 +124,13 @@ def test_qbo_begin_binds_port_and_callback_completes(monkeypatch):
     assert _port_is_held(qbs.REDIRECT_PORT)
     assert qbs.get_status()["in_progress"] is True
 
-    _callback(qbs.REDIRECT_PORT, "code=abc123&realmId=999&state=ridian")
-    assert _wait(lambda: qbs.get_status()["connected"])
+    _callback(qbs.REDIRECT_PORT, f"code=abc123&realmId=999&state={_state_of(begun)}")
+    assert _wait(lambda: qbs.get_status()["connected"], timeout=10)
     st = qbs.get_status()
     assert st["realm_id"] == "999"
     assert st["flow_error"] == ""
     assert st["in_progress"] is False
-    tok = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    tok = qbs._load_token()          # v6.2: the file on disk is encrypted
     assert tok["realm_id"] == "999" and tok["refresh_token"] == "rt"
 
 
@@ -137,13 +143,15 @@ def test_qbo_missing_creds_is_immediate_400():
 def test_qbo_second_begin_while_pending_is_409_then_timeout_error_surfaces(monkeypatch):
     _seed_qbo_creds()
     monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200))
-    qbs.begin_oauth()
+    begun = qbs.begin_oauth()
     with pytest.raises(qbs.QuickBooksError) as exc:
         qbs.begin_oauth()
     assert exc.value.status == 409
-    # Empty callback (no code): flow ends with a SURFACED error, not silence.
-    _callback(qbs.REDIRECT_PORT, "state=ridian")
-    assert _wait(lambda: not qbs.get_status()["in_progress"])
+    # Valid-state callback with NO code: flow ends with a SURFACED error,
+    # not silence. (A wrong-state callback would be refused and keep
+    # waiting — pinned in test_qbo_oauth_hardening.)
+    _callback(qbs.REDIRECT_PORT, f"state={_state_of(begun)}")
+    assert _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
     assert "did not complete" in qbs.get_status()["flow_error"]
     assert not qbs.get_status()["connected"]
 
@@ -151,9 +159,9 @@ def test_qbo_second_begin_while_pending_is_409_then_timeout_error_surfaces(monke
 def test_qbo_failed_token_exchange_is_surfaced_not_silent(monkeypatch):
     _seed_qbo_creds()
     monkeypatch.setattr(qbs, "httpx", _FakeHttpx(400))
-    qbs.begin_oauth()
-    _callback(qbs.REDIRECT_PORT, "code=abc&realmId=42")
-    assert _wait(lambda: not qbs.get_status()["in_progress"])
+    begun = qbs.begin_oauth()
+    _callback(qbs.REDIRECT_PORT, f"code=abc&realmId=42&state={_state_of(begun)}")
+    assert _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
     assert "token exchange failed" in qbs.get_status()["flow_error"].lower()
     assert not qbs.get_status()["connected"]
 
@@ -166,8 +174,8 @@ def test_qbo_endpoint_returns_auth_url_fast(monkeypatch):
     assert r.status_code == 200
     assert time.time() - t0 < 5           # no 300s block — phase 1 returns now
     assert r.json()["auth_url"].startswith("https://appcenter.intuit.com")
-    _callback(qbs.REDIRECT_PORT, "state=cleanup")   # free the port
-    _wait(lambda: not qbs.get_status()["in_progress"])
+    _callback(qbs.REDIRECT_PORT, f"state={_state_of(r.json())}")   # free the port
+    _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
 
 
 def test_connect_stamps_token_with_consent_time_environment(monkeypatch):
@@ -175,11 +183,11 @@ def test_connect_stamps_token_with_consent_time_environment(monkeypatch):
     is stamped with the environment the consent STARTED in."""
     _seed_qbo_creds()
     monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200))
-    qbs.begin_oauth()                                    # env snapshot: sandbox
+    begun = qbs.begin_oauth()                            # env snapshot: sandbox
     settings_service.save_settings({"quickbooks_environment": "production"})
-    _callback(qbs.REDIRECT_PORT, "code=abc&realmId=7")
-    assert _wait(lambda: not qbs.get_status()["in_progress"])
-    tok = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    _callback(qbs.REDIRECT_PORT, f"code=abc&realmId=7&state={_state_of(begun)}")
+    assert _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
+    tok = qbs._load_token()          # v6.2: the file on disk is encrypted
     assert tok["environment"] == "sandbox"
 
 
@@ -189,9 +197,9 @@ def test_wrong_environment_keys_fail_at_connect_with_plain_message(monkeypatch):
     with an actionable message and NO token is saved."""
     _seed_qbo_creds()
     monkeypatch.setattr(qbs, "httpx", _FakeHttpx(200, get_status_code=401))
-    qbs.begin_oauth()
-    _callback(qbs.REDIRECT_PORT, "code=abc&realmId=7")
-    assert _wait(lambda: not qbs.get_status()["in_progress"])
+    begun = qbs.begin_oauth()
+    _callback(qbs.REDIRECT_PORT, f"code=abc&realmId=7&state={_state_of(begun)}")
+    assert _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
     st = qbs.get_status()
     assert not st["connected"]
     assert "Client ID/Secret" in st["flow_error"]
@@ -217,8 +225,8 @@ def test_paste_then_connect_is_one_action(monkeypatch):
     r2 = client.post("/quickbooks/connect")
     assert r2.status_code == 200
     assert "PASTEDID" in r2.json()["auth_url"]
-    _callback(qbs.REDIRECT_PORT, "state=cleanup")
-    _wait(lambda: not qbs.get_status()["in_progress"])
+    _callback(qbs.REDIRECT_PORT, f"state={_state_of(r2.json())}")   # free the port
+    _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
 
 
 def test_connect_uses_freshly_saved_credentials_not_stale_ones(monkeypatch):
@@ -236,8 +244,8 @@ def test_connect_uses_freshly_saved_credentials_not_stale_ones(monkeypatch):
     assert "NEWID" in r2.json()["auth_url"]
     assert "OLDID" not in r2.json()["auth_url"]
     assert settings_service.load_settings()["quickbooks_client_secret"] == "KEEPSECRET"
-    _callback(qbs.REDIRECT_PORT, "state=cleanup")
-    _wait(lambda: not qbs.get_status()["in_progress"])
+    _callback(qbs.REDIRECT_PORT, f"state={_state_of(r2.json())}")   # free the port
+    _wait(lambda: not qbs.get_status()["in_progress"], timeout=10)
 
 
 # --------------------------------------------------------------------------

@@ -5452,3 +5452,7 @@ body {
 /* v6.1 rail cold start: loading is not empty, unreachable is not zero. */
 .rail-threads-loading { font-size: var(--fs-xs); color: var(--color-muted); padding: 4px 2px; font-style: italic; }
 .rail-threads-unavailable { font-size: var(--fs-xs); color: var(--warn, #d9a03f); padding: 4px 2px; }
+
+/* v6.2: support contact line in the Settings footer */
+.settings-support { margin-right: auto; font-size: var(--fs-xs); color: var(--color-muted); }
+.settings-support a { color: inherit; }

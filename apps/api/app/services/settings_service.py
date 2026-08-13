@@ -97,6 +97,36 @@ _SDK_ENV_MAP: dict[str, str] = {
 }
 
 
+# v6.2 encryption at rest for the QuickBooks client secret: on disk the
+# value is "dpapi1:<base64 CryptProtectData blob>" (user scope). Decrypted
+# transparently on load; callers always see plaintext in memory. A blob
+# from a different Windows account fails CLOSED — the value reads as blank
+# and the operator re-enters it, never a crash, never a silent wrong value.
+_DPAPI_PREFIX = "dpapi1:"
+_DPAPI_ENCRYPTED_KEYS: frozenset[str] = frozenset({"quickbooks_client_secret"})
+
+
+def _encrypt_value(plain: str) -> str:
+    from . import dpapi
+    import base64
+    return _DPAPI_PREFIX + base64.b64encode(
+        dpapi.protect(plain.encode("utf-8"))).decode("ascii")
+
+
+def _decrypt_value(stored: str, key: str) -> str:
+    if not stored.startswith(_DPAPI_PREFIX):
+        return stored                      # legacy plaintext — still honored
+    from . import dpapi
+    import base64
+    try:
+        return dpapi.unprotect(
+            base64.b64decode(stored[len(_DPAPI_PREFIX):])).decode("utf-8")
+    except Exception as exc:  # noqa: BLE001 — fail closed, honestly
+        log.warning("settings.secret_undecryptable key=%s type=%s",
+                    key, type(exc).__name__)
+        return ""
+
+
 def load_settings() -> dict[str, str]:
     """Read the JSON file. Returns {} if the file is missing or malformed."""
     if not SETTINGS_PATH.exists():
@@ -112,11 +142,32 @@ def load_settings() -> dict[str, str]:
     if not isinstance(data, dict):
         log.warning("settings.bad_format")
         return {}
-    return {
+    out = {
         str(k): ("" if v is None else str(v))
         for k, v in data.items()
         if k in SETTABLE_KEYS
     }
+    for k in _DPAPI_ENCRYPTED_KEYS:
+        if out.get(k):
+            plain = _decrypt_value(out[k], k)
+            if plain != out[k]:
+                out[k] = plain
+            elif plain:
+                # Legacy plaintext secret on disk: migrate ON FIRST LOAD.
+                # The state-guard refuses this write in test contexts aimed
+                # at the real store; plaintext keeps working there and the
+                # next real save encrypts it.
+                try:
+                    guard_real_state_write(SETTINGS_PATH)
+                    disk = dict(data)
+                    disk[k] = _encrypt_value(plain)
+                    SETTINGS_PATH.write_text(
+                        json.dumps(disk, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8")
+                    log.info("settings.secret_migrated_to_dpapi key=%s", k)
+                except Exception:  # noqa: BLE001 — never break a read
+                    pass
+    return out
 
 
 def save_settings(updates: dict[str, Any]) -> dict[str, str]:
@@ -152,8 +203,14 @@ def save_settings(updates: dict[str, Any]) -> dict[str, str]:
         new[k] = "" if val is None else str(val)
 
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # v6.2: encrypt-at-rest keys are serialized as DPAPI blobs; the dict
+    # RETURNED to callers keeps plaintext (in memory only).
+    disk = dict(new)
+    for k in _DPAPI_ENCRYPTED_KEYS:
+        if disk.get(k) and not str(disk[k]).startswith(_DPAPI_PREFIX):
+            disk[k] = _encrypt_value(str(disk[k]))
     SETTINGS_PATH.write_text(
-        json.dumps(new, indent=2, sort_keys=True) + "\n",
+        json.dumps(disk, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     log.info(

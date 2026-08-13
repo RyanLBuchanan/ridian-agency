@@ -146,7 +146,7 @@ def test_legacy_unstamped_token_counts_as_production():
 
 def test_saved_tokens_are_stamped_with_the_active_environment():
     qbs._save_token({"access_token": "at", "refresh_token": "rt", "realm_id": "9"})
-    tok = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    tok = qbs._load_token()          # v6.2: the file on disk is encrypted
     assert tok["environment"] == "sandbox"
 
 
@@ -237,7 +237,7 @@ def test_refresh_inherits_the_tokens_environment_not_current_settings(monkeypatc
     monkeypatch.setattr(qbs, "get_environment", lambda: "production")
     access, realm = qbs._access_token("sandbox")
     assert access == "at2"
-    saved = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    saved = qbs._load_token()        # v6.2: the file on disk is encrypted
     assert saved["environment"] == "sandbox"             # inherited, not re-read
     assert saved["refresh_token"] == "rt2"
 
@@ -245,7 +245,7 @@ def test_refresh_inherits_the_tokens_environment_not_current_settings(monkeypatc
 def test_save_token_never_overwrites_an_existing_stamp():
     qbs._save_token({"access_token": "a", "refresh_token": "r",
                      "realm_id": "1", "environment": "production"})
-    saved = json.loads(qbs.TOKEN_PATH.read_text(encoding="utf-8"))
+    saved = qbs._load_token()        # v6.2: the file on disk is encrypted
     assert saved["environment"] == "production"          # kept, not re-stamped
 
 

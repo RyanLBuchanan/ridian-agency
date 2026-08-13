@@ -27,6 +27,7 @@ import base64
 import http.server
 import json
 import logging
+import secrets
 import threading
 import time
 import urllib.parse
@@ -34,6 +35,7 @@ from pathlib import Path
 
 import httpx
 
+from . import dpapi
 from .settings_service import load_settings
 
 log = logging.getLogger("ridian.quickbooks")
@@ -98,17 +100,62 @@ def _credentials() -> tuple[str, str]:
     return cid, secret
 
 
+# v6.2 encryption at rest: the token file is DPAPI-protected (user scope) —
+# a magic prefix + CryptProtectData blob, deliberately NOT parseable JSON.
+# The key lives with the Windows user's credentials, managed by the OS —
+# stored separately from anything this app writes, by construction.
+_DPAPI_MAGIC = b"RIDIAN-DPAPI-1\n"
+
+# Honest failure state: set when a token FILE exists but cannot be
+# decrypted (different Windows account, or corrupt). _access_token turns
+# this into an actionable error instead of the misleading "not connected".
+_token_load_error: list[str] = [""]
+
+
 def _load_token() -> dict | None:
     if not TOKEN_PATH.exists():
+        _token_load_error[0] = ""
         return None
     try:
-        return json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        raw = TOKEN_PATH.read_bytes()
+    except OSError:
         return None
+    if raw.startswith(_DPAPI_MAGIC):
+        try:
+            tok = json.loads(dpapi.unprotect(raw[len(_DPAPI_MAGIC):]))
+            _token_load_error[0] = ""
+            return tok
+        except (dpapi.DpapiError, json.JSONDecodeError, ValueError) as exc:
+            log.warning("quickbooks.token_undecryptable type=%s", type(exc).__name__)
+            _token_load_error[0] = (
+                "The saved QuickBooks connection cannot be decrypted — it was "
+                "encrypted by a different Windows account, or the file is "
+                "corrupt. Open Settings and Connect QuickBooks again.")
+            return None
+    # Legacy plaintext token (pre-v6.2): migrate to encrypted ON FIRST LOAD,
+    # preserving saved_at/environment exactly (no restamping).
+    try:
+        tok = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if isinstance(tok, dict) and tok.get("refresh_token"):
+        try:
+            _write_token_file(tok)
+            log.info("quickbooks.token_migrated_to_dpapi")
+        except Exception as exc:  # noqa: BLE001 — keep serving plaintext
+            log.warning("quickbooks.token_migration_failed type=%s",
+                        type(exc).__name__)
+    _token_load_error[0] = ""
+    return tok if isinstance(tok, dict) else None
+
+
+def _write_token_file(tok: dict) -> None:
+    guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
+    TOKEN_PATH.write_bytes(
+        _DPAPI_MAGIC + dpapi.protect(json.dumps(tok).encode("utf-8")))
 
 
 def _save_token(tok: dict) -> None:
-    guard_real_state_write(TOKEN_PATH)   # v4.4: tests never write real tokens
     tok["saved_at"] = int(time.time())
     # v4.6: every token carries the environment it belongs to. Callers that
     # KNOW the environment (consent completion, refresh inheritance) set it
@@ -116,7 +163,7 @@ def _save_token(tok: dict) -> None:
     # never overwrites an existing stamp — a Settings flip between an
     # operation's start and this save must not relabel the token.
     tok.setdefault("environment", get_environment())
-    TOKEN_PATH.write_text(json.dumps(tok, indent=2), encoding="utf-8")
+    _write_token_file(tok)
 
 
 def _token_environment(tok: dict) -> str:
@@ -149,7 +196,23 @@ def disconnect() -> dict:
             TOKEN_PATH.unlink()
         except OSError:
             pass
+    _token_load_error[0] = ""
     return {"connected": False}
+
+
+def _tid(resp) -> str:
+    """Intuit's per-request trace id from the response headers — the one
+    thing Intuit support asks for on every ticket. Captured on every
+    non-success response (v6.2)."""
+    try:
+        return str(resp.headers.get("intuit_tid") or "")
+    except Exception:  # noqa: BLE001 — headers absent on some fakes/transports
+        return ""
+
+
+def _tid_suffix(resp) -> str:
+    t = _tid(resp)
+    return f" (intuit_tid {t})" if t else ""
 
 
 # v4.3: the OAuth browser launch moved OUT of this backend process. The
@@ -167,15 +230,54 @@ _flow_state: dict = {"in_progress": False, "error": ""}
 
 
 class _CallbackHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 — stdlib API
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        result = getattr(self.server, "ridian_result", {})
-        result["code"] = (q.get("code") or [""])[0]
-        result["realm_id"] = (q.get("realmId") or [""])[0]
+    """v6.2 hardened callback.
+
+    - ``state`` is validated against the per-flow random value bound to the
+      listener; a mismatch is REFUSED — the code is never recorded, never
+      exchanged, and the pending consent keeps waiting for the real
+      callback (a forged request must not be able to finish OR abort it).
+    - The callback answers 302 to a parameter-free local page, so
+      code/realmId/state never persist in browser history the way a 200 on
+      the parameterized URL did.
+    """
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def _page(self, html: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write(b"<h3>Ridian is connected to QuickBooks. Close this tab.</h3>")
+        self.wfile.write(html)
+
+    def do_GET(self):  # noqa: N802 — stdlib API
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/connected":
+            self._page(b"<h3>Ridian is connected to QuickBooks. "
+                       b"Close this tab.</h3>")
+            return
+        if parsed.path == "/rejected":
+            self._page(b"<h3>QuickBooks connection attempt rejected "
+                       b"(security check failed). Close this tab and click "
+                       b"Connect again in Ridian.</h3>")
+            return
+        if parsed.path != "/callback":
+            self.send_response(404)
+            self.end_headers()
+            return
+        q = urllib.parse.parse_qs(parsed.query)
+        expected = getattr(self.server, "ridian_expected_state", None)
+        got = (q.get("state") or [""])[0]
+        if not expected or not secrets.compare_digest(got, expected):
+            log.warning("quickbooks.oauth_state_mismatch")
+            self._redirect("/rejected")
+            return          # result untouched — nothing is exchanged
+        result = getattr(self.server, "ridian_result", {})
+        result["code"] = (q.get("code") or [""])[0]
+        result["realm_id"] = (q.get("realmId") or [""])[0]
+        self._redirect("/connected")
 
     def log_message(self, *a):  # silence stdlib request logging
         return
@@ -202,12 +304,17 @@ def begin_oauth() -> dict:
                 "another app is using it. Close it and try again.", 500) from exc
         _flow_state.update(in_progress=True, error="")
     server.ridian_result = {}
+    # v6.2: per-flow cryptographically random state, bound to THIS listener.
+    # The callback validates it and refuses mismatches — the CSRF handling
+    # the constant "ridian" only pretended to be.
+    state = secrets.token_urlsafe(32)
+    server.ridian_expected_state = state
     env = get_environment()   # SNAPSHOT: the consent belongs to this env,
     # even if Settings flips during the (up to 5-minute) browser wait.
     threading.Thread(target=_complete_oauth, args=(server, env), daemon=True).start()
     params = urllib.parse.urlencode({
         "client_id": cid, "response_type": "code", "scope": SCOPE,
-        "redirect_uri": REDIRECT_URI, "state": "ridian",
+        "redirect_uri": REDIRECT_URI, "state": state,
     })
     log.info("quickbooks.oauth_begun port=%s env=%s", REDIRECT_PORT, env)
     return {"auth_url": f"{AUTH_URL}?{params}"}
@@ -229,6 +336,15 @@ def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
         server.timeout = 5
         while time.time() < deadline and "code" not in result:
             server.handle_request()
+        # v6.2: the callback answered 302 — serve the browser's follow-up
+        # GET of the clean /connected page before closing (best-effort;
+        # short timeout so a browser that never follows costs ~2s, not 300).
+        server.timeout = 1
+        for _ in range(2):
+            try:
+                server.handle_request()
+            except Exception:  # noqa: BLE001
+                break
         server.server_close()
         if not result.get("code") or not result.get("realm_id"):
             err = ("Browser consent did not complete within 5 minutes. "
@@ -242,7 +358,8 @@ def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
                                     "redirect_uri": REDIRECT_URI},
                               timeout=30)
             if resp.status_code != 200:
-                err = f"QuickBooks token exchange failed (HTTP {resp.status_code})."
+                err = (f"QuickBooks token exchange failed "
+                       f"(HTTP {resp.status_code}){_tid_suffix(resp)}.")
             else:
                 tok = resp.json()
                 tok["realm_id"] = result["realm_id"]
@@ -259,7 +376,8 @@ def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
                     timeout=30)
                 if check.status_code != 200:
                     err = (f"Consent completed, but the {env} API rejected the "
-                           f"connection (HTTP {check.status_code}). Check that "
+                           f"connection (HTTP {check.status_code})"
+                           f"{_tid_suffix(check)}. Check that "
                            f"your Client ID/Secret are "
                            f"{'Development' if env == 'sandbox' else 'Production'} "
                            f"keys and the company you picked is a {env} company.")
@@ -276,13 +394,56 @@ def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
             log.warning("quickbooks.oauth_failed detail=%s", err)
 
 
-def _access_token(env: str) -> tuple[str, str]:
+def _refresh_access(tok: dict) -> dict:
+    """Exchange the refresh token for a new access token (rolling refresh
+    persisted). v6.2: ``invalid_grant`` — Intuit's explicit signal that the
+    refresh token itself is revoked/expired — CLEARS the stored token (that
+    lineage is dead) and asks for reconnect. Any other failure keeps the
+    file (it may be transient) but still asks for reconnect, with the
+    intuit_tid attached for support."""
+    cid, secret = _credentials()
+    basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+    resp = httpx.post(TOKEN_URL, headers={"Authorization": f"Basic {basic}"},
+                      data={"grant_type": "refresh_token",
+                            "refresh_token": tok["refresh_token"]},
+                      timeout=30)
+    if resp.status_code != 200:
+        try:
+            oauth_error = str(resp.json().get("error") or "")
+        except Exception:  # noqa: BLE001 — non-JSON body
+            oauth_error = ""
+        if oauth_error == "invalid_grant":
+            disconnect()
+            log.warning("quickbooks.refresh_invalid_grant tid=%s", _tid(resp))
+            raise QuickBooksError(
+                "The QuickBooks session has expired (invalid_grant) — the "
+                f"saved connection was cleared{_tid_suffix(resp)}. Open "
+                "Settings and Connect QuickBooks again.", 401)
+        log.warning("quickbooks.refresh_failed status=%s tid=%s",
+                    resp.status_code, _tid(resp))
+        raise QuickBooksError(
+            f"QuickBooks token refresh failed (HTTP {resp.status_code})"
+            f"{_tid_suffix(resp)} — reconnect in Settings.", 502)
+    new = resp.json()
+    new["realm_id"] = tok["realm_id"]
+    # INHERIT the lineage's environment — never re-read settings here,
+    # or a flip during the refresh window would relabel the token and
+    # permanently defeat the mismatch guard.
+    new["environment"] = _token_environment(tok)
+    _save_token(new)
+    return new
+
+
+def _access_token(env: str, force_refresh: bool = False) -> tuple[str, str]:
     """(access_token, realm_id) for the SNAPSHOT environment ``env``,
-    refreshing when older than ~50 minutes. The caller snapshots the
-    environment ONCE and uses it for this guard and for the API base, so a
-    concurrent Settings flip cannot aim the token at the wrong host."""
+    refreshing when older than ~50 minutes (or on demand — the 401 retry
+    path). The caller snapshots the environment ONCE and uses it for this
+    guard and for the API base, so a concurrent Settings flip cannot aim
+    the token at the wrong host."""
     tok = _load_token()
     if not tok or not tok.get("refresh_token"):
+        if _token_load_error[0]:
+            raise QuickBooksError(_token_load_error[0], 401)
         raise QuickBooksError(
             "QuickBooks is not connected. Open Settings to connect first.", 400)
     if _token_environment(tok) != env:
@@ -291,39 +452,52 @@ def _access_token(env: str) -> tuple[str, str]:
             f"environment, but Settings now selects {env}. Open Settings and "
             "click Connect QuickBooks to reconnect (or switch the environment "
             "back).", 409)
-    if time.time() - tok.get("saved_at", 0) > 3000:
-        cid, secret = _credentials()
-        basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
-        resp = httpx.post(TOKEN_URL, headers={"Authorization": f"Basic {basic}"},
-                          data={"grant_type": "refresh_token",
-                                "refresh_token": tok["refresh_token"]},
-                          timeout=30)
-        if resp.status_code != 200:
-            raise QuickBooksError(
-                f"QuickBooks token refresh failed (HTTP {resp.status_code}) — "
-                "reconnect in Settings.", 502)
-        new = resp.json()
-        new["realm_id"] = tok["realm_id"]
-        # INHERIT the lineage's environment — never re-read settings here,
-        # or a flip during the refresh window would relabel the token and
-        # permanently defeat the mismatch guard.
-        new["environment"] = _token_environment(tok)
-        _save_token(new)
-        tok = new
+    if force_refresh or time.time() - tok.get("saved_at", 0) > 3000:
+        tok = _refresh_access(tok)
     return tok["access_token"], tok["realm_id"]
+
+
+def _authed(env: str, send) -> "httpx.Response":
+    """v6.2: run ONE QBO request with auth; on 401 refresh ONCE and retry
+    ONCE. A second 401 — or a refresh that fails on this path — means the
+    stored connection is dead: clear it and ask for reconnect. Exactly two
+    attempts, never a loop."""
+    access, realm = _access_token(env)
+    resp = send(access, realm)
+    if resp.status_code != 401:
+        return resp
+    log.info("quickbooks.retry_after_401 tid=%s", _tid(resp))
+    try:
+        access, realm = _access_token(env, force_refresh=True)
+    except QuickBooksError:
+        disconnect()      # the 401 proved the lineage bad; keep nothing stale
+        raise
+    resp = send(access, realm)
+    if resp.status_code == 401:
+        disconnect()
+        log.warning("quickbooks.auth_rejected_twice tid=%s", _tid(resp))
+        raise QuickBooksError(
+            "QuickBooks rejected the connection twice (HTTP 401)"
+            f"{_tid_suffix(resp)} — the saved connection was cleared. Open "
+            "Settings and Connect QuickBooks again.", 401)
+    return resp
 
 
 def _query(sql: str) -> list[dict]:
     env = get_environment()          # ONE snapshot: guard + base agree
-    access, realm = _access_token(env)
-    resp = httpx.get(
+    resp = _authed(env, lambda access, realm: httpx.get(
         f"{_api_base(env)}/{realm}/query",
         params={"query": sql, "minorversion": _MINOR_VERSION},
         headers={"Authorization": f"Bearer {access}", "Accept": "application/json"},
         timeout=30,
-    )
+    ))
     if resp.status_code != 200:
-        raise QuickBooksError(f"QuickBooks query failed (HTTP {resp.status_code}).", 502)
+        detail = _fault_detail(resp)
+        log.warning("quickbooks.query_failed status=%s tid=%s detail=%s",
+                    resp.status_code, _tid(resp), detail)
+        raise QuickBooksError(
+            f"QuickBooks query failed (HTTP {resp.status_code})"
+            + (f": {detail}" if detail else "") + _tid_suffix(resp), 502)
     return resp.json().get("QueryResponse", {})
 
 
@@ -344,16 +518,6 @@ def _fault_detail(resp) -> str:
         if frag:
             parts.append(frag + (f" (code {code})" if code else ""))
     return "; ".join(parts)
-
-
-def _body_for_log(resp) -> str:
-    """Full response body for backend.log, capped so a rogue payload can't
-    flood the log. Never contains our credentials — it is QBO's reply."""
-    try:
-        body = getattr(resp, "text", "") or json.dumps(resp.json())
-    except Exception:  # noqa: BLE001
-        body = "<unreadable>"
-    return body[:2000]
 
 
 def list_customers() -> list[dict]:
@@ -412,20 +576,29 @@ def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
     if due_date:
         body["DueDate"] = due_date
     env = get_environment()          # ONE snapshot: guard + base + link agree
-    access, realm = _access_token(env)
-    resp = httpx.post(
-        f"{_api_base(env)}/{realm}/invoice", params={"minorversion": _MINOR_VERSION},
-        headers={"Authorization": f"Bearer {access}",
-                 "Accept": "application/json", "Content-Type": "application/json"},
-        json=body, timeout=30,
-    )
+    realm_used = [""]                # captured for the deep link below
+
+    def _send(access: str, realm: str):
+        realm_used[0] = realm
+        return httpx.post(
+            f"{_api_base(env)}/{realm}/invoice",
+            params={"minorversion": _MINOR_VERSION},
+            headers={"Authorization": f"Bearer {access}",
+                     "Accept": "application/json",
+                     "Content-Type": "application/json"},
+            json=body, timeout=30,
+        )
+
+    resp = _authed(env, _send)
     if resp.status_code not in (200, 201):
+        # v6.2 REDACTED failure logging: the parsed Fault detail + intuit_tid,
+        # never the raw response body (capped was not redacted).
         detail = _fault_detail(resp)
-        log.warning("quickbooks.invoice_create_failed status=%s body=%s",
-                    resp.status_code, _body_for_log(resp))
+        log.warning("quickbooks.invoice_create_failed status=%s tid=%s detail=%s",
+                    resp.status_code, _tid(resp), detail)
         raise QuickBooksError(
             f"Invoice create failed (HTTP {resp.status_code})"
-            + (f": {detail}" if detail else "."), 502)
+            + (f": {detail}" if detail else ".") + _tid_suffix(resp), 502)
     inv = resp.json().get("Invoice", {})
     out = {"id": inv.get("Id", ""), "doc_number": inv.get("DocNumber", ""),
            "customer": (inv.get("CustomerRef") or {}).get("name", ""),
@@ -438,6 +611,6 @@ def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
            # company (it surfaces as account_id_hint in the sign-in URL) and
            # restores the deep link after login.
            "link": (f"{_app_url(env)}/app/invoice?txnId={inv.get('Id', '')}"
-                    f"&deeplinkcompanyid={realm}")}
+                    f"&deeplinkcompanyid={realm_used[0]}")}
     log.info("quickbooks.invoice_created id=%s total=%s", out["id"], out["total"])
     return out
