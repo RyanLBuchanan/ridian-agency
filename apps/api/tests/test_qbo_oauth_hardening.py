@@ -163,12 +163,64 @@ def test_mismatch_only_flow_times_out_without_exchanging(monkeypatch):
         assert "did not complete" in qb._flow_state["error"]
 
 
-def test_redirect_uri_matches_the_registered_intuit_string_exactly():
-    """v6.3: Intuit's Production redirect list holds EXACTLY
-    https://localhost:8123/callback — the code must byte-match it (scheme,
-    host, FIXED port, path) in the consent URL and the token exchange."""
-    assert qb.REDIRECT_URI == "https://localhost:8123/callback"
+def test_redirect_uri_matches_the_registered_intuit_strings_exactly():
+    """v6.4: Intuit PRODUCTION rejects localhost/IP URIs, so production
+    consents use the registered public bounce URI EXACTLY —
+    https://ridiantechnologies.com/qbo/callback (site commit 68d01af 302s
+    it to the local listener). Sandbox keeps the direct localhost URI.
+    Both byte-pinned; the port stays fixed, never dynamic."""
+    assert qb.PROD_REDIRECT_URI == "https://ridiantechnologies.com/qbo/callback"
+    assert qb.LOCAL_REDIRECT_URI == "https://localhost:8123/callback"
+    assert qb._redirect_uri("production") == "https://ridiantechnologies.com/qbo/callback"
+    assert qb._redirect_uri("sandbox") == "https://localhost:8123/callback"
     assert qb.REDIRECT_PORT == 8123               # fixed, never dynamic
+
+
+def test_production_consent_and_exchange_carry_the_same_public_uri(monkeypatch):
+    """THE Intuit contract: the token exchange must repeat the authorize
+    request's redirect_uri. In production BOTH must be the registered
+    public URI — sending the localhost URI at exchange would fail every
+    production consent."""
+    monkeypatch.setattr(qb, "REDIRECT_PORT", 18127)
+    monkeypatch.setattr(qb, "load_settings", lambda: {
+        "quickbooks_client_id": "cid-test",
+        "quickbooks_client_secret": "secret-test",
+        "quickbooks_environment": "production"})
+    exchanges = []
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        exchanges.append(dict(data or {}))
+        return _Resp(500)   # fail the exchange — the captured data is the pin
+
+    monkeypatch.setattr(qb.httpx, "post", fake_post)
+    begun = qb.begin_oauth()
+    from urllib.parse import parse_qs, urlparse
+    q = parse_qs(urlparse(begun["auth_url"]).query)
+    assert q["redirect_uri"][0] == "https://ridiantechnologies.com/qbo/callback"
+    state = q["state"][0]
+    # The browser still ARRIVES at the local TLS listener via the bounce.
+    _get(f"https://127.0.0.1:18127/callback?code=abc&realmId=7&state={state}")
+    _wait_flow_done()
+    assert len(exchanges) == 1
+    assert exchanges[0]["redirect_uri"] == "https://ridiantechnologies.com/qbo/callback"
+
+
+def test_sandbox_consent_and_exchange_keep_the_localhost_uri(monkeypatch):
+    monkeypatch.setattr(qb, "REDIRECT_PORT", 18128)
+    exchanges = []
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        exchanges.append(dict(data or {}))
+        return _Resp(500)
+
+    monkeypatch.setattr(qb.httpx, "post", fake_post)
+    begun = qb.begin_oauth()                       # fixture env: sandbox
+    from urllib.parse import parse_qs, urlparse
+    q = parse_qs(urlparse(begun["auth_url"]).query)
+    assert q["redirect_uri"][0] == "https://localhost:8123/callback"
+    _get(f"https://127.0.0.1:18128/callback?code=x&realmId=1&state={q['state'][0]}")
+    _wait_flow_done()
+    assert exchanges[0]["redirect_uri"] == "https://localhost:8123/callback"
 
 
 def test_callback_listener_actually_serves_tls(monkeypatch):

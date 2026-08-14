@@ -60,12 +60,24 @@ PROD_APP_URL = "https://qbo.intuit.com"
 SANDBOX_APP_URL = "https://sandbox.qbo.intuit.com"
 SCOPE = "com.intuit.quickbooks.accounting"
 REDIRECT_PORT = 8123
-# v6.3: httpS — must byte-match the URI registered in Intuit's Production
-# redirect list (https://localhost:8123/callback). The loopback listener
-# serves TLS with a locally-generated self-signed localhost certificate;
-# no CA signs localhost, so the browser shows a one-time interstitial on
-# the callback redirect (Advanced → continue to localhost).
-REDIRECT_URI = f"https://localhost:{REDIRECT_PORT}/callback"
+# v6.4: Intuit PRODUCTION rejects localhost/IP redirect URIs entirely, so
+# production consents route through the registered public URI —
+# https://ridiantechnologies.com/qbo/callback — whose site (site commit
+# 68d01af) answers with a 302 to https://localhost:8123/callback preserving
+# code/state/realmId byte-for-byte. The browser therefore still ARRIVES at
+# the local TLS listener below; only the URI Intuit sees differs. Intuit
+# requires the token exchange to repeat the authorize request's
+# redirect_uri, so BOTH use _redirect_uri(env) from one env snapshot.
+# Sandbox keeps the direct localhost URI (accepted for Development keys).
+PROD_REDIRECT_URI = "https://ridiantechnologies.com/qbo/callback"
+LOCAL_REDIRECT_URI = f"https://localhost:{REDIRECT_PORT}/callback"
+
+
+def _redirect_uri(env: str) -> str:
+    """The redirect URI for an ALREADY-SNAPSHOT environment — same
+    discipline as _api_base: never re-reads settings, so the consent URL
+    and the token exchange can never disagree within one flow."""
+    return PROD_REDIRECT_URI if env == "production" else LOCAL_REDIRECT_URI
 
 # Self-signed localhost cert for the callback listener, generated once per
 # machine into the data dir (runtime files, never in the binary). 10-year
@@ -384,7 +396,7 @@ def begin_oauth() -> dict:
     threading.Thread(target=_complete_oauth, args=(server, env), daemon=True).start()
     params = urllib.parse.urlencode({
         "client_id": cid, "response_type": "code", "scope": SCOPE,
-        "redirect_uri": REDIRECT_URI, "state": state,
+        "redirect_uri": _redirect_uri(env), "state": state,
     })
     log.info("quickbooks.oauth_begun port=%s env=%s", REDIRECT_PORT, env)
     return {"auth_url": f"{AUTH_URL}?{params}"}
@@ -425,7 +437,9 @@ def _complete_oauth(server: http.server.HTTPServer, env: str) -> None:
             resp = httpx.post(TOKEN_URL, headers={"Authorization": f"Basic {basic}"},
                               data={"grant_type": "authorization_code",
                                     "code": result["code"],
-                                    "redirect_uri": REDIRECT_URI},
+                                    # MUST repeat the authorize request's
+                                    # redirect_uri — same env snapshot.
+                                    "redirect_uri": _redirect_uri(env)},
                               timeout=30)
             if resp.status_code != 200:
                 err = (f"QuickBooks token exchange failed "
