@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('ridian', {
   // Whether the global shortcut actually registered — Settings shows the
   // truth rather than implying a shortcut that does nothing.
   hotkeyStatus: () => ipcRenderer.invoke('hotkey:status'),
+  // v6.5: apply a new hotkey from Settings immediately (no restart). The
+  // returned status is honest: ok/reason/detail + which binding is ACTIVE.
+  applyHotkey: (accelerator) => ipcRenderer.invoke('hotkey:apply',
+                                                   String(accelerator || '')),
 });

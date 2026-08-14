@@ -72,6 +72,10 @@ SETTABLE_KEYS: tuple[str, ...] = (
     # operator_service.resolve_monthly_budget; month-to-date comes from the
     # operation log's per-run spend_usd ledger.
     "operator_monthly_budget_usd",
+    # v6.5: global command-bar hotkey (Electron accelerator syntax). Blank =
+    # the Ctrl+Alt+R default (desktop/hotkey.js). Applied by the desktop
+    # main process without restart via the hotkey:apply IPC.
+    "operator_global_hotkey",
     "appearance",
 )
 

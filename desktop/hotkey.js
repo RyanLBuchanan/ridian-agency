@@ -9,7 +9,10 @@
 // No Electron import: `globalShortcut` is injected, so the real logic is
 // testable (apps/api/tests/test_global_hotkey.py runs this file under Node).
 
-const DEFAULT_ACCELERATOR = 'CommandOrControl+Shift+R';
+// v6.5: Ctrl+ALT+R. The original Ctrl+Shift+R collided with the browser
+// hard-refresh shortcut — a global hotkey must never steal a combination
+// the desktop's most-used apps depend on.
+const DEFAULT_ACCELERATOR = 'CommandOrControl+Alt+R';
 
 // Electron accelerators: one or more modifiers plus exactly one key. We
 // validate shape here so a typo fails LOUDLY at startup rather than throwing
@@ -103,4 +106,42 @@ function registerGlobalHotkey({
   return { ok: true, accelerator, reason: '', detail: '' };
 }
 
-module.exports = { registerGlobalHotkey, validateAccelerator, DEFAULT_ACCELERATOR };
+/**
+ * Switch the active hotkey to ``accelerator`` (v6.5 — Settings-applied,
+ * no restart). Unregisters ``currentAccelerator`` first; if the NEW one
+ * cannot be registered, the previous one is restored (best effort) so the
+ * user is never silently left with nothing.
+ *
+ * Returns the registerGlobalHotkey result plus ``active``: the accelerator
+ * actually holding the global registration after this call ('' if none).
+ * ok:false + active=<old> reads as "your new choice failed for <reason>;
+ * the old binding still works" — the honest state, never a fake success.
+ */
+function applyHotkey({ globalShortcut, currentAccelerator, accelerator, onTrigger } = {}) {
+  const next = (accelerator || '').trim() || DEFAULT_ACCELERATOR;
+  const invalid = validateAccelerator(next);
+  if (invalid) {
+    // Nothing attempted, nothing torn down — the old binding stays live.
+    return { ok: false, accelerator: next, reason: 'invalid', detail: invalid,
+             active: currentAccelerator || '' };
+  }
+  if (currentAccelerator && globalShortcut
+      && typeof globalShortcut.unregister === 'function') {
+    try { globalShortcut.unregister(currentAccelerator); } catch (_err) { /* gone */ }
+  }
+  const result = registerGlobalHotkey({ globalShortcut, accelerator: next, onTrigger });
+  if (result.ok) {
+    return { ...result, active: next };
+  }
+  // New binding failed — try to give the old one back.
+  let active = '';
+  if (currentAccelerator && currentAccelerator !== next) {
+    const restore = registerGlobalHotkey({
+      globalShortcut, accelerator: currentAccelerator, onTrigger });
+    if (restore.ok) active = currentAccelerator;
+  }
+  return { ...result, active };
+}
+
+module.exports = { registerGlobalHotkey, applyHotkey, validateAccelerator,
+                   DEFAULT_ACCELERATOR };

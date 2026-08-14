@@ -202,6 +202,7 @@ const SETTINGS_FIELDS = [
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
   'operator_monthly_budget_usd',
+  'operator_global_hotkey',
   'quickbooks_client_id',
   'quickbooks_environment',
   'appearance',
@@ -3210,6 +3211,40 @@ function _workspaceViewKeydown(e) {
   }
 }
 
+/* v6.5: honest global-hotkey state. registerGlobalHotkey returns false when
+   another app owns the combination; before this, that surfaced only as a
+   one-time dialog at startup — dismiss it and the app LOOKED fine while the
+   hotkey did nothing. Settings now shows the live registration state with
+   the reason, and applies changes immediately over IPC (no restart). */
+function _renderHotkeyStatus(status) {
+  const el = document.getElementById('settings-hotkey-status');
+  if (!el || !status) return;
+  el.className = status.ok ? 'is-ok' : 'is-err';
+  if (status.ok) {
+    el.textContent = `✓ Active: ${status.active}`;
+  } else {
+    const fallback = status.active
+      ? ` Still using ${status.active}.`
+      : ' No global hotkey is active.';
+    el.textContent = `✗ ${status.accelerator} unregistered (${status.reason}): `
+      + `${status.detail}${fallback}`;
+  }
+}
+
+async function _refreshHotkeyStatus() {
+  if (!window.ridian || typeof window.ridian.hotkeyStatus !== 'function') return;
+  try { _renderHotkeyStatus(await window.ridian.hotkeyStatus()); } catch (_e) { /* dev browser */ }
+}
+
+async function _applyHotkeyFromForm() {
+  if (!window.ridian || typeof window.ridian.applyHotkey !== 'function') return;
+  const input = els.settingsForm && els.settingsForm.elements.namedItem('operator_global_hotkey');
+  if (!input) return;
+  try {
+    _renderHotkeyStatus(await window.ridian.applyHotkey(input.value.trim()));
+  } catch (_e) { /* dev browser without IPC */ }
+}
+
 // v4.9: Settings is a FULL-PAGE view in the chat pane's grid cell — not a
 // modal. The rail stays; back returns to the chat.
 function openSettings() {
@@ -3233,6 +3268,7 @@ function openSettings() {
   // described the present.
   _qbSetStatus('');
   _qbRefreshStatus();
+  _refreshHotkeyStatus();   // v6.5: live registration state, never assumed
 }
 
 // Verified-state dot helper: null = neutral (unverified), true = verified
@@ -3326,6 +3362,9 @@ async function saveSettings(e) {
     setTimeout(() => {
       if (els.settingsStatus && els.settingsStatus.textContent === 'Settings saved.') setSettingsStatus('');
     }, 2500);
+    // v6.5: apply the (possibly changed) global hotkey NOW — no restart.
+    // The status line under the field tells the truth either way.
+    _applyHotkeyFromForm();
     // A save can change the QuickBooks environment — the status line must
     // reflect it immediately (e.g. show the reconnect-needed mismatch),
     // not wait for the modal to be reopened. Suppressed while the Connect

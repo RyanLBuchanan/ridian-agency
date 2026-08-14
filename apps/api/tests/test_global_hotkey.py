@@ -26,8 +26,8 @@ pytestmark = pytest.mark.skipif(_NODE is None, reason="node is not on PATH")
 def _run(js_body: str) -> dict:
     """Execute a snippet against the real hotkey.js and return its JSON."""
     script = (
-        f"const {{ registerGlobalHotkey, validateAccelerator, DEFAULT_ACCELERATOR }} = "
-        f"require({json.dumps(str(_HOTKEY_JS))});\n"
+        f"const {{ registerGlobalHotkey, applyHotkey, validateAccelerator, "
+        f"DEFAULT_ACCELERATOR }} = require({json.dumps(str(_HOTKEY_JS))});\n"
         f"{js_body}\n"
     )
     proc = subprocess.run([_NODE, "-e", script], capture_output=True, text=True,
@@ -48,8 +48,8 @@ def test_registers_successfully_and_binds_the_callback():
       console.log(JSON.stringify({ res, calls, fired }));
     """)
     assert out["res"]["ok"] is True
-    assert out["res"]["accelerator"] == "CommandOrControl+Shift+R"
-    assert out["calls"][0] == ["register", "CommandOrControl+Shift+R"]
+    assert out["res"]["accelerator"] == "CommandOrControl+Alt+R"
+    assert out["calls"][0] == ["register", "CommandOrControl+Alt+R"]
     assert out["fired"] == 1                      # the trigger really is wired
 
 
@@ -62,7 +62,7 @@ def test_taken_when_register_returns_false():
     """)
     assert out["ok"] is False and out["reason"] == "taken"
     assert "another application" in out["detail"].lower()
-    assert "CommandOrControl+Shift+R" in out["detail"]
+    assert "CommandOrControl+Alt+R" in out["detail"]
 
 
 def test_taken_when_already_registered_never_overwrites():
@@ -130,6 +130,106 @@ def test_custom_accelerator_is_honored():
 def test_missing_globalshortcut_is_reported():
     out = _run("console.log(JSON.stringify(registerGlobalHotkey({})));")
     assert out["ok"] is False and out["reason"] == "invalid"
+
+
+# --------------------------------------------------------------------------
+# v6.5: default is Ctrl+ALT+R (never the browser's hard-refresh), the
+# binding is a SETTING applied without restart, and a failed registration
+# surfaces as unregistered — never a fake success.
+# --------------------------------------------------------------------------
+
+def test_default_is_ctrl_alt_r_never_the_browser_hard_refresh():
+    out = _run("console.log(JSON.stringify({ d: DEFAULT_ACCELERATOR }));")
+    assert out["d"] == "CommandOrControl+Alt+R"
+    assert "Shift+R" not in out["d"]              # the stolen combination
+
+
+def test_apply_switches_bindings_and_releases_the_old_one():
+    out = _run("""
+      const held = new Set();
+      const gs = {
+        register: (a) => { held.add(a); return true; },
+        unregister: (a) => held.delete(a),
+        isRegistered: (a) => held.has(a),
+      };
+      registerGlobalHotkey({ globalShortcut: gs });   // boot: default active
+      const res = applyHotkey({ globalShortcut: gs,
+                                currentAccelerator: DEFAULT_ACCELERATOR,
+                                accelerator: 'Control+Alt+Space' });
+      console.log(JSON.stringify({ res, held: [...held] }));
+    """)
+    assert out["res"]["ok"] is True
+    assert out["res"]["active"] == "Control+Alt+Space"
+    assert out["held"] == ["Control+Alt+Space"]   # old binding released
+
+
+def test_failed_apply_surfaces_unregistered_and_restores_the_old_binding():
+    """THE item-3 pin: register() returning false must NEVER read as
+    success — the result says unregistered + why, and the previous binding
+    is given back so the user isn't silently left with nothing."""
+    out = _run("""
+      const held = new Set([DEFAULT_ACCELERATOR]);
+      const gs = {
+        register: (a) => { if (a === 'Control+Alt+T') return false;
+                           held.add(a); return true; },
+        unregister: (a) => held.delete(a),
+        isRegistered: (a) => held.has(a),
+      };
+      const res = applyHotkey({ globalShortcut: gs,
+                                currentAccelerator: DEFAULT_ACCELERATOR,
+                                accelerator: 'Control+Alt+T' });
+      console.log(JSON.stringify({ res, held: [...held] }));
+    """)
+    assert out["res"]["ok"] is False and out["res"]["reason"] == "taken"
+    assert "another application" in out["res"]["detail"].lower()
+    assert out["res"]["active"] == "CommandOrControl+Alt+R"   # restored
+    assert out["held"] == ["CommandOrControl+Alt+R"]
+
+
+def test_invalid_apply_keeps_the_current_binding_untouched():
+    out = _run("""
+      const held = new Set([DEFAULT_ACCELERATOR]);
+      const gs = { register: (a) => { held.add(a); return true; },
+                   unregister: (a) => held.delete(a),
+                   isRegistered: (a) => held.has(a) };
+      const res = applyHotkey({ globalShortcut: gs,
+                                currentAccelerator: DEFAULT_ACCELERATOR,
+                                accelerator: 'R' });
+      console.log(JSON.stringify({ res, held: [...held] }));
+    """)
+    assert out["res"]["reason"] == "invalid"
+    assert out["held"] == ["CommandOrControl+Alt+R"]  # never torn down
+
+
+def test_blank_apply_falls_back_to_the_default():
+    out = _run("""
+      const held = new Set();
+      const gs = { register: (a) => { held.add(a); return true; },
+                   unregister: (a) => held.delete(a),
+                   isRegistered: (a) => held.has(a) };
+      const res = applyHotkey({ globalShortcut: gs, currentAccelerator: '',
+                                accelerator: '   ' });
+      console.log(JSON.stringify(res));
+    """)
+    assert out["ok"] is True and out["active"] == "CommandOrControl+Alt+R"
+
+
+def test_hotkey_setting_round_trips_and_is_wired_everywhere(monkeypatch, tmp_path):
+    """The binding is a first-class setting: settable, loadable, present in
+    the Pydantic contract, the renderer form, and the main process."""
+    from app.main import SettingsUpdate, SettingsView
+    from app.services import settings_service
+    monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "s.json")
+    settings_service.save_settings({"operator_global_hotkey": "Control+Alt+Space"})
+    assert settings_service.load_settings()["operator_global_hotkey"] == "Control+Alt+Space"
+    assert "operator_global_hotkey" in SettingsUpdate.model_fields
+    assert "operator_global_hotkey" in SettingsView.model_fields
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    assert "'operator_global_hotkey'" in app_js            # form field list
+    assert "_applyHotkeyFromForm" in app_js                # applied on save
+    main_js = (_DESKTOP / "main.js").read_text(encoding="utf-8")
+    assert "operator_global_hotkey" in main_js             # startup source
+    assert "hotkey:apply" in main_js                       # no-restart IPC
 
 
 # --------------------------------------------------------------------------

@@ -9,7 +9,7 @@ const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { registerGlobalHotkey, DEFAULT_ACCELERATOR } = require('./hotkey');
+const { registerGlobalHotkey, applyHotkey, DEFAULT_ACCELERATOR } = require('./hotkey');
 
 // v4.4 state-guard: RIDIAN_PORT lets a sandboxed harness run the whole app
 // (supervisor, CSP, renderer origin) on a scratch port so its probes can
@@ -270,7 +270,7 @@ function createWindow() {
 let mainWindow = null;
 let commandBar = null;
 let hotkeyStatus = { ok: false, accelerator: DEFAULT_ACCELERATOR,
-                     reason: 'pending', detail: '' };
+                     reason: 'pending', detail: '', active: '' };
 
 function createCommandBar() {
   if (commandBar && !commandBar.isDestroyed()) return commandBar;
@@ -323,23 +323,52 @@ function wireCommandBarIpc() {
   // The renderer asks whether the hotkey actually registered, so Settings can
   // tell the truth instead of implying a shortcut that does nothing.
   ipcMain.handle('hotkey:status', () => hotkeyStatus);
+  // v6.5: Settings applies a new hotkey WITHOUT a restart. The new binding
+  // is attempted; on failure the previous one is restored and the returned
+  // status says so — the renderer shows it verbatim.
+  ipcMain.handle('hotkey:apply', (_event, accelerator) => {
+    const result = applyHotkey({
+      globalShortcut,
+      currentAccelerator: hotkeyStatus.active || '',
+      accelerator: String(accelerator || ''),
+      onTrigger: toggleCommandBar,
+    });
+    hotkeyStatus = result;
+    return hotkeyStatus;
+  });
 }
 
-function installGlobalHotkey() {
-  hotkeyStatus = registerGlobalHotkey({
-    globalShortcut,
-    accelerator: process.env.RIDIAN_HOTKEY || DEFAULT_ACCELERATOR,
-    onTrigger: toggleCommandBar,
+// v6.5: the hotkey is a SETTING (operator_global_hotkey in the same
+// settings file as everything else). Priority: settings value, then the
+// RIDIAN_HOTKEY env escape hatch, then the default. Read over HTTP — the
+// backend is already up by the time this runs (whenReady awaits it).
+async function resolveConfiguredHotkey() {
+  try {
+    const res = await fetch(`${BACKEND_ORIGIN}/settings`);
+    if (res.ok) {
+      const s = await res.json();
+      const configured = (s.operator_global_hotkey || '').trim();
+      if (configured) return configured;
+    }
+  } catch (_err) { /* backend hiccup — fall through to env/default */ }
+  return process.env.RIDIAN_HOTKEY || DEFAULT_ACCELERATOR;
+}
+
+async function installGlobalHotkey() {
+  const accelerator = await resolveConfiguredHotkey();
+  const result = registerGlobalHotkey({
+    globalShortcut, accelerator, onTrigger: toggleCommandBar,
   });
+  hotkeyStatus = { ...result, active: result.ok ? accelerator : '' };
   if (!hotkeyStatus.ok) {
     // LOUD by contract: the user must never think a dead shortcut is live.
+    // Settings ALSO shows this state persistently (hotkey:status).
     dialog.showErrorBox(
       'Ridian Operator — global shortcut unavailable',
       `${hotkeyStatus.detail}\n\n`
       + 'Everything else works normally; only the global command bar shortcut '
-      + 'is affected. Set a different combination with the RIDIAN_HOTKEY '
-      + 'environment variable (e.g. RIDIAN_HOTKEY="Control+Alt+R") and '
-      + 'restart Ridian.',
+      + 'is affected. Change it in Settings → Advanced → Global hotkey '
+      + '(applies immediately, no restart).',
     );
   }
   return hotkeyStatus;
@@ -383,7 +412,7 @@ app.whenReady().then(async () => {
   if (!backendOk) { app.quit(); return; }          // stranger on the port — refused
   createWindow();
   wireCommandBarIpc();
-  installGlobalHotkey();   // shows an error dialog if the combination is taken
+  await installGlobalHotkey();   // dialog + persistent status if unavailable
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
