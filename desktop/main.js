@@ -187,6 +187,30 @@ if (process.platform === 'win32') {
 // window. This is what a taskbar pin must relaunch (never bare electron.exe).
 const LAUNCHER_PATH = path.join(__dirname, '..', 'Start-Ridian-Agency.bat');
 
+// ---------------------------------------------------------------------------
+// v6.7 single-instance lock. Clicking the pinned shortcut while Ridian is
+// already running used to launch a SECOND instance, which then lost the
+// global-hotkey registration to the first and blamed "another application"
+// — the culprit was Ridian itself. Now: the second launch quits before ANY
+// work (no backend spawn, no hotkey attempt, no window), and the first
+// instance receives 'second-instance' and raises its window.
+// The lock is scoped to the userData path, so sandboxed harness launches
+// (which redirect APPDATA to a scratch profile) contend with each other,
+// never with the real app.
+// ---------------------------------------------------------------------------
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('[ridian] second launch detected — the running instance takes '
+              + 'focus; this one quits without starting anything');
+  app.quit();
+}
+
+app.on('second-instance', () => {
+  console.log('[ridian] second-instance signal — raising the existing window');
+  if (!app.isReady()) return;   // mid-boot: the window will show on its own
+  raiseMainWindow();
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     title: 'Ridian Agency',
@@ -360,6 +384,10 @@ async function installGlobalHotkey() {
     globalShortcut, accelerator, onTrigger: toggleCommandBar,
   });
   hotkeyStatus = { ...result, active: result.ok ? accelerator : '' };
+  // Observable in stdout: the single-instance test asserts a second launch
+  // NEVER prints this line (it must quit before any registration attempt).
+  console.log(`[ridian] hotkey ${result.ok ? 'registered' : 'FAILED'}: ${accelerator}`
+              + (result.ok ? '' : ` (${result.reason})`));
   if (!hotkeyStatus.ok) {
     // LOUD by contract: the user must never think a dead shortcut is live.
     // Settings ALSO shows this state persistently (hotkey:status).
@@ -405,6 +433,9 @@ function applyContentSecurityPolicy() {
 }
 
 app.whenReady().then(async () => {
+  // v6.7: a lockless (second) instance is already quitting — ready can still
+  // fire on some platforms before the quit lands. Do NOTHING here.
+  if (!gotTheLock) return;
   if (!sandboxEnvPreflight()) { app.quit(); return; }
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
