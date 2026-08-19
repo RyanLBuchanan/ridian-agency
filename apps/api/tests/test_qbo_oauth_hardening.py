@@ -27,8 +27,6 @@ from app.services import quickbooks_service as qb
 @pytest.fixture(autouse=True)
 def _isolated_token(monkeypatch, tmp_path):
     monkeypatch.setattr(qb, "TOKEN_PATH", tmp_path / "quickbooks_token.json")
-    monkeypatch.setattr(qb, "TLS_CERT_PATH", tmp_path / "cb_cert.pem")
-    monkeypatch.setattr(qb, "TLS_KEY_PATH", tmp_path / "cb_key.pem")
     monkeypatch.setattr(qb, "load_settings", lambda: {
         "quickbooks_client_id": "cid-test",
         "quickbooks_client_secret": "secret-test",
@@ -63,19 +61,12 @@ def _seed_token(env="sandbox", fresh=True):
 # ==========================================================================
 
 def _get(url):
-    # v6.3: the listener serves TLS — https with verification off, like a
-    # browser after the one-time self-signed interstitial.
-    import ssl
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url)
     # Never follow redirects — the tests assert on the redirect itself.
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *a, **kw):
             return None
-    opener = urllib.request.build_opener(
-        _NoRedirect, urllib.request.HTTPSHandler(context=ctx))
+    opener = urllib.request.build_opener(_NoRedirect)
     try:
         resp = opener.open(req, timeout=5)
         return resp.status, dict(resp.headers), resp.read()
@@ -110,7 +101,7 @@ def test_state_is_random_per_flow_and_validated(monkeypatch):
     # Forged callback with the WRONG state: 302 to /rejected, code ignored,
     # NOTHING exchanged — and the pending flow keeps waiting.
     status, headers, body_ = _get(
-        f"https://127.0.0.1:18123/callback?code=EVIL&realmId=1&state=forged")
+        f"http://127.0.0.1:18123/callback?code=EVIL&realmId=1&state=forged")
     assert status == 302 and headers.get("Location") == "/rejected"
     assert exchanged == []
     with qb._flow_lock:
@@ -118,7 +109,7 @@ def test_state_is_random_per_flow_and_validated(monkeypatch):
 
     # The REAL callback with the right state completes the flow.
     status, headers, body_ = _get(
-        f"https://127.0.0.1:18123/callback?code=good&realmId=9341&state={state}")
+        f"http://127.0.0.1:18123/callback?code=good&realmId=9341&state={state}")
     assert status == 302 and headers.get("Location") == "/connected"
     _wait_flow_done()
     assert exchanged, "valid state must reach the token exchange"
@@ -129,7 +120,7 @@ def test_state_is_random_per_flow_and_validated(monkeypatch):
     q2 = parse_qs(urlparse(begun2["auth_url"]).query)
     state2 = q2["state"][0]
     assert state2 != state
-    _get(f"https://127.0.0.1:18123/callback?code=x&realmId=1&state={state2}")
+    _get(f"http://127.0.0.1:18123/callback?code=x&realmId=1&state={state2}")
     _wait_flow_done()
 
 
@@ -139,9 +130,9 @@ def test_success_page_carries_no_oauth_params(monkeypatch):
     begun = qb.begin_oauth()
     from urllib.parse import parse_qs, urlparse
     state = parse_qs(urlparse(begun["auth_url"]).query)["state"][0]
-    _get(f"https://127.0.0.1:18124/callback?code=abc123&realmId=77&state={state}")
+    _get(f"http://127.0.0.1:18124/callback?code=abc123&realmId=77&state={state}")
     # The clean page the 302 points at: static HTML, no code/state/realmId.
-    status, _h, body = _get("https://127.0.0.1:18124/connected")
+    status, _h, body = _get("http://127.0.0.1:18124/connected")
     assert status == 200
     text = body.decode()
     for leaked in ("abc123", state, "realmId", "code="):
@@ -156,7 +147,7 @@ def test_mismatch_only_flow_times_out_without_exchanging(monkeypatch):
     monkeypatch.setattr(qb.httpx, "post",
                         lambda *a, **kw: exchanged.append(1) or _Resp(500))
     qb.begin_oauth()
-    _get("https://127.0.0.1:18125/callback?code=EVIL&realmId=1&state=wrong")
+    _get("http://127.0.0.1:18125/callback?code=EVIL&realmId=1&state=wrong")
     _wait_flow_done(timeout=20)
     assert exchanged == []                        # refused: never exchanged
     with qb._flow_lock:
@@ -164,15 +155,16 @@ def test_mismatch_only_flow_times_out_without_exchanging(monkeypatch):
 
 
 def test_redirect_uri_matches_the_registered_intuit_strings_exactly():
-    """v6.4: Intuit PRODUCTION rejects localhost/IP URIs, so production
+    """v6.6: Intuit PRODUCTION rejects localhost/IP URIs, so production
     consents use the registered public bounce URI EXACTLY —
-    https://ridiantechnologies.com/qbo/callback (site commit 68d01af 302s
-    it to the local listener). Sandbox keeps the direct localhost URI.
-    Both byte-pinned; the port stays fixed, never dynamic."""
+    https://ridiantechnologies.com/qbo/callback (the site 302s it to the
+    local listener). Intuit never sees the loopback leg, so the local
+    listener is plain HTTP and sandbox uses the direct http://localhost
+    URI. Both byte-pinned; the port stays fixed, never dynamic."""
     assert qb.PROD_REDIRECT_URI == "https://ridiantechnologies.com/qbo/callback"
-    assert qb.LOCAL_REDIRECT_URI == "https://localhost:8123/callback"
+    assert qb.LOCAL_REDIRECT_URI == "http://localhost:8123/callback"
     assert qb._redirect_uri("production") == "https://ridiantechnologies.com/qbo/callback"
-    assert qb._redirect_uri("sandbox") == "https://localhost:8123/callback"
+    assert qb._redirect_uri("sandbox") == "http://localhost:8123/callback"
     assert qb.REDIRECT_PORT == 8123               # fixed, never dynamic
 
 
@@ -198,8 +190,8 @@ def test_production_consent_and_exchange_carry_the_same_public_uri(monkeypatch):
     q = parse_qs(urlparse(begun["auth_url"]).query)
     assert q["redirect_uri"][0] == "https://ridiantechnologies.com/qbo/callback"
     state = q["state"][0]
-    # The browser still ARRIVES at the local TLS listener via the bounce.
-    _get(f"https://127.0.0.1:18127/callback?code=abc&realmId=7&state={state}")
+    # The browser still ARRIVES at the local plain-HTTP listener via the bounce.
+    _get(f"http://127.0.0.1:18127/callback?code=abc&realmId=7&state={state}")
     _wait_flow_done()
     assert len(exchanges) == 1
     assert exchanges[0]["redirect_uri"] == "https://ridiantechnologies.com/qbo/callback"
@@ -217,40 +209,10 @@ def test_sandbox_consent_and_exchange_keep_the_localhost_uri(monkeypatch):
     begun = qb.begin_oauth()                       # fixture env: sandbox
     from urllib.parse import parse_qs, urlparse
     q = parse_qs(urlparse(begun["auth_url"]).query)
-    assert q["redirect_uri"][0] == "https://localhost:8123/callback"
-    _get(f"https://127.0.0.1:18128/callback?code=x&realmId=1&state={q['state'][0]}")
+    assert q["redirect_uri"][0] == "http://localhost:8123/callback"
+    _get(f"http://127.0.0.1:18128/callback?code=x&realmId=1&state={q['state'][0]}")
     _wait_flow_done()
-    assert exchanges[0]["redirect_uri"] == "https://localhost:8123/callback"
-
-
-def test_callback_listener_actually_serves_tls(monkeypatch):
-    """The registered URI is https, so the loopback listener must complete
-    a real TLS handshake with a localhost cert (SANs: localhost+127.0.0.1)."""
-    import ssl
-    monkeypatch.setattr(qb, "REDIRECT_PORT", 18126)
-    monkeypatch.setattr(qb.httpx, "post", lambda *a, **kw: _Resp(500))
-    begun = qb.begin_oauth()
-    from urllib.parse import parse_qs, urlparse
-    state = parse_qs(urlparse(begun["auth_url"]).query)["state"][0]
-    # A PLAIN-HTTP probe must not complete (TLS socket rejects it)...
-    with pytest.raises(Exception):
-        urllib.request.urlopen("http://127.0.0.1:18126/connected", timeout=3)
-    # ...while HTTPS does, and the served cert names localhost.
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    import socket
-    with socket.create_connection(("127.0.0.1", 18126), timeout=5) as sock:
-        with ctx.wrap_socket(sock, server_hostname="localhost") as tls:
-            der = tls.getpeercert(binary_form=True)
-    from cryptography import x509
-    cert = x509.load_der_x509_certificate(der)
-    sans = cert.extensions.get_extension_for_class(
-        x509.SubjectAlternativeName).value
-    assert "localhost" in sans.get_values_for_type(x509.DNSName)
-    # End the flow: valid-state callback (no code) surfaces the timeout error.
-    _get(f"https://127.0.0.1:18126/callback?state={state}")
-    _wait_flow_done()
+    assert exchanges[0]["redirect_uri"] == "http://localhost:8123/callback"
 
 
 # ==========================================================================

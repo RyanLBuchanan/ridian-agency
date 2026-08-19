@@ -44,21 +44,12 @@ def _port_is_held(port: int) -> bool:
 
 
 def _callback(port: int, query: str) -> None:
-    # v6.3: the QBO listener serves TLS (self-signed localhost cert) —
-    # connect via https with verification off, exactly as a browser does
-    # after the one-time interstitial. 127.0.0.1 explicitly: urllib won't
-    # fall back across address families the way browsers do, and the
-    # listener binds IPv4.
-    import ssl
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    urllib.request.urlopen(f"https://127.0.0.1:{port}/callback?{query}",
-                           timeout=5, context=ctx)
+    # v6.6: both listeners are plain HTTP again — Intuit only ever sees the
+    # public https bounce URI, so the loopback leg needs no TLS.
+    urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?{query}", timeout=5)
 
 
 def _google_callback(port: int, query: str) -> None:
-    # Google's loopback listener remains plain HTTP.
     urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?{query}", timeout=5)
 
 
@@ -83,8 +74,6 @@ def _reset_flow_state(monkeypatch, tmp_path):
     monkeypatch.setattr(qbs, "_flow_state", {"in_progress": False, "error": ""})
     monkeypatch.setattr(gds, "_flow_state", {"in_progress": False, "error": ""})
     monkeypatch.setattr(qbs, "TOKEN_PATH", tmp_path / "qb_token.json")
-    monkeypatch.setattr(qbs, "TLS_CERT_PATH", tmp_path / "cb_cert.pem")
-    monkeypatch.setattr(qbs, "TLS_KEY_PATH", tmp_path / "cb_key.pem")
     monkeypatch.setattr(gds, "TOKEN_PATH", tmp_path / "google_token.json")
     monkeypatch.setattr(gds, "CREDENTIALS_PATH", tmp_path / "google_credentials.json")
     monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "settings.json")

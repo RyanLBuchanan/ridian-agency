@@ -28,7 +28,6 @@ import http.server
 import json
 import logging
 import secrets
-import ssl
 import threading
 import time
 import urllib.parse
@@ -60,17 +59,19 @@ PROD_APP_URL = "https://qbo.intuit.com"
 SANDBOX_APP_URL = "https://sandbox.qbo.intuit.com"
 SCOPE = "com.intuit.quickbooks.accounting"
 REDIRECT_PORT = 8123
-# v6.4: Intuit PRODUCTION rejects localhost/IP redirect URIs entirely, so
+# v6.6: Intuit PRODUCTION rejects localhost/IP redirect URIs entirely, so
 # production consents route through the registered public URI —
-# https://ridiantechnologies.com/qbo/callback — whose site (site commit
-# 68d01af) answers with a 302 to https://localhost:8123/callback preserving
-# code/state/realmId byte-for-byte. The browser therefore still ARRIVES at
-# the local TLS listener below; only the URI Intuit sees differs. Intuit
-# requires the token exchange to repeat the authorize request's
-# redirect_uri, so BOTH use _redirect_uri(env) from one env snapshot.
-# Sandbox keeps the direct localhost URI (accepted for Development keys).
+# https://ridiantechnologies.com/qbo/callback — whose site answers with a
+# 302 to the local listener preserving code/state/realmId byte-for-byte.
+# Intuit only ever SEES the public https URI, so the loopback leg carries
+# no TLS obligation: the listener is plain HTTP (the d1b0330 self-signed
+# TLS wrap is REMOVED — its browser interstitial was a demo liability the
+# bounce made unnecessary). Intuit requires the token exchange to repeat
+# the authorize request's redirect_uri, so BOTH use _redirect_uri(env)
+# from one env snapshot. Sandbox uses the direct http://localhost URI
+# (accepted for Development keys).
 PROD_REDIRECT_URI = "https://ridiantechnologies.com/qbo/callback"
-LOCAL_REDIRECT_URI = f"https://localhost:{REDIRECT_PORT}/callback"
+LOCAL_REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 
 
 def _redirect_uri(env: str) -> str:
@@ -79,11 +80,12 @@ def _redirect_uri(env: str) -> str:
     and the token exchange can never disagree within one flow."""
     return PROD_REDIRECT_URI if env == "production" else LOCAL_REDIRECT_URI
 
-# Self-signed localhost cert for the callback listener, generated once per
-# machine into the data dir (runtime files, never in the binary). 10-year
-# validity; regenerated automatically if deleted.
-TLS_CERT_PATH = data_dir() / "qbo_callback_cert.pem"
-TLS_KEY_PATH = data_dir() / "qbo_callback_key.pem"
+
+# v6.6: leftover self-signed cert files from the removed TLS listener
+# (d1b0330 .. 8846ca2). Deleted opportunistically at flow start; the
+# state-guard keeps test contexts from ever touching the real data dir.
+_LEGACY_TLS_FILES = (data_dir() / "qbo_callback_cert.pem",
+                     data_dir() / "qbo_callback_key.pem")
 _MINOR_VERSION = "75"   # Intuit ignores <75 since 2025-08-01 (75 is the floor)
 
 
@@ -253,53 +255,6 @@ _flow_lock = threading.Lock()
 _flow_state: dict = {"in_progress": False, "error": ""}
 
 
-def _ensure_tls_cert() -> tuple[Path, Path]:
-    """Self-signed cert for CN=localhost (SANs: localhost, 127.0.0.1),
-    generated once per machine, reused until deleted. Private key stays in
-    the user's data dir next to the other runtime credentials — it protects
-    only a loopback hop on this machine."""
-    if TLS_CERT_PATH.exists() and TLS_KEY_PATH.exists():
-        return TLS_CERT_PATH, TLS_KEY_PATH
-    guard_real_state_write(TLS_KEY_PATH)   # tests never write real state
-    import datetime as _dt
-    import ipaddress
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-
-    key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
-    now = _dt.datetime.now(_dt.timezone.utc)
-    cert = (x509.CertificateBuilder()
-            .subject_name(name).issuer_name(name)
-            .public_key(key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now - _dt.timedelta(days=1))
-            .not_valid_after(now + _dt.timedelta(days=3650))
-            .add_extension(x509.SubjectAlternativeName([
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-            ]), critical=False)
-            .sign(key, hashes.SHA256()))
-    TLS_KEY_PATH.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()))
-    TLS_CERT_PATH.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    log.info("quickbooks.tls_cert_generated path=%s", TLS_CERT_PATH)
-    return TLS_CERT_PATH, TLS_KEY_PATH
-
-
-def _wrap_tls(server: http.server.HTTPServer) -> None:
-    """v6.3: the callback listener serves HTTPS so the redirect URI can
-    byte-match the https://localhost URI registered with Intuit."""
-    cert, key = _ensure_tls_cert()
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(str(cert), str(key))
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-
-
 class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     """v6.2 hardened callback.
 
@@ -360,30 +315,30 @@ def begin_oauth() -> dict:
     Raises immediately (with an operator-actionable message) when creds are
     missing, a flow is already pending, or the callback port can't bind."""
     cid, _secret = _credentials()
+    # v6.6: the TLS listener is gone — sweep its leftover cert files. The
+    # state-guard refuses real-store writes from tests; failures are moot.
+    for legacy in _LEGACY_TLS_FILES:
+        try:
+            guard_real_state_write(legacy)
+            legacy.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
     with _flow_lock:
         if _flow_state["in_progress"]:
             raise QuickBooksError(
                 "A QuickBooks connect attempt is already waiting for browser "
                 "consent. Finish it or wait for it to time out.", 409)
         try:
+            # v6.6: plain HTTP — Intuit only ever sees the public https
+            # bounce URI; the loopback leg needs no TLS (and the self-signed
+            # interstitial it required is gone with it).
             server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), _CallbackHandler)
-            _wrap_tls(server)   # v6.3: https://localhost — matches Intuit's list
         except OSError as exc:
             log.warning("quickbooks.oauth_bind_failed port=%s type=%s",
                         REDIRECT_PORT, type(exc).__name__)
             raise QuickBooksError(
                 f"Could not open the OAuth callback port {REDIRECT_PORT} — "
                 "another app is using it. Close it and try again.", 500) from exc
-        except Exception as exc:  # noqa: BLE001 — cert generation/load failed
-            try:
-                server.server_close()   # the bind succeeded — free the port
-            except Exception:  # noqa: BLE001
-                pass
-            log.warning("quickbooks.oauth_tls_failed type=%s", type(exc).__name__)
-            raise QuickBooksError(
-                "Could not prepare the HTTPS callback listener "
-                f"({type(exc).__name__}). Delete {TLS_CERT_PATH.name}/"
-                f"{TLS_KEY_PATH.name} in the data folder and try again.", 500) from exc
         _flow_state.update(in_progress=True, error="")
     server.ridian_result = {}
     # v6.2: per-flow cryptographically random state, bound to THIS listener.
