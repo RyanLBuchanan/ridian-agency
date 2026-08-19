@@ -27,6 +27,11 @@ def _ctx(tmp_path, record):
         return None
     for key in ("steps", "tools_used", "artifacts", "errors"):
         record.setdefault(key, [])
+    # v6.7: quantities verify against the PLAIN (non-currency) pool. Tests
+    # seeding stated numbers mean "typed bare in the command" — mirror them.
+    if "user_stated_numbers" in record:
+        record.setdefault("user_stated_plain_numbers",
+                          list(record["user_stated_numbers"]))
     return OperatorContext(folder=Path(tmp_path), record=record, emit=_emit)
 
 

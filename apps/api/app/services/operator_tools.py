@@ -1939,8 +1939,24 @@ _STATED_NUM_RE = _re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\$?\d+(?:\.\d+)?"
 # v6.0 Phase 6 adds "document": a number that appears in a document THIS RUN
 # actually ingested (read_document → record["document_numbers"]) — a client's
 # own RFP figure. Absent from every ingested document, it still refuses.
+# v6.7 adds "user-selected-item": the operator CLICKED a catalog button whose
+# machine token carried the QuickBooks item id; _apply_item_selection_answer
+# (operator_service — the sole writer) validated that id against the ids the
+# ask actually OFFERED and recorded it. The gate then matches lines by ID
+# EQUALITY — never by display text.
 _ALLOWED_LINE_SOURCES = frozenset({"user-stated", "qbo-item", "deal-record",
-                                   "document"})
+                                   "document", "user-selected-item"})
+
+# The machine token a catalog button prefills into the composer. Parsed by
+# operator_service._apply_item_selection_answer; validated against
+# record["offered_catalog_items"] (snapshot taken when the ask was emitted).
+ITEM_TOKEN_RE = _re.compile(r"\[\[qbo-item:([A-Za-z0-9_-]+)\]\]")
+
+
+def _selected_item(operator, item_id) -> dict | None:
+    """The recorded selection for this id, or None. ID equality only."""
+    sel = operator.record.get("selected_catalog_items") or {}
+    return sel.get(str(item_id))
 
 
 def _amount_matches_deal(deal_id: str, amount) -> bool:
@@ -1972,12 +1988,58 @@ def extract_stated_numbers(text: str) -> list[float]:
     return out
 
 
+def extract_plain_numbers(text: str) -> list[float]:
+    """v6.7: numbers the operator typed BARE — without a $ sign. Dollars are
+    never quantities: '$500' sanctions amounts and rates, never a count.
+    (The cross-purpose hole this closes: with a quantity question pending,
+    typing a NEW request containing '$500' put 500 into the flat stated
+    pool, where the quantity gate would have accepted qty=500.)"""
+    out: list[float] = []
+    for m in _STATED_NUM_RE.findall(text or ""):
+        if m.startswith("$"):
+            continue
+        try:
+            v = float(m.replace(",", ""))
+        except ValueError:
+            continue
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def absorb_stated_numbers(record: dict, text: str) -> None:
+    """THE single absorption path for operator-typed numbers (intake and
+    resume answers): the full pool sanctions amounts/rates/prices; the
+    plain (non-currency) pool is the only thing that can sanction a
+    QUANTITY."""
+    stated = record.setdefault("user_stated_numbers", [])
+    for v in extract_stated_numbers(text):
+        if v not in stated:
+            stated.append(v)
+    plain = record.setdefault("user_stated_plain_numbers", [])
+    for v in extract_plain_numbers(text):
+        if v not in plain:
+            plain.append(v)
+
+
 def _is_stated(operator, value) -> bool:
     try:
         v = float(value)
     except (TypeError, ValueError):
         return False
     return any(abs(v - s) < 0.005 for s in operator.record.get("user_stated_numbers", []))
+
+
+def _is_stated_plain(operator, value) -> bool:
+    """v6.7 quantity provenance: true only for numbers the operator typed
+    WITHOUT a currency mark. Strict — a record with no plain pool sanctions
+    nothing (never falls back to the full pool)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return any(abs(v - s) < 0.005
+               for s in operator.record.get("user_stated_plain_numbers", []))
 
 
 def _invoice_sig(customer_id: str, lines: list) -> str:
@@ -2103,9 +2165,11 @@ async def create_quickbooks_invoice(
                 "reason": "customer_unresolved"}
     cust = matches[0]
 
-    async def _park(question: str, reason: str) -> dict:
+    async def _park(question: str, reason: str, summary: str = "") -> dict:
         await operator.emit_needs_input(
-            question=question, context_hint="QuickBooks invoice — value needed from you")
+            question=question,
+            context_hint="QuickBooks invoice — value needed from you",
+            task_summary=summary or f"Invoice for {cust['name']} — waiting on your answer")
         return {"error": f"BLOCKED: {question} A needs-input question was raised; "
                          "WAIT for the operator. Never invent a value.",
                 "reason": reason}
@@ -2117,14 +2181,73 @@ async def create_quickbooks_invoice(
             return {"error": "each line must be an object", "reason": "bad_args"}
         ln = dict(ln)
         sources: dict = {}
-        if ln.get("item_name"):
+        # v6.7: an item ID takes precedence over display text — but ONLY an
+        # id the operator actually selected (clicked). ID equality, in code.
+        if ln.get("item_id") and not ln.get("item_name"):
+            chosen = _selected_item(operator, ln["item_id"])
+            if chosen is None:
+                return await _park(
+                    f"Item id {ln['item_id']} isn't one you selected — pick a "
+                    "service from the buttons, or name it.", "item_unverified")
+            ln["item_id"] = str(ln["item_id"])
+            sources["item_id"] = "user-selected-item"
+            if ln.get("unit_price") is None:
+                ln["unit_price"] = chosen["unit_price"]
+                sources["unit_price"] = "user-selected-item"
+            elif _is_stated(operator, ln["unit_price"]):
+                sources["unit_price"] = "user-stated"
+            else:
+                return await _park(
+                    f"What rate should I use for {chosen['name']}? "
+                    f"({ln['unit_price']} wasn't something you stated; the "
+                    f"catalog price is {chosen['unit_price']}.)",
+                    "line_value_unverified")
+            _line_state = (f"Invoice for {cust['name']} — {chosen['name']} "
+                           f"${ln['unit_price']} — quantity needed")
+            if ln.get("qty") is None:
+                return await _park(
+                    f"How many of '{chosen['name']}' should I invoice?",
+                    "line_value_missing", _line_state)
+            if not _is_stated_plain(operator, ln["qty"]):
+                return await _park(
+                    f"Confirm the quantity for '{chosen['name']}' — "
+                    f"{ln['qty']} isn't a count you typed (dollar amounts "
+                    "don't count as quantities).", "line_value_unverified",
+                    _line_state)
+            sources["qty"] = "user-stated"
+            ln["_amount"] = round(float(ln["qty"]) * float(ln["unit_price"]), 2)
+        elif ln.get("item_name"):
             if items is None:
                 items = await asyncio.to_thread(quickbooks_service.list_items)
             im = [i for i in items if i["name"].strip().lower() == str(ln["item_name"]).strip().lower()]
             if len(im) != 1:
-                return await _park(
-                    f'Which product/service is "{ln["item_name"]}"? It must match '
-                    "a real QuickBooks item.", "item_unresolved")
+                # v6.7: the ask carries the catalog as SELECTABLE BUTTONS.
+                # Each button prefills a machine token carrying the ITEM ID —
+                # never display text that would be matched back later. The
+                # offered set is snapshot on the record so the selection
+                # applier can refuse ids that were never offered. Clicking
+                # fills the composer (compose action — does NOT submit);
+                # the operator types the quantity; free text stays open.
+                operator.record["offered_catalog_items"] = {
+                    str(i["id"]): {"name": i["name"],
+                                   "unit_price": i["unit_price"]}
+                    for i in items}
+                await operator.emit_needs_input(
+                    question=(f'Which product/service is "{ln["item_name"]}"? '
+                              "Pick one below (then type the quantity), or "
+                              "describe it in your own words."),
+                    context_hint="QuickBooks invoice — pick the catalog item",
+                    options=[{"label": f"{i['name']} — ${i['unit_price']}",
+                              "action": "compose",
+                              "prefill": f"[[qbo-item:{i['id']}]] {i['name']} × "}
+                             for i in items],
+                    task_summary=(f"Invoice for {cust['name']} — service needed "
+                                  f"for \"{ln.get('item_name', '')}\""),
+                )
+                return {"error": (f"BLOCKED: '{ln['item_name']}' did not match "
+                                  "one QuickBooks item. The operator was shown "
+                                  "the catalog as buttons; WAIT for the answer."),
+                        "reason": "item_unresolved"}
             ln["item_id"] = im[0]["id"]
             sources["item_id"] = "qbo-item"
             # Rate: the catalog's price ("qbo-item") unless the operator
@@ -2139,16 +2262,21 @@ async def create_quickbooks_invoice(
                     f"What rate should I use for {ln['item_name']}? "
                     f"({ln['unit_price']} wasn't something you stated; the catalog "
                     f"price is {im[0]['unit_price']}.)", "line_value_unverified")
-            # Quantity: REQUIRED and operator-stated. No silent qty=1.
+            # Quantity: REQUIRED and operator-stated as a BARE number. No
+            # silent qty=1, and (v6.7) no dollar figure moonlighting as a
+            # count — "$500" typed anywhere never sanctions qty=500.
+            _line_state = (f"Invoice for {cust['name']} — {ln['item_name']} "
+                           f"${ln['unit_price']} — quantity needed")
             if ln.get("qty") is None:
                 return await _park(
                     f"How many of '{ln['item_name']}' should I invoice?",
-                    "line_value_missing")
-            if not _is_stated(operator, ln["qty"]):
+                    "line_value_missing", _line_state)
+            if not _is_stated_plain(operator, ln["qty"]):
                 return await _park(
                     f"Confirm the quantity for '{ln['item_name']}' — "
-                    f"{ln['qty']} wasn't something you stated.",
-                    "line_value_unverified")
+                    f"{ln['qty']} isn't a count you typed (dollar amounts "
+                    "don't count as quantities).",
+                    "line_value_unverified", _line_state)
             sources["qty"] = "user-stated"
             ln["_amount"] = round(float(ln["qty"]) * float(ln["unit_price"]), 2)
         else:

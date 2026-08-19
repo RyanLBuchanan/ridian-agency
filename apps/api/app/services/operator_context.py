@@ -119,6 +119,7 @@ class OperatorContext:
         self, *, question: str, context_hint: str = "",
         options: "list[dict] | None" = None,
         buttons_only: bool = False,
+        task_summary: str = "",
     ) -> dict:
         """Record a missing-information request + broadcast it to the renderer.
 
@@ -143,6 +144,12 @@ class OperatorContext:
             # typed text can never satisfy the gate, so the renderer locks
             # the composer instead of letting a submit silently no-op.
             "buttons_only": bool(buttons_only),
+            # v6.7: one line of PENDING-TASK state for the renderer's
+            # persistent strip — what's collected so far and what's missing
+            # ("Invoice for Sandra Dibeler — AI Discovery $250 — quantity
+            # needed."), so the ask never lives only in a scrolled-away
+            # chat bubble. Blank = the strip shows the question itself.
+            "task_summary": (task_summary or "").strip(),
         }
         if "needs_input" not in self.record:
             self.record["needs_input"] = []

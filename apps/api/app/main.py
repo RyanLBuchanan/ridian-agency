@@ -1330,6 +1330,14 @@ async def operations_upload_source(operation_id: str, file: UploadFile = File(..
     ))
 
 
+@app.post("/operations/{operation_id}/dismiss")
+async def operations_dismiss(operation_id: str) -> dict:
+    """v6.7: explicit cancel for a pending task — drops the live session and
+    marks the persisted record cancelled. The renderer's pending-task strip
+    calls this from its Cancel button."""
+    return operator_service.dismiss_operation(operation_id)
+
+
 @app.get("/operations/recent")
 async def operations_recent(limit: int = 20) -> dict:
     return {"operations": operation_log_service.list_recent(limit=limit)}

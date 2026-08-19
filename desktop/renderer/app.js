@@ -4660,14 +4660,67 @@ function _opSetAnswerMode(mode) {
   }
   if (OPERATOR.command) {
     OPERATOR.command.disabled = lock;
+    // v6.7: the composer NEVER carries the question text — not as a value
+    // and not as a question-length placeholder that reads as prefilled
+    // content. The question lives in the chip and the pending strip.
     OPERATOR.command.setAttribute(
       'placeholder',
       lock ? 'Use the buttons below to approve or cancel.'
-           : (mode && q ? `Answer: ${q}` : _COMPOSER_PLACEHOLDER),
+           : (mode ? 'Type your answer…' : _COMPOSER_PLACEHOLDER),
     );
   }
+  _opRenderPendingStrip(mode);
   _opUpdateSendEnabled();
   if (!mode) _opHideOptionsRow();
+}
+
+/* v6.7: a pending question's answer is usually short (a number, a name, a
+   choice). A long imperative sentence is far more likely a NEW task — ask
+   instead of silently consuming it. Deterministic heuristic, UI-level only:
+   the backend gates remain the real protection either way. */
+function _opLooksLikeNewTask(text) {
+  const t = (text || '').trim();
+  if (/^\[\[qbo-item:/.test(t)) return false;   // catalog-button prefill
+  const imperative = /^(create|make|build|draft|write|research|invoice|add|update|merge|delete|remove|restore|export|send|list|show|prep|triage|schedule|run)\b/i;
+  return imperative.test(t) && t.length >= 40;
+}
+
+function _opShowPendingDecision(command) {
+  const decision = document.getElementById('operator-pending-decision');
+  operatorState.pendingDecisionText = command;
+  if (decision) decision.classList.remove('hidden');
+  _opSetStatus('That reads like a new task — choose below whether it answers '
+               + 'the pending question or starts fresh.', 'err');
+}
+
+async function _opCancelPendingTask() {
+  const opId = operatorState.answerMode && operatorState.active && operatorState.active.id;
+  _opSetAnswerMode(null);
+  _opSetStatus('Pending task cancelled.', 'ok');
+  if (!opId) return;
+  try {
+    await fetch(`${BACKEND}/operations/${encodeURIComponent(opId)}/dismiss`,
+                { method: 'POST' });
+    _opSetStatusDot('failed');   // the run is over; reflect non-completion
+    _railThreadsFill();          // history stops showing "needs attention"
+  } catch (_e) { /* backend hiccup — answer mode is already disarmed */ }
+}
+
+/* v6.7: persistent pending-task strip — collected state + explicit
+   cancel / new-task affordances, pinned above the composer. */
+function _opRenderPendingStrip(mode) {
+  const strip = document.getElementById('operator-pending-strip');
+  const text = document.getElementById('operator-pending-strip-text');
+  const decision = document.getElementById('operator-pending-decision');
+  if (!strip || !text) return;
+  operatorState.pendingDecisionText = null;
+  if (decision) decision.classList.add('hidden');
+  if (!mode) {
+    strip.classList.add('hidden');
+    return;
+  }
+  text.textContent = (mode.summary || mode.question || '').replace(/\s+/g, ' ').trim();
+  strip.classList.remove('hidden');
 }
 
 function _opSetStatusDot(kind) {
@@ -5092,8 +5145,18 @@ function _opRenderOptionsRow(need) {
       b.classList.add('btn-ghost');
       b.addEventListener('click', () => {
         if (OPERATOR.command) {
+          // v6.7: compose buttons may PREFILL the composer (the catalog
+          // item token — the ONE sanctioned prefill; the id rides the
+          // token, never display text). Click fills; the operator still
+          // types the rest (e.g. the quantity) and submits.
+          if (opt.prefill) {
+            OPERATOR.command.value = opt.prefill;
+            _opUpdateSendEnabled();
+          }
           if (opt.placeholder) OPERATOR.command.setAttribute('placeholder', opt.placeholder);
           OPERATOR.command.focus();
+          const end = OPERATOR.command.value.length;
+          OPERATOR.command.setSelectionRange(end, end);
         }
       });
     } else if (action === 'upload') {
@@ -5550,6 +5613,7 @@ function _opHandleEvent(evt) {
           opId: operatorState.active && operatorState.active.id,
           question: need.question,
           buttonsOnly: !!need.buttons_only,
+          summary: need.task_summary || '',   // v6.7: the pending strip
         });
       }
       break;
@@ -5602,6 +5666,14 @@ async function _opSubmit(e) {
   // only while answer mode is armed. Dismissing the chip makes this a new
   // command even though a question is still open.
   if (operatorState.answerMode && operatorState.active && operatorState.active.id) {
+    // v6.7: text that reads like a NEW REQUEST while a question is pending
+    // is never silently consumed as the answer — the strip asks which the
+    // operator meant. Bypassed once they choose "It's my answer".
+    if (operatorState.pendingDecisionText !== command && _opLooksLikeNewTask(command)) {
+      _opShowPendingDecision(command);
+      return;
+    }
+    operatorState.pendingDecisionText = null;
     return _opContinue(operatorState.active.id, command);
   }
   // Conversation flow: archive the finished turn into the thread instead of
@@ -6193,7 +6265,23 @@ async function loadOperatorRun(run) {
     operatorState.receipt = log.receipt;
     _opRenderReceipt(log.receipt);
   }
-  (Array.isArray(log.needs_input) ? log.needs_input : []).forEach((n) => _opRenderNeedsInput(n, false));
+  // v6.7: reopening a waiting run from the sidebar lands ON the pending
+  // question — the LAST need renders interactively and answer mode re-arms
+  // with the pending strip, instead of a read-only replay.
+  const needs = Array.isArray(log.needs_input) ? log.needs_input : [];
+  const stillWaiting = !!log.awaiting_input;
+  needs.forEach((n, i) => {
+    const isLive = stillWaiting && i === needs.length - 1;
+    _opRenderNeedsInput(n, isLive);
+    if (isLive) {
+      _opSetAnswerMode({
+        opId: log.id,
+        question: n.question,
+        buttonsOnly: !!n.buttons_only,
+        summary: n.task_summary || '',
+      });
+    }
+  });
 
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
@@ -6742,6 +6830,34 @@ if (_pdfInput) {
 
 const _sourceChipClear = document.getElementById('operator-source-chip-clear');
 if (_sourceChipClear) _sourceChipClear.addEventListener('click', _opClearSource);
+/* v6.7: pending-strip affordances — cancel, and answer-vs-new-task. */
+const _pendingCancelBtn = document.getElementById('operator-pending-cancel');
+if (_pendingCancelBtn) _pendingCancelBtn.addEventListener('click', _opCancelPendingTask);
+const _pendingSendAnswerBtn = document.getElementById('operator-pending-send-answer');
+if (_pendingSendAnswerBtn) {
+  _pendingSendAnswerBtn.addEventListener('click', () => {
+    // The operator confirmed: the typed text IS the answer. Re-submit with
+    // the bypass token set (pendingDecisionText === command skips the ask).
+    document.getElementById('operator-pending-decision').classList.add('hidden');
+    _opSetStatus('');
+    _opSubmit(new Event('submit'));
+  });
+}
+const _pendingNewTaskBtn = document.getElementById('operator-pending-new-task');
+if (_pendingNewTaskBtn) {
+  _pendingNewTaskBtn.addEventListener('click', async () => {
+    // Explicit start-over: cancel the pending task, then run the typed
+    // text as a fresh command.
+    const command = (OPERATOR.command && OPERATOR.command.value || '').trim();
+    document.getElementById('operator-pending-decision').classList.add('hidden');
+    await _opCancelPendingTask();
+    if (command && OPERATOR.command) {
+      OPERATOR.command.value = command;
+      _opSubmit(new Event('submit'));
+    }
+  });
+}
+
 const _answerChipClear = document.getElementById('operator-answer-chip-clear');
 if (_answerChipClear) {
   _answerChipClear.addEventListener('click', () => {

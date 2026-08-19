@@ -31,7 +31,8 @@ from typing import Awaitable, Callable
 
 from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_model
 from ..agents.planner_agent import build_planner_system
-from . import gmail_service, google_drive_service, memory_service, operation_log_service
+from . import (gmail_service, google_drive_service, memory_service,
+               operation_log_service, state_store)
 from .anthropic_runtime import date_line, estimate_cost_usd, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
@@ -40,8 +41,10 @@ from .operator_tools import (
     CONTACT_ADMIN_PROCEED,
     INVOICE_CANCEL,
     INVOICE_PROCEED,
+    ITEM_TOKEN_RE,
     RESTORE_CANCEL,
     RESTORE_PROCEED,
+    absorb_stated_numbers,
     PLANNER_TOOLS,
     PROPOSAL_CANCEL,
     PROPOSAL_PROCEED,
@@ -869,6 +872,66 @@ def _apply_contact_admin_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+def _apply_item_selection_answer(operator: OperatorContext, answer: str) -> str:
+    """v6.7: consume [[qbo-item:ID]] tokens a catalog BUTTON prefilled into
+    the answer — the SOLE writer of record["selected_catalog_items"], same
+    trust model as the invoice/proposal appliers. Each id is validated
+    against record["offered_catalog_items"] (the snapshot taken when the
+    ask was emitted): an id that was never offered is REFUSED — recorded
+    nowhere, and the planner is told so. Provenance is therefore
+    "user selected catalog item id N", set and checked by code; display
+    text plays no part."""
+    rec = operator.record
+    tokens = ITEM_TOKEN_RE.findall(answer or "")
+    if not tokens:
+        return ""
+    offered = rec.get("offered_catalog_items") or {}
+    accepted, refused = [], []
+    for item_id in tokens:
+        item = offered.get(str(item_id))
+        if item is None:
+            refused.append(str(item_id))
+            continue
+        rec.setdefault("selected_catalog_items", {})[str(item_id)] = dict(item)
+        accepted.append(f"id {item_id} ({item['name']}, ${item['unit_price']})")
+    notes = []
+    if accepted:
+        notes.append(
+            "The operator SELECTED catalog item " + "; ".join(accepted) + ". "
+            "Use that item_id (not item_name) for the line. The quantity "
+            "must still come from the operator's own words.")
+    if refused:
+        notes.append(
+            "REFUSED: item id(s) " + ", ".join(refused) + " were never "
+            "offered in this run — they were NOT recorded. Ask the operator "
+            "to pick from the buttons.")
+    return "\n".join(notes)
+
+
+def dismiss_operation(operation_id: str) -> dict:
+    """v6.7: the operator explicitly CANCELS a pending (awaiting-input)
+    task. Drops the live session so nothing can resume it, and marks the
+    persisted record cancelled so history and the morning brief stop
+    reporting it as waiting. Staged approvals in the inbox are untouched —
+    they remain independently answerable there."""
+    _drop_session(operation_id)
+    ops = state_store.load_list("operations")
+    changed = False
+    for op in ops:
+        if op.get("id") == operation_id and op.get("status") == "awaiting_input":
+            op["status"] = "cancelled"
+            op["awaiting_input"] = False
+            op.setdefault("steps", []).append({
+                "name": "cancelled", "status": "completed",
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+                "completed_at": datetime.now().isoformat(timespec="seconds"),
+                "detail": "Cancelled by the operator from the pending-task strip."})
+            changed = True
+    if changed:
+        state_store.save("operations", ops)
+    return {"cancelled": changed, "operation_id": operation_id}
+
+
 def _apply_restore_answer(operator: OperatorContext, answer: str) -> str:
     """Resolve a pending backup-restore preview from the operator's resume
     answer — the ONLY writer of record["restore_approved"] /
@@ -952,7 +1015,9 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     # v4.0.1: numbers the operator actually typed — the invoice line-item
     # provenance gate verifies every amount/qty/rate against these (never a
     # planner-invented figure). Same pattern as the recipient emails above.
-    record["user_stated_numbers"] = extract_stated_numbers(command)
+    # v6.7: one absorption path builds BOTH pools (full + plain); dollar
+    # figures can sanction amounts/rates but never quantities.
+    absorb_stated_numbers(record, command)
     # v2.5: conversational input must get a conversational answer — the build
     # tools refuse (operator_tools._deliverable_gate) unless the command
     # actually asked for a deliverable.
@@ -1041,10 +1106,9 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 typed.append(e)
         # v4.0.1: numbers typed in a resume answer become verifiable for the
         # invoice provenance gate ("How many?" → "3" makes 3 user-stated).
-        stated = record.setdefault("user_stated_numbers", [])
-        for v in extract_stated_numbers(answer):
-            if v not in stated:
-                stated.append(v)
+        # v6.7: same dual-pool absorption as intake — "$500" in an answer
+        # can sanction an amount, never a quantity.
+        absorb_stated_numbers(record, answer)
         # v2.5: a resume answer can add deliverable intent ("yes, build the
         # deck") to a run that started conversational. Never downgrades.
         if not record.get("deliverable_intent") and detect_deliverable_intent(answer):
@@ -1070,6 +1134,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_proposal_answer(operator, answer),
                 _apply_contact_admin_answer(operator, answer),
                 _apply_restore_answer(operator, answer),
+                _apply_item_selection_answer(operator, answer),
             ) if n
         ]
         # v6.0 Phase 3: an answer given IN-THREAD resolves the staged inbox

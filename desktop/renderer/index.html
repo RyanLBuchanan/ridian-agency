@@ -496,6 +496,20 @@
                 <!-- Structured-question options (Claude-style suggested
                      replies): tappable choices ride the composer while a
                      question is live; hidden once answered or dismissed. -->
+                <!-- v6.7: PERSISTENT pending-task strip — the ask never lives
+                     only in a chat bubble that scrolls away. Shows what has
+                     been collected and what's missing, with explicit Cancel
+                     and new-task affordances. -->
+                <div id="operator-pending-strip" class="operator-pending-strip hidden">
+                  <span class="operator-pending-strip-label">Waiting on you</span>
+                  <span id="operator-pending-strip-text" class="operator-pending-strip-text"></span>
+                  <span id="operator-pending-decision" class="operator-pending-decision hidden">
+                    <span class="operator-pending-decision-q">Is that an answer, or a new task?</span>
+                    <button id="operator-pending-send-answer" type="button" class="btn btn-compact">It's my answer</button>
+                    <button id="operator-pending-new-task" type="button" class="btn btn-ghost btn-compact">New task (cancel pending)</button>
+                  </span>
+                  <button id="operator-pending-cancel" type="button" class="btn btn-ghost btn-compact" title="Cancel this pending task">Cancel task</button>
+                </div>
                 <div id="operator-options-row" class="operator-options-row hidden"></div>
                 <!-- Answer-mode chip: visible whenever the composer will send an
                      ANSWER to the open question instead of a new command. ✕
