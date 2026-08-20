@@ -3182,7 +3182,7 @@ async function loadSettingsIntoForm() {
 // one is shown, and the chat pane is visible only when no view is. Views can
 // never disagree about who owns the cell.
 const WORKSPACE_VIEW_IDS = ['settings-view', 'brief-view', 'approvals-view',
-                            'audit-view'];
+                            'audit-view', 'obligations-view'];
 let _activeWorkspaceView = null;
 
 function _showWorkspaceView(id) {
@@ -3207,6 +3207,7 @@ function _workspaceViewKeydown(e) {
     case 'brief-view': closeMorningBrief(); break;
     case 'approvals-view': closeApprovals(); break;
     case 'audit-view': closeAuditLog(); break;
+    case 'obligations-view': closeObligations(); break;
     default: _showWorkspaceView(null);
   }
 }
@@ -4701,7 +4702,7 @@ async function _opCancelPendingTask() {
   try {
     await fetch(`${BACKEND}/operations/${encodeURIComponent(opId)}/dismiss`,
                 { method: 'POST' });
-    _opSetStatusDot('failed');   // the run is over; reflect non-completion
+    _opSetStatusDot('cancelled');   // v6.8: cancelled is not failed
     _railThreadsFill();          // history stops showing "needs attention"
   } catch (_e) { /* backend hiccup — answer mode is already disarmed */ }
 }
@@ -4725,7 +4726,8 @@ function _opRenderPendingStrip(mode) {
 
 function _opSetStatusDot(kind) {
   if (!OPERATOR.statusDot) return;
-  OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed', 'is-partial', 'is-awaiting_input');
+  OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed',
+    'is-partial', 'is-awaiting_input', 'is-cancelled');
   OPERATOR.statusDot.classList.add('is-' + kind);
   if (OPERATOR.statusLabel) {
     OPERATOR.statusLabel.textContent =
@@ -4733,6 +4735,8 @@ function _opSetStatusDot(kind) {
       kind === 'completed' ? 'Completed' :
       kind === 'partial'   ? 'Completed with issues' :
       kind === 'awaiting_input' ? 'Waiting for your answer' :
+      // v6.8: cancelled is a CHOICE, not a failure — its own state.
+      kind === 'cancelled' ? 'Cancelled' :
       kind === 'failed'    ? 'Failed' :
       'Idle';
   }
@@ -7798,6 +7802,11 @@ async function loadMorningBrief() {
     const s = brief.sections;
     if (dateEl) dateEl.textContent = brief.generated_for || '';
     body.innerHTML = [
+      _briefSection('Obligations due', s.obligations_due || { items: [], empty: true, unavailable: false, note: 'No obligations are due.' }, (items) => items.map((d) => `
+        <div class="brief-item">
+          <span class="brief-item-main"><span class="obligation-due ${d.status === 'overdue' ? 'is-overdue' : ''}">${d.status === 'overdue' ? `OVERDUE ${d.days_overdue}d` : 'DUE TODAY'}</span> ${_briefEsc(d.name)}</span>
+          <span class="brief-item-meta">Due ${_briefEsc(d.due_date)}${d.missed_periods ? ` · ${d.missed_periods} earlier occurrence(s) missed` : ''} · start it from the Obligations view</span>
+        </div>`).join('')),
       _briefSection('Today’s calendar', s.today_events, (items) => items.map((e) => `
         <div class="brief-item">
           <span class="brief-item-main">${_briefEsc(e.summary)}</span>
@@ -8023,6 +8032,171 @@ if (_auditExportBtn) {
     }
   });
 }
+/* ============================================================ */
+/*        OBLIGATIONS VIEW (v6.8) — computed, never timed        */
+/* ============================================================ */
+
+function _obCadenceText(c) {
+  if (!c) return '';
+  if (c.kind === 'monthly_first_business_day') return 'Monthly — first business day';
+  if (c.kind === 'monthly_day') return `Monthly — day ${c.day}`;
+  if (c.kind === 'weekly') {
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return `Weekly — ${names[c.weekday] || c.weekday}`;
+  }
+  if (c.kind === 'once') return `Once — ${c.date}`;
+  return c.kind;
+}
+
+async function _obAction(id, verb) {
+  await fetch(`${BACKEND}/obligations/${encodeURIComponent(id)}/${verb}`, { method: 'POST' });
+  loadObligations();
+  refreshObligationsDue();
+}
+
+async function loadObligations() {
+  const body = document.getElementById('obligations-body');
+  if (!body) return;
+  body.innerHTML = '<p class="brief-loading">Loading…</p>';
+  try {
+    const res = await fetch(`${BACKEND}/obligations`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.obligations.length) {
+      body.innerHTML = '<p class="brief-note">No obligations yet — add one above.</p>';
+      return;
+    }
+    body.innerHTML = data.obligations.map((ob) => {
+      const due = ob.due;
+      const badge = due
+        ? `<span class="obligation-due ${due.status === 'overdue' ? 'is-overdue' : ''}">${due.status === 'overdue' ? `OVERDUE ${due.days_overdue}d (since ${due.due_date})` : 'DUE TODAY'}${due.missed_periods ? ` · ${due.missed_periods} earlier missed` : ''}</span>`
+        : `<span class="obligation-next">next: ${ob.next_due || '—'}</span>`;
+      return `
+      <div class="brief-item obligation-item" data-ob-id="${_briefEsc(ob.id)}">
+        <span class="brief-item-main">${_briefEsc(ob.name)} ${badge}</span>
+        <span class="brief-item-meta">${_briefEsc(_obCadenceText(ob.cadence))} · last completed ${_briefEsc((ob.last_completed_iso || 'never').slice(0, 10))}</span>
+        <span class="brief-item-meta">Task: ${_briefEsc(ob.task)}</span>
+        <span class="approval-actions">
+          ${due ? `<button type="button" class="btn btn-compact ob-start">Start task</button>
+          <button type="button" class="btn btn-ghost btn-compact ob-complete">Mark complete</button>
+          <button type="button" class="btn btn-ghost btn-compact ob-dismiss">Dismiss this one</button>` : ''}
+          <button type="button" class="btn btn-ghost btn-compact ob-delete">Delete</button>
+        </span>
+      </div>`;
+    }).join('');
+    body.querySelectorAll('.obligation-item').forEach((row) => {
+      const id = row.getAttribute('data-ob-id');
+      const ob = data.obligations.find((o) => o.id === id);
+      const wire = (cls, fn) => { const b = row.querySelector(cls); if (b) b.addEventListener('click', fn); };
+      wire('.ob-start', () => _obStartTask(ob));
+      wire('.ob-complete', () => _obAction(id, 'complete'));
+      wire('.ob-dismiss', () => _obAction(id, 'dismiss'));
+      wire('.ob-delete', () => { if (window.confirm(`Delete obligation "${ob.name}"?`)) _obAction(id, 'delete'); });
+    });
+  } catch (err) {
+    body.innerHTML = `<p class="brief-note brief-unavailable">Could not load obligations: ${_briefEsc(err && err.message ? err.message : err)}</p>`;
+  }
+}
+
+function _obStartTask(ob) {
+  // Surfacing only: starting the task runs it as a normal command through
+  // EVERY existing gate — customer provenance, catalog id selection,
+  // quantity, approval. Nothing is staged by the obligation itself.
+  closeObligations();
+  if (!OPERATOR.command) return;
+  OPERATOR.command.value = ob.task;
+  _opSubmit(new Event('submit'));
+}
+
+const _obligationAddForm = document.getElementById('obligation-add-form');
+if (_obligationAddForm) {
+  const kindSel = _obligationAddForm.elements['ob-kind'];
+  const sync = () => {
+    const k = kindSel.value;
+    _obligationAddForm.elements['ob-day'].hidden = k !== 'monthly_day';
+    _obligationAddForm.elements['ob-weekday'].hidden = k !== 'weekly';
+    _obligationAddForm.elements['ob-date'].hidden = k !== 'once';
+  };
+  kindSel.addEventListener('change', sync);
+  sync();
+  _obligationAddForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const els2 = _obligationAddForm.elements;
+    const kind = els2['ob-kind'].value;
+    const cadence = { kind };
+    if (kind === 'monthly_day') cadence.day = parseInt(els2['ob-day'].value, 10);
+    if (kind === 'weekly') cadence.weekday = parseInt(els2['ob-weekday'].value, 10);
+    if (kind === 'once') cadence.date = els2['ob-date'].value;
+    const status = document.getElementById('obligation-add-status');
+    try {
+      const res = await fetch(`${BACKEND}/obligations`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: els2['ob-name'].value.trim(),
+                               task: els2['ob-task'].value.trim(), cadence }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+      _obligationAddForm.reset(); sync();
+      if (status) { status.className = 'is-ok'; status.textContent = '✓ Added.'; }
+      loadObligations();
+      refreshObligationsDue();
+    } catch (err) {
+      if (status) { status.className = 'is-err'; status.textContent = `✗ ${err && err.message ? err.message : err}`; }
+    }
+  });
+}
+
+/* Persistent due banner + rail badge — refreshed on boot and with the
+   badge poll; due state is COMPUTED server-side each call, never timed. */
+async function refreshObligationsDue() {
+  try {
+    const res = await fetch(`${BACKEND}/obligations`);
+    if (!res.ok) return;
+    const due = (await res.json()).due || [];
+    const badge = document.getElementById('rail-obligations-count');
+    if (badge) {
+      badge.textContent = String(due.length);
+      badge.classList.toggle('hidden', !due.length);
+    }
+    const strip = document.getElementById('operator-obligations-strip');
+    if (strip) {
+      if (!due.length) { strip.classList.add('hidden'); strip.innerHTML = ''; return; }
+      strip.classList.remove('hidden');
+      strip.innerHTML = due.map((d) => `
+        <span class="obligation-banner-row" data-ob-id="${_briefEsc(d.id)}">
+          <span class="obligation-due ${d.status === 'overdue' ? 'is-overdue' : ''}">${d.status === 'overdue' ? `OVERDUE ${d.days_overdue}d` : 'DUE TODAY'}</span>
+          ${_briefEsc(d.name)}
+          <button type="button" class="btn btn-compact ob-banner-start">Start task</button>
+          <button type="button" class="btn btn-ghost btn-compact ob-banner-open">Open</button>
+        </span>`).join('');
+      strip.querySelectorAll('.obligation-banner-row').forEach((row) => {
+        const d = due.find((x) => x.id === row.getAttribute('data-ob-id'));
+        const s = row.querySelector('.ob-banner-start');
+        if (s) s.addEventListener('click', () => _obStartTask(d));
+        const o = row.querySelector('.ob-banner-open');
+        if (o) o.addEventListener('click', openObligations);
+      });
+    }
+  } catch (_e) { /* backend not up — banner stays as-is */ }
+}
+
+function openObligations() {
+  if (!document.getElementById('obligations-view')) return;
+  _showWorkspaceView('obligations-view');
+  loadObligations();
+}
+
+function closeObligations() {
+  _showWorkspaceView(null);
+}
+
+const _railObligationsBtn = document.getElementById('rail-obligations-btn');
+if (_railObligationsBtn) _railObligationsBtn.addEventListener('click', openObligations);
+const _obligationsCloseBtn = document.getElementById('obligations-close-btn');
+if (_obligationsCloseBtn) _obligationsCloseBtn.addEventListener('click', closeObligations);
+refreshObligationsDue();
+setInterval(refreshObligationsDue, 60000);
+
 const _railAuditBtn = document.getElementById('rail-audit-btn');
 if (_railAuditBtn) _railAuditBtn.addEventListener('click', openAuditLog);
 const _auditCloseBtn = document.getElementById('audit-close-btn');

@@ -194,10 +194,18 @@ const LAUNCHER_PATH = path.join(__dirname, '..', 'Start-Ridian-Agency.bat');
 // — the culprit was Ridian itself. Now: the second launch quits before ANY
 // work (no backend spawn, no hotkey attempt, no window), and the first
 // instance receives 'second-instance' and raises its window.
-// The lock is scoped to the userData path, so sandboxed harness launches
-// (which redirect APPDATA to a scratch profile) contend with each other,
-// never with the real app.
+// The lock is scoped to the userData path. CORRECTION (v6.8): on Windows,
+// Electron resolves appData via the OS (SHGetKnownFolderPath), which
+// IGNORES the APPDATA env var — so redirecting APPDATA does NOT move the
+// lock scope, and a harness instance would contend with the real running
+// app (observed live: the real 0.8.8 held the lock and a test instance
+// correctly quit as "second"). RIDIAN_USERDATA is the real isolation
+// channel: harnesses set it (per-child env only) and userData — and with
+// it the lock scope — genuinely moves to the scratch profile.
 // ---------------------------------------------------------------------------
+if (process.env.RIDIAN_USERDATA) {
+  app.setPath('userData', process.env.RIDIAN_USERDATA);
+}
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   console.log('[ridian] second launch detected — the running instance takes '

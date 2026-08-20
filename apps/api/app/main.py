@@ -1051,6 +1051,71 @@ async def audit_export_csv(date_from: str = "", date_to: str = "",
                              'attachment; filename="audit_log.csv"'})
 
 
+class ObligationRequest(BaseModel):
+    name: str = Field("", description="What the obligation is called.")
+    task: str = Field("", description="The command Start-task runs (through every gate).")
+    cadence: dict = Field(default_factory=dict,
+                          description="{kind, day?/weekday?/date?} — validated server-side.")
+
+
+@app.get("/obligations")
+async def obligations_list() -> dict:
+    """v6.8: obligations + what's due, computed ON DEMAND — never a timer."""
+    from .services import obligations_service
+    obs = obligations_service.list_obligations()
+    return {"obligations": [
+        {**ob, "next_due": obligations_service.next_due(ob),
+         "due": obligations_service.due_status(ob)} for ob in obs],
+        "due": obligations_service.due_obligations()}
+
+
+@app.post("/obligations")
+async def obligations_add(payload: ObligationRequest) -> dict:
+    from .services import obligations_service
+    try:
+        return obligations_service.add_obligation(
+            payload.model_dump(), written_by="manual")
+    except obligations_service.ObligationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/obligations/{obligation_id}/update")
+async def obligations_update(obligation_id: str, payload: ObligationRequest) -> dict:
+    from .services import obligations_service
+    try:
+        updates = {k: v for k, v in payload.model_dump().items() if v}
+        out = obligations_service.update_obligation(obligation_id, updates)
+    except obligations_service.ObligationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if out is None:
+        raise HTTPException(status_code=404, detail="no such obligation")
+    return out
+
+
+@app.post("/obligations/{obligation_id}/delete")
+async def obligations_delete(obligation_id: str) -> dict:
+    from .services import obligations_service
+    return {"deleted": obligations_service.delete_obligation(obligation_id)}
+
+
+@app.post("/obligations/{obligation_id}/complete")
+async def obligations_complete(obligation_id: str) -> dict:
+    from .services import obligations_service
+    try:
+        return obligations_service.mark_complete(obligation_id)
+    except obligations_service.ObligationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/obligations/{obligation_id}/dismiss")
+async def obligations_dismiss(obligation_id: str) -> dict:
+    from .services import obligations_service
+    try:
+        return obligations_service.dismiss_occurrence(obligation_id)
+    except obligations_service.ObligationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 class ApprovalAnswerRequest(BaseModel):
     id: str = Field(..., description="Approval id from GET /approvals.")
     value: str = Field(..., description="One of the staged options' values — buttons only.")

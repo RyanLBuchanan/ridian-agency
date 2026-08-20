@@ -187,6 +187,7 @@ function check(width, data) {
 const BRIEF_PAYLOAD = {
   generated_for: '2026-08-07',
   sections: {
+    obligations_due: { items: [{ id: 'obl1', name: 'WRN Monthly Support Retainer — Greg Alexander', status: 'overdue', days_overdue: 7, due_date: '2026-08-03', missed_periods: 1 }], empty: false, unavailable: false, note: '' },
     today_events: { items: [{ summary: 'Sandy discovery call', start: '2026-08-07T10:00:00', all_day: false, location: 'Zoom' }], empty: false, unavailable: false, note: '' },
     needs_reply: { items: [{ subject: 'Re: Discovery scope', last_from: 'sandy@gulf.test', days_quiet: 1, contact: { name: 'Sandy Alvarez', in_pipeline: true } }], empty: false, unavailable: false, note: '' },
     due_today: { items: [], empty: true, unavailable: false, note: 'Nothing due today — no next actions dated today or overdue.' },
@@ -197,7 +198,7 @@ const BRIEF_PAYLOAD = {
   },
 };
 
-const REQUIRED_SECTIONS = ['Today’s calendar', 'Needs your reply', 'Due today',
+const REQUIRED_SECTIONS = ['Obligations due', 'Today’s calendar', 'Needs your reply', 'Due today',
                            'Due this week', 'Gone quiet', 'Unpaid invoices',
                            'Awaiting your approval'];
 

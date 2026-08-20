@@ -99,7 +99,7 @@ def test_morning_brief_claims_the_chat_pane_cell(harness_output):
     brief = harness_output.split("Morning brief view", 1)[1].split("View switching", 1)[0]
     for width in (1280, 1100, 1000, 940, 880):
         line = next(l for l in brief.splitlines() if l.startswith(f"{width}px:"))
-        assert "7 sections" in line, line
+        assert "8 sections" in line, line
         assert "main display=none" in line, line
 
 

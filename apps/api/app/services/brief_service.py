@@ -22,8 +22,8 @@ import datetime as _dt
 import logging
 from typing import Optional
 
-from . import (calendar_service, inbox_service, pipeline_service,
-               quickbooks_service, state_store)
+from . import (calendar_service, inbox_service, obligations_service,
+               pipeline_service, quickbooks_service, state_store)
 
 log = logging.getLogger("ridian.brief")
 
@@ -127,9 +127,16 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
             [], "", unavailable=(f"Gmail unreachable ({detail}) — threads "
                                  "needing a reply unknown, NOT zero."))
 
+    # v6.8: obligations due — computed NOW from the store + calendar (no
+    # timer exists to have missed). Surfacing only; nothing is created.
+    obligations = _section(
+        obligations_service.due_obligations(today=today),
+        "No obligations are due.")
+
     return {
         "generated_for": today.isoformat(),
         "sections": {
+            "obligations_due": obligations,
             "today_events": calendar,
             "needs_reply": inbox,
             "due_today": _section(

@@ -42,7 +42,12 @@ def _env(scratch: Path) -> dict:
         "RIDIAN_SANDBOX": "1",
         "RIDIAN_DATA_DIR": str(scratch / "data"),
         "RIDIAN_PORT": "8767",
-        "APPDATA": str(scratch / "profile"),   # scopes the instance lock too
+        "APPDATA": str(scratch / "profile"),
+        # v6.8: APPDATA does NOT move Electron's userData on Windows (the OS
+        # API ignores the env var), so it never isolated the instance lock —
+        # with the real app running, the test instance correctly lost the
+        # lock and "failed". RIDIAN_USERDATA is the real isolation channel.
+        "RIDIAN_USERDATA": str(scratch / "profile" / "userdata"),
         "RIDIAN_HOTKEY": _TEST_HOTKEY,
     })
     return env

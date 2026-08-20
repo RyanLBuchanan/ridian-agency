@@ -145,9 +145,9 @@ def test_empty_sections_are_present_and_say_so(tmp_path, monkeypatch):
                                       "gone_quiet": [], "from_contacts": [],
                                       "checked": 0})
     sections = brief_service.build_brief(today=TODAY)["sections"]
-    assert set(sections) == {"today_events", "needs_reply", "due_today",
-                             "due_this_week", "stale_deals", "unpaid_invoices",
-                             "awaiting_approval"}
+    assert set(sections) == {"obligations_due", "today_events", "needs_reply",
+                             "due_today", "due_this_week", "stale_deals",
+                             "unpaid_invoices", "awaiting_approval"}
     for name, sec in sections.items():
         assert sec["empty"] is True, name
         assert sec["items"] == [], name
