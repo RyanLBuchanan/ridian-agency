@@ -77,6 +77,11 @@ SETTABLE_KEYS: tuple[str, ...] = (
     # main process without restart via the hotkey:apply IPC.
     "operator_global_hotkey",
     "appearance",
+    # v6.9: phone companion. "true" binds the backend to the LAN (0.0.0.0)
+    # at next start; default/blank/anything else = loopback only. The
+    # CompanionGate middleware (main.py) refuses every non-loopback request
+    # unless this is "true" AND the request carries a paired device token.
+    "companion_enabled",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when

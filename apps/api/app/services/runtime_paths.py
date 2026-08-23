@@ -100,6 +100,19 @@ def resolve_backend_port() -> int:
     return port
 
 
+def resolve_backend_host(companion_enabled: bool) -> str:
+    """Bind address for the backend (v6.9). Loopback unless the operator
+    explicitly enabled the phone companion. A sandboxed process NEVER binds
+    the LAN off a setting — probes must not open real network surfaces —
+    and RIDIAN_HOST (explicit, per-child) overrides everything for tests."""
+    override = (os.environ.get("RIDIAN_HOST") or "").strip()
+    if override:
+        return override
+    if os.environ.get("RIDIAN_SANDBOX"):
+        return "127.0.0.1"
+    return "0.0.0.0" if companion_enabled else "127.0.0.1"
+
+
 def data_dir() -> Path:
     """Base for ALL writable state. Dev: apps/api (unchanged). Frozen:
     %APPDATA%/Ridian Operator (created on first use).

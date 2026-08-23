@@ -33,6 +33,8 @@ const STATUS_TEXT = {
   'settings-drive-note': 'Connected as ryan@ridiantechnologies.com — Test to verify.',
   'settings-gmail-note': 'Connected as ryan@ridiantechnologies.com — Test to verify.',
   'settings-calendar-note': 'Connected as ryan@ridiantechnologies.com — Test to verify.',
+  // v6.9 Phone companion — the longest realistic line: URL + a device row.
+  'settings-companion-status': 'Listening on your Wi-Fi — on the phone visit http://192.168.96.201:8000/companion · Pixel 7 (seen 2026-08-23 09:14) Revoke',
 };
 
 const MEASURE = `(() => {

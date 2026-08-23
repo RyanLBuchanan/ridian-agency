@@ -89,11 +89,18 @@ if (Test-Backend) {
   # Each spawned PowerShell sets its own window title, switches to the right
   # directory, then runs the long-lived command. -NoExit keeps the window
   # open so the user can see logs and close it to stop the process.
+  # v6.9: bind host comes from the same resolver the frozen backend uses --
+  # loopback unless the operator enabled the phone companion. Without this
+  # the dev backend would silently ignore the setting and the phone could
+  # never connect.
   $backendCommand = @"
 `$Host.UI.RawUI.WindowTitle = 'Ridian Agency -- Backend (uvicorn)'
 Set-Location '$RepoRoot'
 Write-Host 'Starting FastAPI backend...' -ForegroundColor Cyan
-& '$VenvPython' -m uvicorn app.main:app --port 8000 --app-dir '$ApiDir'
+`$BindHost = & '$VenvPython' -c "import sys; sys.path.insert(0, r'$ApiDir'); from app.services import settings_service; from app.services.runtime_paths import resolve_backend_host; print(resolve_backend_host(settings_service.get_bool_setting('companion_enabled', default=False)))"
+if (-not `$BindHost) { `$BindHost = '127.0.0.1' }
+`$env:RIDIAN_BOUND_HOST = `$BindHost
+& '$VenvPython' -m uvicorn app.main:app --port 8000 --host `$BindHost --app-dir '$ApiDir'
 "@
 
   Start-Process -FilePath 'powershell.exe' `

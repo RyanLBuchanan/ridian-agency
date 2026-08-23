@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Ridian Companion</title>
+<link rel="manifest" href="/companion/manifest.json">
+<link rel="icon" href="/static/companion-icon-192.png">
+<link rel="apple-touch-icon" href="/static/companion-apple-touch.png">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e2230; --line: #2a2f3d;
+    --text: #e6e9ef; --dim: #9aa3b2; --accent: #5b9dff; --ok: #46c98d;
+    --warn: #e8b647; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
+         -webkit-tap-highlight-color: transparent; }
+  .hidden { display: none !important; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg);
+           padding: calc(10px + env(safe-area-inset-top)) 14px 8px;
+           display: flex; align-items: baseline; gap: 8px;
+           border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  main { padding: 12px 12px calc(70px + env(safe-area-inset-bottom)); }
+  nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex;
+        background: var(--panel); border-top: 1px solid var(--line);
+        padding-bottom: env(safe-area-inset-bottom); }
+  nav button { flex: 1; background: none; border: 0; color: var(--dim);
+               font: 600 13px system-ui; padding: 12px 4px 10px; position: relative; }
+  nav button.active { color: var(--accent); }
+  nav button .cnt { position: absolute; top: 5px; right: 18%;
+                    background: var(--bad); color: #fff; border-radius: 9px;
+                    font-size: 10px; min-width: 17px; padding: 1px 4px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .card .meta { color: var(--dim); font-size: 12.5px; margin-top: 3px;
+                overflow-wrap: anywhere; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700;
+           border-radius: 6px; padding: 2px 7px; vertical-align: 1px; }
+  .badge.due { background: #3d3320; color: var(--warn); }
+  .badge.over { background: #3d2020; color: var(--bad); }
+  .badge.stale { background: #33261a; color: var(--warn); }
+  .row-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button.act { background: var(--accent); border: 0; color: #0b1524;
+               font: 600 14px system-ui; border-radius: 9px; padding: 9px 14px; }
+  button.ghost { background: var(--panel2); color: var(--text);
+                 border: 1px solid var(--line); font: 500 14px system-ui;
+                 border-radius: 9px; padding: 9px 14px; }
+  button:disabled { opacity: .45; }
+  .note { color: var(--dim); font-size: 13.5px; }
+  .err { color: var(--bad); font-size: 13.5px; white-space: pre-wrap; }
+  .okline { color: var(--ok); font-size: 13.5px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--dim); margin: 18px 2px 8px; }
+  textarea { width: 100%; min-height: 88px; background: var(--panel);
+             color: var(--text); border: 1px solid var(--line);
+             border-radius: 10px; padding: 10px; font: 15px system-ui; }
+  input[type=text] { width: 100%; background: var(--panel); color: var(--text);
+             border: 1px solid var(--line); border-radius: 10px;
+             padding: 11px; font: 16px system-ui; }
+  #pair-view { max-width: 420px; margin: 8vh auto 0; padding: 0 18px; }
+  #pair-view img { width: 72px; height: 72px; border-radius: 16px;
+                   display: block; margin: 0 auto 14px; }
+  #run-log { font-size: 14px; }
+  #run-log .step { color: var(--dim); padding: 2px 0; }
+  #run-log .step.done::before { content: "✓ "; color: var(--ok); }
+  #run-log .step.run::before { content: "… "; color: var(--warn); }
+  #run-log .msg { padding: 4px 0; white-space: pre-wrap; }
+  .qbox { background: var(--panel2); border: 1px solid var(--line);
+          border-radius: 10px; padding: 10px; margin: 8px 0; }
+  .qbox .q { font-weight: 600; margin-bottom: 6px; }
+  .spin { color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="pair-view" class="hidden">
+  <img src="/static/companion-icon-192.png" alt="">
+  <h1 style="text-align:center;font-size:19px">Pair with your PC</h1>
+  <p class="note">In Ridian on the PC: Settings → Phone companion →
+    <b>Generate pairing code</b>, then type the code here.</p>
+  <p><input type="text" id="pair-code" placeholder="Pairing code"
+            autocapitalize="characters" autocomplete="one-time-code"></p>
+  <p><input type="text" id="pair-name" placeholder="This device's name (e.g. Pixel 7)"></p>
+  <p><button class="act" id="pair-btn" style="width:100%">Pair</button></p>
+  <p class="err" id="pair-err"></p>
+</div>
+
+<div id="app-view" class="hidden">
+  <header><h1>Ridian</h1><span class="sub" id="dev-name"></span></header>
+  <main>
+    <section id="tab-due">
+      <div id="due-list" class="note">Loading…</div>
+      <h2>All obligations</h2>
+      <div id="ob-list" class="note">Loading…</div>
+    </section>
+    <section id="tab-brief" class="hidden">
+      <div id="brief-body" class="note">Loading…</div>
+    </section>
+    <section id="tab-approvals" class="hidden">
+      <div id="appr-list" class="note">Loading…</div>
+    </section>
+    <section id="tab-task" class="hidden">
+      <textarea id="task-input" placeholder="Tell Ridian what to do — it runs on the PC through every gate."></textarea>
+      <div class="row-btns"><button class="act" id="task-run">Run</button></div>
+      <div id="run-status" class="note" style="margin-top:8px"></div>
+      <div id="run-question"></div>
+      <div id="run-log"></div>
+      <h2>Waiting on you</h2>
+      <div id="awaiting-list" class="note">Loading…</div>
+    </section>
+  </main>
+  <nav>
+    <button data-tab="due" class="active">Due<span class="cnt hidden" id="cnt-due"></span></button>
+    <button data-tab="brief">Brief</button>
+    <button data-tab="approvals">Approvals<span class="cnt hidden" id="cnt-appr"></span></button>
+    <button data-tab="task">Task</button>
+  </nav>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
+
+function showPair() {
+  $("app-view").classList.add("hidden");
+  $("pair-view").classList.remove("hidden");
+}
+
+async function api(path, opts) {
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers);
+  if ((opts.method || "GET") !== "GET") {
+    headers["X-Ridian-Companion"] = "1";
+    if (opts.body) headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) { showPair(); throw new Error("Not paired."); }
+  let data = null;
+  try { data = await res.json(); } catch (_e) { /* non-JSON */ }
+  if (!res.ok) throw new Error((data && data.detail) || ("HTTP " + res.status));
+  return data;
+}
+
+/* ---------------- pairing ---------------- */
+$("pair-btn").addEventListener("click", async () => {
+  $("pair-err").textContent = "";
+  try {
+    await api("/companion/pair", { method: "POST", body: JSON.stringify({
+      code: $("pair-code").value.trim(),
+      device_name: $("pair-name").value.trim() }) });
+    location.reload();
+  } catch (e) { $("pair-err").textContent = e.message; }
+});
+
+/* ---------------- tabs ---------------- */
+const LOADERS = { due: loadDue, brief: loadBrief, approvals: loadApprovals,
+                  task: loadAwaiting };
+document.querySelectorAll("nav button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    ["due", "brief", "approvals", "task"].forEach((t) =>
+      $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
+    (LOADERS[b.dataset.tab] || (() => {}))();
+  });
+});
+function openTab(name) {
+  document.querySelector(`nav button[data-tab="${name}"]`).click();
+}
+
+/* ---------------- due / obligations ---------------- */
+function dueBadge(d) {
+  return d.status === "overdue"
+    ? `<span class="badge over">OVERDUE ${d.days_overdue}d</span>`
+    : `<span class="badge due">DUE TODAY</span>`;
+}
+async function loadDue() {
+  try {
+    const data = await api("/obligations");
+    const due = data.due || [];
+    $("cnt-due").classList.toggle("hidden", !due.length);
+    $("cnt-due").textContent = due.length;
+    $("due-list").innerHTML = due.length ? "" : '<p class="note">Nothing is due. 🎉</p>';
+    due.forEach((d) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `<div>${dueBadge(d)} <b>${esc(d.name)}</b></div>
+        <div class="meta">Due ${esc(d.due_date)}${d.missed_periods ? ` · ${d.missed_periods} earlier missed` : ""}</div>
+        <div class="meta">Task: ${esc(d.task)}</div>
+        <div class="row-btns">
+          <button class="act st">Start task</button>
+          <button class="ghost mc">Mark complete</button>
+          <button class="ghost dm">Dismiss this one</button>
+        </div>`;
+      el.querySelector(".st").addEventListener("click", () => {
+        $("task-input").value = d.task; openTab("task"); runTask();
+      });
+      el.querySelector(".mc").addEventListener("click", async () => {
+        if (!confirm(`Mark "${d.name}" complete for ${d.due_date}?`)) return;
+        try { await api(`/obligations/${encodeURIComponent(d.id)}/complete`, { method: "POST" }); }
+        catch (e) { alert(e.message); }
+        loadDue();
+      });
+      el.querySelector(".dm").addEventListener("click", async () => {
+        if (!confirm(`Skip the ${d.due_date} occurrence of "${d.name}"? It will not come back; the next occurrence still will.`)) return;
+        try { await api(`/obligations/${encodeURIComponent(d.id)}/dismiss`, { method: "POST" }); }
+        catch (e) { alert(e.message); }
+        loadDue();
+      });
+      $("due-list").appendChild(el);
+    });
+    const obs = data.obligations || [];
+    $("ob-list").innerHTML = obs.length
+      ? obs.map((o) => `<div class="card"><b>${esc(o.name)}</b>
+          <div class="meta">${o.due ? dueBadge(o.due) : "next: " + esc(o.next_due || "—")}</div>
+          <div class="meta">Task: ${esc(o.task)}</div></div>`).join("")
+      : '<p class="note">No obligations yet — add them on the PC.</p>';
+  } catch (e) {
+    $("due-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  }
+}
+
+/* ---------------- brief ---------------- */
+const BRIEF_ORDER = [
+  ["obligations_due", "Obligations due", (i) => `${i.status === "overdue" ? "OVERDUE " + i.days_overdue + "d — " : "Due today — "}${i.name}`],
+  ["today_events", "Today's calendar", (i) => `${i.all_day ? "All day" : String(i.start || "").replace("T", " ").slice(11, 16)} — ${i.summary}`],
+  ["needs_reply", "Needs a reply", (i) => `${i.from_name || i.from_email || ""}: ${i.subject || ""}`],
+  ["due_today", "Due today", (i) => `${i.overdue ? "OVERDUE — " : ""}${i.title} (${i.next_action || ""})`],
+  ["due_this_week", "Due this week", (i) => `${i.title} — ${i.next_action_date || ""}`],
+  ["stale_deals", "Gone quiet", (i) => i.title],
+  ["unpaid_invoices", "Unpaid invoices", (i) => `#${i.doc_number} ${i.customer} — $${i.balance}`],
+  ["awaiting_approval", "Awaiting approval", (i) => i.question || i.command],
+];
+async function loadBrief() {
+  $("brief-body").innerHTML = '<p class="note">Loading…</p>';
+  try {
+    const brief = await api("/morning-brief");
+    const s = brief.sections || {};
+    $("brief-body").innerHTML = BRIEF_ORDER.map(([key, title, fmt]) => {
+      const sec = s[key] || { items: [], empty: true, note: "" };
+      let body;
+      if (sec.unavailable) body = `<p class="err">${esc(sec.note)}</p>`;
+      else if (sec.empty) body = `<p class="note">${esc(sec.note)}</p>`;
+      else body = sec.items.map((i) => `<div class="card">${esc(fmt(i))}</div>`).join("");
+      return `<h2>${esc(title)}</h2>${body}`;
+    }).join("");
+  } catch (e) {
+    $("brief-body").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  }
+}
+
+/* ---------------- approvals ---------------- */
+async function loadApprovals() {
+  try {
+    const data = await api("/approvals");
+    const list = data.approvals || [];
+    $("cnt-appr").classList.toggle("hidden", !list.length);
+    $("cnt-appr").textContent = list.length;
+    $("appr-list").innerHTML = list.length ? "" : '<p class="note">Nothing awaiting approval.</p>';
+    list.forEach((a) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `<div><b>${esc(a.question || a.tool)}</b>
+          ${a.stale ? '<span class="badge stale">STALE</span>' : ""}</div>
+        <div class="meta">${esc(a.command || a.operation_id)}</div>
+        <div class="meta">${esc(a.staged_at)}</div>
+        <div class="row-btns"></div><div class="err"></div>`;
+      const btns = el.querySelector(".row-btns");
+      (a.options || []).forEach((o, i) => {
+        const b = document.createElement("button");
+        b.className = i === 0 ? "act" : "ghost";
+        b.textContent = o.label;
+        b.addEventListener("click", async () => {
+          btns.querySelectorAll("button").forEach((x) => x.disabled = true);
+          try {
+            const out = await api("/approvals/answer", { method: "POST",
+              body: JSON.stringify({ id: a.id, value: o.value }) });
+            if (out.error) throw new Error(out.error + (out.detail ? " — " + out.detail : ""));
+            el.querySelector(".err").className = "okline";
+            el.querySelector(".err").textContent = out.approved ? "Approved ✓" : "Declined";
+            setTimeout(loadApprovals, 1200);
+          } catch (e) {
+            el.querySelector(".err").textContent = e.message;
+            btns.querySelectorAll("button").forEach((x) => x.disabled = false);
+          }
+        });
+        btns.appendChild(b);
+      });
+      $("appr-list").appendChild(el);
+    });
+  } catch (e) {
+    $("appr-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  }
+}
+
+/* ---------------- task run (SSE over fetch) ---------------- */
+let currentOpId = "";
+function sseBlocks(block, onEvent) {
+  let ev = "message", data = "";
+  block.split("\n").forEach((line) => {
+    if (line.startsWith("event:")) ev = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  });
+  if (data) onEvent(ev, (() => { try { return JSON.parse(data); } catch (_e) { return {}; } })());
+}
+async function streamRun(url, body) {
+  const res = await fetch(url, { method: "POST", headers: {
+    "Content-Type": "application/json", "Accept": "text/event-stream",
+    "X-Ridian-Companion": "1" }, body: JSON.stringify(body) });
+  if (res.status === 401) { showPair(); return; }
+  if (!res.ok) {
+    let d = null; try { d = await res.json(); } catch (_e) {}
+    throw new Error((d && d.detail) || ("HTTP " + res.status));
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) !== -1) {
+      sseBlocks(buf.slice(0, idx), handleRunEvent);
+      buf = buf.slice(idx + 2);
+    }
+  }
+}
+function handleRunEvent(ev, d) {
+  const log = $("run-log");
+  if (ev === "start") {
+    currentOpId = d.id || currentOpId;
+    $("run-status").textContent = d.resumed ? "Resumed on the PC…" : "Running on the PC…";
+  } else if (ev === "step") {
+    const line = document.createElement("div");
+    line.className = "step " + (d.status === "completed" ? "done" : "run");
+    line.textContent = d.name + (d.detail ? " — " + d.detail : "");
+    log.appendChild(line);
+  } else if (ev === "message") {
+    if (String(d.text || "").startsWith("Planner →")) return;
+    const line = document.createElement("div");
+    line.className = "msg"; line.textContent = d.text || "";
+    log.appendChild(line);
+  } else if (ev === "error") {
+    const line = document.createElement("div");
+    line.className = "err"; line.textContent = d.message || "error";
+    log.appendChild(line);
+  } else if (ev === "needs_input") {
+    renderQuestion($("run-question"), currentOpId, d);
+    $("run-status").textContent = "Waiting on you.";
+  } else if (ev === "complete") {
+    const st = d.status || "";
+    $("run-status").textContent = "Status: " + st +
+      (d.artifacts && d.artifacts.length ? ` · ${d.artifacts.length} artifact(s) on the PC` : "");
+    if (st !== "awaiting_input") $("run-question").innerHTML = "";
+    loadAwaiting(); loadApprovals();
+  }
+}
+function renderQuestion(container, opId, need) {
+  container.innerHTML = "";
+  const box = document.createElement("div");
+  box.className = "qbox";
+  box.innerHTML = `<div class="q">${esc(need.question)}</div>
+    ${need.task_summary ? `<div class="meta">${esc(need.task_summary)}</div>` : ""}
+    <div class="row-btns"></div>`;
+  const btns = box.querySelector(".row-btns");
+  (need.options || []).forEach((o) => {
+    const b = document.createElement("button");
+    b.className = o.action === "submit" ? "act" : "ghost";
+    b.textContent = o.label;
+    if (o.action === "submit") {
+      b.addEventListener("click", () => answerOp(opId, o.value || o.label));
+    } else if (o.action === "compose") {
+      b.addEventListener("click", () => {
+        $("task-input").value = o.prefill || "";
+        $("task-input").placeholder = o.placeholder || "Finish and press Answer";
+        $("task-input").focus();
+        $("task-run").textContent = "Answer";
+        $("task-run").dataset.answerOp = opId;
+      });
+    } else {
+      b.disabled = true;
+      if (o.action === "upload") b.textContent += " (PC only)";
+    }
+    btns.appendChild(b);
+  });
+  if (!need.buttons_only) {
+    const hint = document.createElement("div");
+    hint.className = "meta";
+    hint.textContent = "Or type an answer above and press Answer.";
+    box.appendChild(hint);
+    $("task-run").textContent = "Answer";
+    $("task-run").dataset.answerOp = opId;
+  }
+  container.appendChild(box);
+}
+async function answerOp(opId, value) {
+  $("run-question").innerHTML = "";
+  $("run-status").textContent = "Sending answer…";
+  try { await streamRun(`/operations/${encodeURIComponent(opId)}/continue`, { answer: value }); }
+  catch (e) { $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+async function runTask() {
+  const cmd = $("task-input").value.trim();
+  if (!cmd) return;
+  const answerOpId = $("task-run").dataset.answerOp;
+  $("task-run").dataset.answerOp = "";
+  $("task-run").textContent = "Run";
+  $("task-input").value = "";
+  $("task-input").placeholder = "Tell Ridian what to do — it runs on the PC through every gate.";
+  if (answerOpId) { currentOpId = answerOpId; return answerOp(answerOpId, cmd); }
+  $("run-log").innerHTML = ""; $("run-question").innerHTML = "";
+  $("run-status").textContent = "Starting…";
+  try {
+    await streamRun("/operations/run", { command: cmd, project_id: "",
+      research_model: "", script_model: "", effort: "", background: false });
+  } catch (e) {
+    $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  }
+}
+$("task-run").addEventListener("click", runTask);
+
+/* ---------------- parked runs ---------------- */
+async function loadAwaiting() {
+  try {
+    const data = await api("/operations/recent?limit=50");
+    const waiting = (data.operations || []).filter((o) => o.status === "awaiting_input");
+    $("awaiting-list").innerHTML = waiting.length ? "" : '<p class="note">Nothing is parked.</p>';
+    waiting.forEach((o) => {
+      const need = (o.needs_input || [])[o.needs_input.length - 1];
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `<div class="meta">${esc(o.command)}</div><div class="qwrap"></div>
+        <div class="row-btns"><button class="ghost cancel">Cancel task</button></div>`;
+      if (need) renderQuestion(el.querySelector(".qwrap"), o.id, need);
+      el.querySelector(".cancel").addEventListener("click", async () => {
+        if (!confirm("Cancel this parked task?")) return;
+        try { await api(`/operations/${encodeURIComponent(o.id)}/dismiss`, { method: "POST" }); }
+        catch (e) { alert(e.message); }
+        loadAwaiting();
+      });
+      $("awaiting-list").appendChild(el);
+    });
+  } catch (e) {
+    $("awaiting-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  }
+}
+
+/* ---------------- boot ---------------- */
+(async function boot() {
+  try {
+    const me = await api("/companion/me");
+    $("dev-name").textContent = me.name || "";
+    $("app-view").classList.remove("hidden");
+    loadDue(); loadApprovals();
+    setInterval(() => {
+      if (!$("app-view").classList.contains("hidden")) { loadDue(); loadApprovals(); }
+    }, 60000);
+  } catch (_e) { /* showPair already ran on 401 */ }
+})();
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,7 @@ from .services.export_service import (  # noqa: E402
     open_artifact_file,
     open_artifact_folder,
 )
+from .services import companion_service  # noqa: E402
 from .services import dashboard_service  # noqa: E402
 from .services import gmail_service  # noqa: E402
 from .services import google_drive_service  # noqa: E402
@@ -98,10 +99,12 @@ STATIC_DIR = resource_base() / "app" / "static"
 
 app = FastAPI(title="Ridian Agency API", version="0.1.0")
 
-# Local-only MVP: the Electron renderer makes cross-origin fetches against
-# 127.0.0.1:8000. Allow any origin so the desktop GUI, the bundled web
-# console, and curl all work. The server only listens on loopback, so this
-# is not externally reachable.
+# The Electron renderer makes cross-origin fetches against 127.0.0.1:8000.
+# Allow any origin so the desktop GUI, the bundled web console, and curl all
+# work. Loopback requests bypass the CompanionGate below, and credentials
+# are NOT allowed here, so a browser will never attach the companion cookie
+# to a cross-origin request — the wide-open origins stay safe even when the
+# companion binds the LAN.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -109,7 +112,188 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def _gate_refusal(status: int, detail: str):
+    body = json.dumps({"detail": detail}).encode()
+
+    async def _send(send):
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+    return _send
+
+
+class CompanionGate:
+    """v6.9 pure-ASGI gate. Loopback = the desktop, untouched. Everything
+    else exists only when the operator enabled the companion, and even then:
+    the pairing surface pre-auth, the companion allowlist with a paired
+    device token, and NOTHING more. Pure-ASGI (not BaseHTTPMiddleware) so
+    the operator SSE streams pass through unbuffered."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        client = scope.get("client")
+        if companion_service.client_is_local(client[0] if client else None):
+            return await self.app(scope, receive, send)
+        if scope["type"] == "websocket":
+            return await send({"type": "websocket.close", "code": 1008})
+        if not settings_service.get_bool_setting("companion_enabled",
+                                                 default=False):
+            return await _gate_refusal(
+                403, "Companion access is disabled on this PC.")(send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        if not companion_service.host_header_ok(headers.get("host", "")):
+            # DNS-rebinding defense: off-box access is by literal IP only.
+            return await _gate_refusal(
+                403, "Companion access uses the PC's IP address.")(send)
+        method = scope["method"].upper()
+        path = scope["path"]
+        if method not in ("GET", "HEAD") and \
+                headers.get("x-ridian-companion") != "1":
+            # CSRF: cross-site pages can't set this header without a
+            # preflight, and the preflight never carries it either.
+            return await _gate_refusal(403, "Missing companion header.")(send)
+        if companion_service.preauth_request_allowed(method, path):
+            return await self.app(scope, receive, send)
+        cookies = {}
+        for part in headers.get("cookie", "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name:
+                cookies[name] = value
+        device = companion_service.verify_token(cookies.get("ridian_companion", ""))
+        if device is None:
+            return await _gate_refusal(
+                401, "Not paired — open /companion on this device and enter "
+                     "a pairing code from the PC's Settings.")(send)
+        if not companion_service.device_request_allowed(method, path):
+            return await _gate_refusal(
+                403, "This action is not available from a companion device — "
+                     "use the PC.")(send)
+        scope.setdefault("state", {})["companion_device"] = device
+        return await self.app(scope, receive, send)
+
+
+# Added AFTER CORSMiddleware so the gate wraps it (outermost): a refused
+# request never even reaches CORS handling.
+app.add_middleware(CompanionGate)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# ---------------------------------------------------------------------------
+# Phone companion (v6.9)
+# ---------------------------------------------------------------------------
+
+_COMPANION_COOKIE = "ridian_companion"
+# The token rides plain HTTP on the LAN, so it is a bearer credential worth
+# aging out: a month, not half a year. Re-pairing costs one code.
+_COMPANION_COOKIE_MAX_AGE = 30 * 24 * 3600
+
+
+def _require_loopback(request: Request) -> None:
+    """Belt-and-braces for the pairing-admin endpoints: even if the gate
+    ever regressed, code generation and revocation answer only the desktop."""
+    host = request.client.host if request.client else None
+    if not companion_service.client_is_local(host):
+        raise HTTPException(status_code=403, detail="PC only.")
+
+
+class CompanionPairRequest(BaseModel):
+    code: str = Field(..., min_length=1)
+    device_name: str = Field("", max_length=60)
+
+
+@app.get("/companion")
+async def companion_page():
+    return FileResponse(STATIC_DIR / "companion.html", media_type="text/html")
+
+
+@app.get("/companion/manifest.json")
+async def companion_manifest():
+    return FileResponse(STATIC_DIR / "companion-manifest.json",
+                        media_type="application/manifest+json")
+
+
+@app.post("/companion/pair")
+async def companion_pair(payload: CompanionPairRequest) -> JSONResponse:
+    try:
+        out = companion_service.pair(payload.code, payload.device_name)
+    except companion_service.CompanionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    resp = JSONResponse({"ok": True, "device_id": out["device_id"],
+                         "name": out["name"]})
+    # No Secure flag: the companion runs over plain HTTP on the trusted LAN
+    # (stated honestly in Settings). HttpOnly + SameSite=Lax + the custom
+    # header requirement are the cross-site defenses.
+    resp.set_cookie(_COMPANION_COOKIE, out["token"],
+                    max_age=_COMPANION_COOKIE_MAX_AGE, httponly=True,
+                    samesite="lax", path="/")
+    return resp
+
+
+@app.get("/companion/me")
+async def companion_me(request: Request) -> dict:
+    device = request.scope.get("state", {}).get("companion_device")
+    if device is not None:
+        return {"paired": True, "device_id": device.get("id"),
+                "name": device.get("name")}
+    # Only a loopback caller can reach here without a device (the gate
+    # refuses unpaired off-box requests before the route runs).
+    return {"paired": True, "loopback": True}
+
+
+@app.get("/companion/status")
+async def companion_status(request: Request) -> dict:
+    """Settings-view data (PC only): enabled state, whether the running
+    process actually bound what the setting asks for, the URL to type on
+    the phone, paired devices, pairing lock state."""
+    _require_loopback(request)
+    enabled = settings_service.get_bool_setting("companion_enabled",
+                                                default=False)
+    ip = companion_service.lan_ip()
+    port = request.url.port or 8000
+    # PROBED, not inferred: connect to our own LAN socket. This is the only
+    # answer that stays true across the frozen app, the dev launcher (which
+    # binds loopback regardless), and a settings change that has not been
+    # restarted into effect yet.
+    listening = await asyncio.to_thread(
+        companion_service.lan_listener_reachable, ip, port)
+    return {
+        "enabled": enabled,
+        "bound_host": os.environ.get("RIDIAN_BOUND_HOST", ""),
+        "lan_listening": listening,
+        "restart_required": bool(enabled and not listening),
+        "lan_ip": ip,
+        "url": f"http://{ip}:{port}/companion" if ip else "",
+        "devices": companion_service.list_devices(),
+        "pairing_locked": companion_service.pairing_locked(),
+    }
+
+
+@app.post("/companion/pairing-code")
+async def companion_pairing_code(request: Request) -> dict:
+    _require_loopback(request)
+    if not settings_service.get_bool_setting("companion_enabled", default=False):
+        raise HTTPException(status_code=400,
+                            detail="Enable the companion first, then Save.")
+    return companion_service.generate_pairing_code()
+
+
+class CompanionRevokeRequest(BaseModel):
+    device_id: str = Field(..., min_length=1)
+
+
+@app.post("/companion/revoke")
+async def companion_revoke(payload: CompanionRevokeRequest,
+                           request: Request) -> dict:
+    _require_loopback(request)
+    return {"revoked": companion_service.revoke_device(payload.device_id)}
 
 
 class WorkflowRequest(BaseModel):
@@ -191,6 +375,9 @@ class SettingsView(BaseModel):
     # Stored as "true"/"false" string in local_settings.json.
     operator_auto_upload_drive: str = "true"
     appearance: str = ""
+    # v6.9: "true" = bind the LAN for the phone companion (takes effect at
+    # next backend start). Blank/default = loopback only.
+    companion_enabled: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
     # so the renderer can show a clear, actionable warning if the configured
@@ -231,6 +418,7 @@ class SettingsUpdate(BaseModel):
     operator_monthly_budget_usd: str | None = None
     operator_global_hotkey: str | None = None
     appearance: str | None = None
+    companion_enabled: str | None = None
 
 
 class KeyTestResponse(BaseModel):
@@ -1130,10 +1318,27 @@ async def approvals_list() -> dict:
 
 
 @app.post("/approvals/answer")
-async def approvals_answer(payload: ApprovalAnswerRequest) -> dict:
+async def approvals_answer(payload: ApprovalAnswerRequest,
+                           request: Request) -> dict:
     """Approve or cancel a staged item — the same signed gate path as
-    answering in the thread; a tampered payload refuses."""
+    answering in the thread; a tampered payload refuses.
+
+    v6.9: a COMPANION device may answer only non-destructive kinds. The
+    endpoint allowlist alone would not confine it — /operations/run can make
+    the planner stage any gate, and answering re-executes the staged tool —
+    so a restore or contact merge/delete staged from anywhere still requires
+    the PC."""
     from .services import approval_inbox_service
+    device = request.scope.get("state", {}).get("companion_device")
+    if device is not None:
+        pending = await asyncio.to_thread(approval_inbox_service.list_pending)
+        entry = next((a for a in pending if a.get("id") == payload.id), None)
+        if entry is not None and not companion_service.device_may_answer_approval(
+                entry.get("reason", "")):
+            raise HTTPException(
+                status_code=403,
+                detail="This approval can only be answered on the PC — it "
+                       "changes or replaces stored records.")
     return await approval_inbox_service.answer_approval(payload.id, payload.value)
 
 

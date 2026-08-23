@@ -32,6 +32,7 @@ def main() -> None:
     from app.services.runtime_paths import (
         SandboxViolation,
         maybe_migrate_on_first_run,
+        resolve_backend_host,
         resolve_backend_port,
     )
 
@@ -47,11 +48,19 @@ def main() -> None:
     try:
         port = resolve_backend_port()
         from app.main import app
+        from app.services import settings_service
     except SandboxViolation as exc:
         sys.stderr.write(f"state-guard refusal: {exc}\n")
         raise SystemExit(2) from exc
 
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    # v6.9: loopback unless the operator enabled the phone companion (and
+    # never off a setting in a sandbox — see resolve_backend_host). The
+    # actual bind is recorded so /companion/status can report honestly
+    # whether a settings change still needs a restart to take effect.
+    host = resolve_backend_host(
+        settings_service.get_bool_setting("companion_enabled", default=False))
+    os.environ["RIDIAN_BOUND_HOST"] = host
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

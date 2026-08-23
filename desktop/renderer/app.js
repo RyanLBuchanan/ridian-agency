@@ -212,7 +212,13 @@ const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_pas
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
-const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive'];
+const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive', 'companion_enabled'];
+// Per-field default when the key is missing entirely — must mirror the
+// backend: auto-upload defaults ON, companion (a network surface) OFF.
+const SETTINGS_BOOL_DEFAULTS = {
+  operator_auto_upload_drive: 'true',
+  companion_enabled: 'false',
+};
 
 /* ============================================================ */
 /*                    TABS PER WORKFLOW MODE                     */
@@ -3096,10 +3102,12 @@ function applySettingsToForm(settings) {
     const input = els.settingsForm.elements.namedItem(name);
     if (!input) return;
     // Treat "true"/"1"/"yes"/"on" as checked; everything else (including
-    // empty / missing) as unchecked. operator_auto_upload_drive defaults
-    // server-side to "true" but if the key is missing entirely we still
-    // want the box checked on first launch — mirror the backend default.
-    const raw = (settings[name] == null ? 'true' : String(settings[name])).toLowerCase().trim();
+    // empty / missing) as unchecked. A missing key takes that field's own
+    // backend default (SETTINGS_BOOL_DEFAULTS) — auto-upload ON, the
+    // companion network surface OFF.
+    const raw = (settings[name] == null
+      ? (SETTINGS_BOOL_DEFAULTS[name] || 'false')
+      : String(settings[name])).toLowerCase().trim();
     input.checked = (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on');
   });
   SETTINGS_SECRET_FIELDS.forEach((name) => {
@@ -3264,6 +3272,7 @@ function openSettings() {
   _setKeyDot('settings-dot-gmail', null);
   _setKeyDot('settings-dot-calendar', null);
   _googleRowsRefresh();
+  _companionRefresh();
   // Status lines must reflect the CURRENT state on every open — a failure
   // message from a previous attempt must never greet the user as if it
   // described the present.
@@ -6498,6 +6507,82 @@ function _qbStatusText(s) {
   }
   return s.connected ? `Connected to ${env} (company ${s.realm_id}).` : 'Not connected.';
 }
+/* ---- Phone companion (v6.9) ---- */
+function _companionStatusEl() {
+  return document.getElementById('settings-companion-status');
+}
+
+async function _companionRefresh() {
+  const el = _companionStatusEl();
+  if (!el) return;
+  try {
+    const res = await fetch(`${BACKEND}/companion/status`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    // lan_listening is PROBED (a real connect to our own LAN socket), so
+    // the dot means "verified reachable", never "the setting says so".
+    _setKeyDot('settings-dot-companion', s.enabled ? (s.lan_listening || null) : null);
+    if (!s.enabled) {
+      el.textContent = 'Off — the backend answers this PC only. Check the box and Save to let your phone reach it on this Wi-Fi. It travels as plain HTTP on your local network, so use it on networks you trust; pairing is always required.';
+      return;
+    }
+    el.innerHTML = '';
+    const line = document.createElement('span');
+    if (s.restart_required) {
+      line.textContent = 'Enabled but NOT yet listening on Wi-Fi — restart Ridian, then on the phone visit ';
+    } else {
+      line.textContent = 'Listening on your Wi-Fi (plain HTTP — trusted networks only) — on the phone visit ';
+    }
+    const url = document.createElement('b');
+    url.textContent = s.url || `http://<this PC's IP>:8000/companion`;
+    el.appendChild(line);
+    el.appendChild(url);
+    if (s.pairing_locked) {
+      const warn = document.createElement('span');
+      warn.textContent = ' · pairing LOCKED after wrong codes — generate a new code to unlock';
+      el.appendChild(warn);
+    }
+    (s.devices || []).forEach((d) => {
+      const row = document.createElement('span');
+      row.className = 'settings-companion-device';
+      row.textContent = ` · ${d.name}${d.last_seen_iso ? ` (seen ${d.last_seen_iso.slice(0, 16).replace('T', ' ')})` : ''} `;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-ghost btn-compact';
+      btn.textContent = 'Revoke';
+      btn.addEventListener('click', async () => {
+        if (!window.confirm(`Revoke "${d.name}"? The phone will need a new pairing code.`)) return;
+        try {
+          await fetch(`${BACKEND}/companion/revoke`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: d.id }),
+          });
+        } catch (_e) { /* refresh shows the truth either way */ }
+        _companionRefresh();
+      });
+      row.appendChild(btn);
+      el.appendChild(row);
+    });
+  } catch (_e) {
+    el.textContent = '';                       // backend not up — stay quiet
+  }
+}
+
+const _companionCodeBtn = document.getElementById('settings-companion-code');
+if (_companionCodeBtn) {
+  _companionCodeBtn.addEventListener('click', async () => {
+    const el = _companionStatusEl();
+    try {
+      const res = await fetch(`${BACKEND}/companion/pairing-code`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      if (el) el.textContent = `Pairing code: ${data.code} — valid 10 minutes, single use. Type it on the phone at the companion page.`;
+    } catch (err) {
+      if (el) el.textContent = `Could not generate a code: ${err && err.message ? err.message : err}`;
+    }
+  });
+}
+
 // QBO's dot IS verified state: a connected token in the matching
 // environment was validated live at connect time (companyinfo probe).
 function _qbSetDot(s) {

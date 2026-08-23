@@ -31,7 +31,11 @@ def _new_id() -> str:
 # 2026-07-15) — new code must never write it.
 # "pipeline" = the v5.0 contact/deal tools, where the operator's explicit
 # command is the approval (same consent model as save_memory).
-WRITTEN_BY_VALUES = ("commit", "save_memory", "manual", "pipeline", "unknown")
+# "companion-pairing" = a companion device record (v6.9): the operator
+# generating the pairing code on the PC is the approval; the phone's code
+# exchange is what physically writes the record.
+WRITTEN_BY_VALUES = ("commit", "save_memory", "manual", "pipeline",
+                     "companion-pairing", "unknown")
 
 
 def _stamp(entry: dict, written_by: str, source_op: str) -> dict:

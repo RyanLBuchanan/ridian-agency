@@ -38,14 +38,14 @@ def _electron_available() -> bool:
 # --------------------------------------------------------------------------
 
 def test_every_settings_row_is_a_self_contained_block():
-    """All six service rows (plus Voice) own their controls AND their
+    """All service rows (plus Phone and Voice) own their controls AND their
     status line — QuickBooks included, with no special case."""
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     form = html.split('id="settings-form"', 1)[1].split("</form>", 1)[0]
-    assert form.count('class="settings-block"') == 7
+    assert form.count('class="settings-block"') == 8
     # Every status note lives INSIDE a block, never as a bare sibling of it.
     for label in ("Anthropic", "OpenAI", "QuickBooks", "Drive", "Gmail",
-                  "Calendar"):
+                  "Calendar", "Phone"):
         idx = form.find(f">{label}<")
         assert idx != -1, label
         block_start = form.rfind('class="settings-block"', 0, idx)
@@ -89,7 +89,7 @@ def test_no_text_collides_at_any_width(harness_output):
     """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
     painted elements from different rows share pixels."""
     for width in (1280, 1100, 1000, 940, 880):
-        assert f"{width}px: 7 blocks" in harness_output, harness_output[-3000:]
+        assert f"{width}px: 8 blocks" in harness_output, harness_output[-3000:]
 
 
 def test_morning_brief_claims_the_chat_pane_cell(harness_output):

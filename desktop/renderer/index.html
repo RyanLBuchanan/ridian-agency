@@ -1071,6 +1071,21 @@
 
                   <div class="settings-block">
                     <div class="settings-row">
+                      <span id="settings-dot-companion" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Phone</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" name="companion_enabled" />
+                        <span>Allow companion on my Wi-Fi</span>
+                      </label>
+                      <button id="settings-companion-code" type="button" class="btn btn-ghost btn-compact">Pairing code</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-companion-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-row">
                       <span class="settings-dot is-blank" aria-hidden="true"></span>
                       <span class="settings-row-label">Voice</span>
                       <label class="settings-toggle">
