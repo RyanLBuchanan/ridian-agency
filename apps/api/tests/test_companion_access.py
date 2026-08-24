@@ -288,6 +288,36 @@ def test_client_is_local_semantics():
     assert not cs.client_is_local("evil")
 
 
+def test_gate_is_address_agnostic_for_any_non_loopback_peer():
+    """There is NO Tailscale-specific rule, and deliberately so: every
+    non-loopback peer walks the same path — enabled + IP-literal Host +
+    paired cookie + allowlisted route. That is WHY a tailnet (100.64/10)
+    peer works from outside the house, and it is the reason a future
+    "LAN-only" tightening must break this test rather than pass quietly.
+    Binding 0.0.0.0 binds EVERY interface, tailnet included."""
+    for peer in ("192.168.1.50",      # home Wi-Fi
+                 "10.224.51.133",     # another private range
+                 "100.105.232.26",    # Tailscale CGNAT range
+                 "100.64.0.1", "100.127.255.254"):
+        assert not cs.client_is_local(peer), f"{peer} must be gated"
+        assert cs.host_header_ok(peer), f"{peer} must pass the Host check"
+    _enable()
+    code = _pc().post("/companion/pairing-code").json()["code"]
+    tailnet = TestClient(app, base_url="http://100.105.232.26:8000",
+                         client=("100.105.232.26", 41234))
+    # Unpaired: the pairing surface only.
+    assert tailnet.get("/companion").status_code == 200
+    assert tailnet.get("/obligations").status_code == 401
+    assert tailnet.post("/companion/pair", headers=HDR,
+                        json={"code": code, "device_name": "Pixel 7 (tailnet)"}
+                        ).status_code == 200
+    # Paired: the allowlist, and nothing beyond it.
+    assert tailnet.get("/obligations").status_code == 200
+    assert tailnet.get("/morning-brief").status_code == 200
+    assert tailnet.get("/settings").status_code == 403
+    assert tailnet.post("/settings", headers=HDR, json={}).status_code == 403
+
+
 def test_host_header_ok_semantics():
     assert cs.host_header_ok("192.168.1.7:8000")
     assert cs.host_header_ok("192.168.1.7")
