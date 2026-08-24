@@ -6523,20 +6523,39 @@ async function _companionRefresh() {
     // the dot means "verified reachable", never "the setting says so".
     _setKeyDot('settings-dot-companion', s.enabled ? (s.lan_listening || null) : null);
     if (!s.enabled) {
-      el.textContent = 'Off — the backend answers this PC only. Check the box and Save to let your phone reach it on this Wi-Fi. It travels as plain HTTP on your local network, so use it on networks you trust; pairing is always required.';
+      el.textContent = 'Off — the backend answers this PC only. Checking the box opens the backend on EVERY network interface this PC has (Wi-Fi, Ethernet, VPN and Tailscale alike), not just Wi-Fi. Traffic is plain HTTP, so use it on networks you trust; every device must pair first, and a paired phone still reaches only the brief, obligations, approvals and tasks.';
       return;
     }
     el.innerHTML = '';
     const line = document.createElement('span');
-    if (s.restart_required) {
-      line.textContent = 'Enabled but NOT yet listening on Wi-Fi — restart Ridian, then on the phone visit ';
-    } else {
-      line.textContent = 'Listening on your Wi-Fi (plain HTTP — trusted networks only) — on the phone visit ';
-    }
-    const url = document.createElement('b');
-    url.textContent = s.url || `http://<this PC's IP>:8000/companion`;
+    line.textContent = s.restart_required
+      ? 'Enabled but NOT yet listening — restart Ridian to open the listener. It binds every network interface on this PC, not only Wi-Fi. Then on the phone visit: '
+      : 'Listening on every network interface on this PC (plain HTTP — trusted networks only). On the phone visit: ';
     el.appendChild(line);
-    el.appendChild(url);
+    // Two addresses, two meanings — labelled so it is obvious which to use.
+    // The tailnet row appears ONLY when a tailnet was actually detected;
+    // no tailnet means no row, never a dead entry.
+    const addrs = [
+      { url: s.url, label: 'on this network',
+        hint: 'works while the phone is on the same Wi-Fi' },
+    ];
+    if (s.tailnet_url) {
+      addrs.push({ url: s.tailnet_url, label: 'from anywhere (Tailscale)',
+                   hint: 'works wherever both devices are signed in to Tailscale' });
+    }
+    addrs.forEach((a) => {
+      const row = document.createElement('span');
+      row.className = 'settings-companion-addr';
+      const b = document.createElement('b');
+      b.textContent = a.url || `http://<this PC's IP>:8000/companion`;
+      row.appendChild(b);
+      const tag = document.createElement('span');
+      tag.className = 'settings-companion-addr-tag';
+      tag.textContent = ` — ${a.label}`;
+      tag.title = a.hint;
+      row.appendChild(tag);
+      el.appendChild(row);
+    });
     if (s.pairing_locked) {
       const warn = document.createElement('span');
       warn.textContent = ' · pairing LOCKED after wrong codes — generate a new code to unlock';

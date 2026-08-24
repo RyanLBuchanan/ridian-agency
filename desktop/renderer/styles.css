@@ -1,5 +1,18 @@
 /* Ridian Agency desktop renderer — tokens borrowed from ridian-technologies-site */
 
+/* Inter v4.1, bundled (SIL OFL — renderer/fonts/Inter-LICENSE.txt).
+   Bundled because Inter was installed on neither the PC nor the phone, so
+   the stack below silently fell through to Segoe UI here and Roboto there.
+   One variable file covers 100–900; `font-display: block` keeps the first
+   paint from flashing the fallback face. */
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --color-bg: #f7f8fa;
   --color-bg-soft: #f1f3f7;
@@ -4788,6 +4801,27 @@ body {
   /* Long unbroken ids (company 9341457602986271) wrap instead of forcing
      the row wider than the pane. */
   overflow-wrap: anywhere;
+}
+
+/* v6.9.2 phone companion: the entry-point addresses, one row each, with a
+   label saying what each address is FOR. Blocks, so the LAN and tailnet
+   URLs never run together on one line. */
+.settings-companion-addr {
+  display: block;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.settings-companion-addr-tag {
+  color: var(--color-muted-soft);
+  font-size: var(--fs-xs);
+}
+
+.settings-companion-device {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-muted-soft);
+  font-size: var(--fs-xs);
 }
 .settings-row-note:empty { display: none; }
 /* Narrow panes: the indent costs more than it aligns. */

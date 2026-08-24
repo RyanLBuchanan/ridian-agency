@@ -9,6 +9,17 @@
 <link rel="icon" href="/static/companion-icon-192.png">
 <link rel="apple-touch-icon" href="/static/companion-apple-touch.png">
 <style>
+/* Inter v4.1, bundled and served by the backend (SIL OFL — see
+   /static/fonts/Inter-LICENSE.txt). Same file the desktop ships, so both
+   surfaces render the SAME face rather than Segoe UI here and Roboto there. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/static/fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
 /* Tokens lifted verbatim from the desktop renderer (styles.css) so the phone
    and the PC read as one product, not two that resemble each other. */
 :root {

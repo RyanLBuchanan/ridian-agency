@@ -362,6 +362,122 @@ def test_status_reports_devices_and_restart_state(monkeypatch):
     assert out["restart_required"] is True
 
 
+def test_status_offers_both_entry_points_labelled(monkeypatch):
+    """Enabling binds every interface, so both addresses are real entry
+    points — and they mean different things, so both are reported."""
+    _enable()
+    monkeypatch.setattr(cs, "lan_ip", lambda: "192.168.1.7")
+    monkeypatch.setattr(cs, "tailnet_ip", lambda: "100.105.232.26")
+    out = _pc().get("/companion/status").json()
+    assert out["lan_ip"] == "192.168.1.7"
+    assert out["url"].endswith("/companion") and "192.168.1.7" in out["url"]
+    assert out["tailnet_ip"] == "100.105.232.26"
+    assert "100.105.232.26" in out["tailnet_url"]
+    assert out["tailnet_url"].endswith("/companion")
+
+
+def test_no_tailnet_means_no_row_not_a_dead_one(monkeypatch):
+    _enable()
+    monkeypatch.setattr(cs, "lan_ip", lambda: "192.168.1.7")
+    monkeypatch.setattr(cs, "tailnet_ip", lambda: "")
+    out = _pc().get("/companion/status").json()
+    assert out["tailnet_ip"] == ""
+    assert out["tailnet_url"] == ""          # renderer omits the row entirely
+    assert out["url"]                        # the LAN row still stands
+
+
+def test_tailnet_detection_only_ever_reports_the_cgnat_range(monkeypatch):
+    """Detected, never assumed. A machine with no tailnet must report "" —
+    even though the routing probe will happily hand back the default-route
+    address if the range check is dropped."""
+    import socket as _socket
+
+    class _FakeSock:
+        def __init__(self, addr): self._addr = addr
+        def settimeout(self, _t): pass
+        def connect(self, _a): pass
+        def getsockname(self): return (self._addr, 9)
+        def close(self): pass
+
+    def _no_hostname_addrs(*_a, **_k):
+        return [(None, None, None, None, ("192.168.1.7", 0))]
+
+    monkeypatch.setattr(cs.socket, "getaddrinfo", _no_hostname_addrs)
+    # Routing probe answers with the LAN address (no tailnet): must be "".
+    monkeypatch.setattr(cs.socket, "socket",
+                        lambda *a, **k: _FakeSock("192.168.1.7"))
+    assert cs.tailnet_ip() == ""
+    # Routing probe answers inside 100.64/10: that IS the tailnet.
+    monkeypatch.setattr(cs.socket, "socket",
+                        lambda *a, **k: _FakeSock("100.105.232.26"))
+    assert cs.tailnet_ip() == "100.105.232.26"
+    # Hostname enumeration alone is enough when it carries a tailnet address.
+    monkeypatch.setattr(cs.socket, "getaddrinfo", lambda *a, **k: [
+        (None, None, None, None, ("10.0.0.5", 0)),
+        (None, None, None, None, ("100.71.2.3", 0))])
+    monkeypatch.setattr(cs.socket, "socket",
+                        lambda *a, **k: _FakeSock("192.168.1.7"))
+    assert cs.tailnet_ip() == "100.71.2.3"
+    assert cs.tailnet_ip() != _socket.gethostname()
+
+
+def test_settings_copy_states_what_enabling_actually_does():
+    """The copy used to say "on my Wi-Fi". Enabling binds 0.0.0.0 — every
+    interface, VPN and tailnet included — so the copy has to say that."""
+    index = (_RENDERER / "index.html").read_text(encoding="utf-8")
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    label = index.split('name="companion_enabled"', 1)[1].split("</label>", 1)[0]
+    assert "every network interface" in label.lower()
+    assert "wi-fi" not in label.lower(), "the label must not claim Wi-Fi only"
+    body = app_js.split("async function _companionRefresh", 1)[1][:4000]
+    # Both the off-state and the listening-state copy say it plainly.
+    assert "EVERY network interface" in body
+    assert "every network interface on this PC" in body
+    # And neither claims Wi-Fi exclusivity any more.
+    assert "Listening on your Wi-Fi" not in body
+    assert "on this Wi-Fi." not in body
+
+
+def test_renderer_labels_each_address_and_skips_a_missing_tailnet():
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    body = app_js.split("async function _companionRefresh", 1)[1][:4000]
+    assert "on this network" in body
+    assert "from anywhere (Tailscale)" in body
+    # The tailnet row is pushed ONLY when the backend reported one.
+    assert "if (s.tailnet_url)" in body
+    assert body.index("addrs = [") < body.index("if (s.tailnet_url)")
+
+
+def test_inter_is_bundled_for_both_surfaces():
+    """Bundled so the PC and the phone render the SAME face. Inter is on
+    neither OS by default, so a stack alone fell through to Segoe UI here
+    and Roboto there."""
+    api_font = _STATIC / "fonts" / "InterVariable.woff2"
+    desk_font = _RENDERER / "fonts" / "InterVariable.woff2"
+    for f in (api_font, desk_font):
+        assert f.exists(), f
+        assert f.read_bytes()[:4] == b"wOF2", f"{f} is not a woff2"
+    # The SAME file on both surfaces — not two different cuts of Inter.
+    assert api_font.read_bytes() == desk_font.read_bytes()
+    # The OFL requires the license to travel with the font.
+    for lic in (_STATIC / "fonts" / "Inter-LICENSE.txt",
+                _RENDERER / "fonts" / "Inter-LICENSE.txt"):
+        assert lic.exists() and "SIL OPEN FONT LICENSE" in lic.read_text(
+            encoding="utf-8").upper()
+    # Declared at both ends, covering the full variable weight range.
+    css = (_RENDERER / "styles.css").read_text(encoding="utf-8")
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    for sheet, url in ((css, "fonts/InterVariable.woff2"),
+                       (html, "/static/fonts/InterVariable.woff2")):
+        face = sheet.split("@font-face", 1)[1].split("}", 1)[0]
+        assert url in face
+        assert "font-weight: 100 900" in face
+        assert "format('woff2')" in face
+    # And the font actually SERVES from the backend for the phone.
+    r = _pc().get("/static/fonts/InterVariable.woff2")
+    assert r.status_code == 200 and r.content[:4] == b"wOF2"
+
+
 def test_pairing_code_requires_the_toggle_first():
     r = _pc().post("/companion/pairing-code")
     assert r.status_code == 400

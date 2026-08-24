@@ -301,6 +301,45 @@ def lan_listener_reachable(ip: str, port: int) -> bool:
         return False
 
 
+_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")   # Tailscale's range
+
+
+def tailnet_ip() -> str:
+    """This machine's Tailscale address, DETECTED not assumed — empty when
+    there is no tailnet. Two independent probes, both validated against the
+    CGNAT range so a machine without Tailscale can never report a false one:
+    enumerate the host's own addresses, then ask the routing table which
+    source address reaches Tailscale's MagicDNS resolver (100.100.100.100).
+    The UDP connect() sends no packet; it only resolves the route."""
+    def _cgnat(addr: str) -> bool:
+        try:
+            return ipaddress.ip_address(addr) in _CGNAT_NET
+        except ValueError:
+            return False
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None,
+                                       socket.AF_INET):
+            addr = info[4][0]
+            if _cgnat(addr):
+                return addr
+    except (OSError, socket.gaierror):
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.settimeout(0.3)
+            s.connect(("100.100.100.100", 9))
+            addr = s.getsockname()[0]
+            # Without a tailnet the OS answers with the default-route
+            # address; the range check is what makes this honest.
+            return addr if _cgnat(addr) else ""
+        finally:
+            s.close()
+    except OSError:
+        return ""
+
+
 def pc_name() -> str:
     """A human label for THIS machine, for the phone's header — the phone is
     a window, and the window should say what it looks through to."""

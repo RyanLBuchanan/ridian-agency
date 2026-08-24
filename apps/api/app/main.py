@@ -266,6 +266,9 @@ async def companion_status(request: Request) -> dict:
     enabled = settings_service.get_bool_setting("companion_enabled",
                                                 default=False)
     ip = companion_service.lan_ip()
+    # Detected, never assumed: empty string when this machine has no tailnet,
+    # so the Settings view can omit the row instead of showing a dead one.
+    tailnet = await asyncio.to_thread(companion_service.tailnet_ip)
     port = request.url.port or 8000
     # PROBED, not inferred: connect to our own LAN socket. This is the only
     # answer that stays true across the frozen app, the dev launcher (which
@@ -280,6 +283,12 @@ async def companion_status(request: Request) -> dict:
         "restart_required": bool(enabled and not listening),
         "lan_ip": ip,
         "url": f"http://{ip}:{port}/companion" if ip else "",
+        # v6.9.2: enabling binds EVERY interface, so both addresses are real
+        # entry points. They are labelled separately because they mean
+        # different things: the LAN one works on this network, the tailnet
+        # one works anywhere both devices are signed in to Tailscale.
+        "tailnet_ip": tailnet,
+        "tailnet_url": f"http://{tailnet}:{port}/companion" if tailnet else "",
         "devices": companion_service.list_devices(),
         "pairing_locked": companion_service.pairing_locked(),
     }
