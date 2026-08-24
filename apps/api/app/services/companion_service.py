@@ -301,6 +301,15 @@ def lan_listener_reachable(ip: str, port: int) -> bool:
         return False
 
 
+def pc_name() -> str:
+    """A human label for THIS machine, for the phone's header — the phone is
+    a window, and the window should say what it looks through to."""
+    try:
+        return socket.gethostname() or "this PC"
+    except OSError:
+        return "this PC"
+
+
 def lan_ip() -> str:
     """The PC's LAN address, for the Settings view to display the companion
     URL. UDP connect() never sends a packet — it only resolves the route."""

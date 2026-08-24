@@ -239,13 +239,22 @@ async def companion_pair(payload: CompanionPairRequest) -> JSONResponse:
 
 @app.get("/companion/me")
 async def companion_me(request: Request) -> dict:
+    """Identity for the phone's header: WHICH PC this window is looking at,
+    plus the desktop's own theme choice so the companion matches it."""
+    saved = settings_service.load_settings()
+    base = {
+        "paired": True,
+        "pc_name": companion_service.pc_name(),
+        "company": (saved.get("company_name") or "").strip(),
+        "appearance": (saved.get("appearance") or "system").strip().lower(),
+    }
     device = request.scope.get("state", {}).get("companion_device")
     if device is not None:
-        return {"paired": True, "device_id": device.get("id"),
+        return {**base, "device_id": device.get("id"),
                 "name": device.get("name")}
     # Only a loopback caller can reach here without a device (the gate
     # refuses unpaired off-box requests before the route runs).
-    return {"paired": True, "loopback": True}
+    return {**base, "loopback": True}
 
 
 @app.get("/companion/status")

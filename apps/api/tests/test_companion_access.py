@@ -17,6 +17,7 @@ THE CONTRACT, pinned here:
   6. Wrong codes lock pairing; revocation kills a cookie immediately.
 """
 import datetime as dt
+import re as _re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -469,6 +470,69 @@ def test_companion_page_carries_its_contract():
     assert "text/event-stream" in html           # runs stream like the desktop
     manifest = (_STATIC / "companion-manifest.json").read_text(encoding="utf-8")
     assert '"start_url": "/companion"' in manifest
+
+
+def test_task_is_the_landing_surface_and_the_field_is_ready():
+    """An agent app opens on its command line: Task is the first tab, the
+    only section not pre-hidden, and the composer takes focus on boot."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    nav = html.split("<nav>", 1)[1].split("</nav>", 1)[0]
+    buttons = _re.findall(r'data-tab="([a-z]+)"', nav)
+    assert buttons[0] == "task", f"Task must be the first tab, got {buttons}"
+    assert set(buttons) == {"task", "due", "brief", "approvals"}
+    # Exactly the non-task sections ship hidden, so Task is what renders.
+    for tab in ("due", "brief", "approvals"):
+        assert f'<section id="tab-{tab}" class="hidden">' in html, tab
+    assert '<section id="tab-task">' in html
+    # ...and the Task nav button is the one marked active.
+    assert 'data-tab="task" class="active"' in nav
+    # The chat field is focused at boot, not merely present.
+    assert '$("task-input").focus({ preventScroll: true })' in html
+
+
+def test_visual_identity_matches_the_desktop():
+    """Same typeface stack, same blue, same mark, same card/button treatment
+    — read from the DESKTOP stylesheet, so a token change there that is not
+    mirrored here fails this test rather than drifting silently."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    css = (_RENDERER / "styles.css").read_text(encoding="utf-8")
+
+    def token(sheet: str, name: str, scope: str = ":root") -> str:
+        block = sheet.split(scope + " {", 1)[1].split("}", 1)[0]
+        line = next(l for l in block.splitlines() if l.strip().startswith(name + ":"))
+        return line.split(":", 1)[1].strip().rstrip(";")
+
+    # Typeface: the desktop's exact declared stack.
+    desktop_font = next(l.split(":", 1)[1].strip().rstrip(";")
+                        for l in css.splitlines()
+                        if l.strip().startswith("font-family: Inter"))
+    assert desktop_font in html, f"font stack drifted from {desktop_font!r}"
+
+    # The blue, the surfaces, the radii — light AND dark.
+    for name in ("--color-accent", "--color-surface", "--color-border",
+                 "--color-text-strong", "--radius-md", "--shadow-soft",
+                 "--gradient-primary"):
+        assert f"{name}: {token(css, name)}" in html, f"{name} drifted (light)"
+    for name in ("--color-accent", "--color-surface", "--color-bg"):
+        want = token(css, name, '[data-theme="dark"]')
+        assert f"{name}: {want}" in html, f"{name} drifted (dark)"
+
+    # The sunrise-waves mark, at the desktop's own brand-mark geometry.
+    assert 'class="brand-mark" src="/static/companion-icon-192.png"' in html
+    assert "width: 32px; height: 32px; border-radius: 9px" in html
+    # Button treatment: the .btn family, gradient primary + bordered ghost.
+    assert "btn-primary { background: var(--gradient-primary)" in html
+    assert "btn-ghost {" in html and "--color-border-strong" in html
+    # Cards use the surface/border/radius/shadow set, not ad-hoc colors.
+    assert "background: var(--color-surface);" in html
+
+
+def test_header_names_the_pc_not_just_the_phone():
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert '"Connected to " + pc' in html
+    assert "me.pc_name" in html
+    # The phone's own name is secondary, appended after the PC.
+    assert html.index("me.pc_name") < html.index('me.name ? " · " + me.name')
 
 
 def test_gate_passes_streaming_responses_through_untouched():
