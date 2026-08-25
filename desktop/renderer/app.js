@@ -7311,6 +7311,12 @@ function _railRenderThreads() {
     ops = _railOps.filter((op) => ids.has(op.project_id || ''));
   }
   if (q) ops = ops.filter((op) => (op.command || '').toLowerCase().includes(q));
+  const terminal = ops.filter((op) => op.status === 'failed' || op.status === 'cancelled');
+  const lbl = document.getElementById('rail-hide-terminal-label');
+  if (lbl) lbl.textContent = 'Hide failed & cancelled' + (terminal.length ? ` (${terminal.length})` : '');
+  if (_railHideTerminal && terminal.length) {
+    ops = ops.filter((op) => op.status !== 'failed' && op.status !== 'cancelled');
+  }
   list.innerHTML = '';
   // v6.1: only a backend that has ANSWERED may produce an empty state.
   if (_railThreadsState !== RAIL_STATE.READY) {
@@ -7631,6 +7637,21 @@ async function _folderArtifactsOpenFolder(run) {
    unknown-is-not-zero contract the morning brief uses. */
 const RAIL_STATE = { LOADING: 'loading', READY: 'ready', UNAVAILABLE: 'unavailable' };
 let _railThreadsState = RAIL_STATE.LOADING;
+// v6.9.4: one-click clutter filter — hides chats whose run ended failed or
+// cancelled. NEVER hides awaiting_input (a parked run is work to do) or
+// completed (history is the point of the list). Per-machine preference.
+const _HIDE_TERMINAL_KEY = 'ridian.hideTerminalRuns';
+let _railHideTerminal = false;
+try { _railHideTerminal = localStorage.getItem(_HIDE_TERMINAL_KEY) === '1'; } catch (_e) { /* storage off */ }
+const _railHideTerminalChk = document.getElementById('rail-hide-terminal');
+if (_railHideTerminalChk) {
+  _railHideTerminalChk.checked = _railHideTerminal;
+  _railHideTerminalChk.addEventListener('change', () => {
+    _railHideTerminal = _railHideTerminalChk.checked;
+    try { localStorage.setItem(_HIDE_TERMINAL_KEY, _railHideTerminal ? '1' : '0'); } catch (_e) { /* storage off */ }
+    _railRenderThreads();
+  });
+}
 let _railProjectsState = RAIL_STATE.LOADING;
 
 // Backend boot is normally under a second; keep retrying past that before

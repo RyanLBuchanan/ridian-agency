@@ -1331,6 +1331,23 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
+/* v6.9.4: terminal-state clutter filter, under the chat search. */
+.rail-terminal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 2px 0;
+  font-size: var(--fs-xs);
+  color: var(--color-muted-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.rail-terminal-toggle input {
+  accent-color: var(--color-accent);
+  margin: 0;
+}
+
 .rail-search {
   width: 100%;
   padding: 7px 10px;
