@@ -77,6 +77,14 @@ def _stage_invoice(tmp_path, op_id="op_inv", stated=(4500,)):
     out = _call("create_quickbooks_invoice", customer="Sandy Alvarez",
                 lines=[{"description": "Discovery engagement", "amount": 4500}])
     assert out.get("reason") == "invoice_plan_pending"
+    # v6.9.3: the liveness gate refuses execution when the owning run is
+    # missing — seed the parked owner every real staging leaves behind.
+    ops = state_store.load_list("operations")
+    if not any(o.get("id") == op_id for o in ops):
+        ops.insert(0, {"id": op_id, "status": "awaiting_input",
+                       "awaiting_input": True, "steps": [],
+                       "command": "Invoice Sandy for the discovery engagement"})
+        state_store.save("operations", ops)
 
 
 # --------------------------------------------------------------------------

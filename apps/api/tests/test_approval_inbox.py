@@ -68,13 +68,23 @@ def _call(_tool_name, **kwargs):
 _LINES = [{"description": "Discovery engagement", "amount": 4500}]
 
 
-def _stage_invoice(tmp_path, stated=(4500,)):
+def _stage_invoice(tmp_path, stated=(4500,), owner_status="awaiting_input"):
     """Stage an invoice approval in a 'thread', then drop that thread's
-    context entirely — the inbox is all that remains."""
+    context entirely — the inbox is all that remains. A persisted owner run
+    is seeded too (v6.9.3): staging only ever happens when a run parks, and
+    parks persist — and the liveness gate refuses execution for an approval
+    whose owner is terminal or missing."""
     op = _op(tmp_path, stated=list(stated))
     out = _call("create_quickbooks_invoice", customer="Sandy Alvarez",
                 lines=[dict(l) for l in _LINES])
     assert out.get("reason") == "invoice_plan_pending"
+    ops = state_store.load_list("operations")
+    ops.insert(0, {"id": op.record["id"], "status": owner_status,
+                   "command": op.record["command"],
+                   "awaiting_input": owner_status == "awaiting_input",
+                   "needs_input": list(op.record.get("needs_input") or []),
+                   "steps": []})
+    state_store.save("operations", ops)
     set_current_operator(None)                       # the thread is GONE
     return op
 
@@ -221,6 +231,12 @@ def test_approving_restore_from_inbox_restores_state(tmp_path):
     _call("add_contact", name="Casey Reed")
     out = _call("restore_backup", timestamp=snap_id)
     assert out.get("reason") == "restore_pending"
+    # v6.9.3 liveness gate: seed the parked owner run every real staging
+    # leaves behind, so the approval's owner reads as live.
+    ops = state_store.load_list("operations")
+    ops.insert(0, {"id": "op_restore", "status": "awaiting_input",
+                   "awaiting_input": True, "steps": [], "command": "restore"})
+    state_store.save("operations", ops)
     set_current_operator(None)                       # thread gone
 
     appr = next(a for a in approval_inbox_service.list_pending()

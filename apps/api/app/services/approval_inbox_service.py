@@ -107,6 +107,34 @@ def stage_from_tool(tool_name: str, kwargs: dict, result: dict) -> Optional[dict
     return entry
 
 
+# Owner statuses under which a staged approval is still LIVE. Everything
+# else — cancelled, failed, completed, partial, or a missing record — is
+# terminal: the staged action must never execute from a dead run. This is
+# the deterministic fix for the 2026-08-20 incident where cancelling an
+# invoice run left its $500 approval answerable for five days.
+LIVE_OWNER_STATUSES = frozenset({"awaiting_input", "running"})
+
+
+def void_for_operation(operation_id: str, why: str) -> int:
+    """Void every PENDING approval owned by ``operation_id``. Called by
+    dismiss_operation so cancelling a run kills its staged approvals in the
+    same breath. Returns how many were voided. The outcome text contains
+    "declined" deliberately — the audit log classifies by that word, and a
+    void IS an automatic decline."""
+    items = _load()
+    voided = 0
+    for a in items:
+        if a.get("operation_id") == operation_id and a.get("status") == "pending":
+            a["status"] = "declined"
+            a["answered_at"] = _now_iso()
+            a["outcome"] = f"declined automatically — voided: {why}"
+            voided += 1
+    if voided:
+        state_store.save(_STORE, items)
+        log.info("approvals.voided op=%s count=%s", operation_id, voided)
+    return voided
+
+
 def list_pending(now: Optional[_dt.datetime] = None) -> list[dict]:
     """Pending approvals, newest first, each with a computed ``stale`` flag
     (staged 7+ days ago). ``now`` is injectable for deterministic tests."""
@@ -237,6 +265,24 @@ async def answer_approval(approval_id: str, value: str) -> dict:
         return {"declined": True, "approval": appr["id"]}
     if not approved:
         return {"error": "No gate recognized that answer — nothing was done."}
+
+    # DETERMINISTIC liveness gate (v6.9.3): approving executes the staged
+    # tool, so the owning run must still be live. A terminal or missing
+    # owner voids the approval right here — refused AND cleared, never
+    # merely hidden — so a stale approval cannot sit approvable the way
+    # the 2026-08-20 $500 invoice did after its run was cancelled.
+    owner = next((o for o in state_store.load_list("operations")
+                  if o.get("id") == appr.get("operation_id")), None)
+    owner_status = str((owner or {}).get("status", ""))
+    if owner is None or owner_status not in LIVE_OWNER_STATUSES:
+        _mark(approval_id, "declined",
+              f"declined automatically — voided at answer time: owning run "
+              f"is {owner_status or 'missing'}")
+        return {"error": (f"REFUSED: this approval's owning run is "
+                          f"{owner_status or 'missing'} — the staged action "
+                          "was voided, nothing was executed. Re-run the "
+                          "command if you still want this."),
+                "reason": "owner_terminal"}
 
     tool = next((t for t in PLANNER_TOOLS if t.name == appr.get("tool")), None)
     if tool is None:

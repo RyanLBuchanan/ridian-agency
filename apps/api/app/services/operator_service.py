@@ -912,8 +912,10 @@ def dismiss_operation(operation_id: str) -> dict:
     """v6.7: the operator explicitly CANCELS a pending (awaiting-input)
     task. Drops the live session so nothing can resume it, and marks the
     persisted record cancelled so history and the morning brief stop
-    reporting it as waiting. Staged approvals in the inbox are untouched —
-    they remain independently answerable there."""
+    reporting it as waiting. v6.9.3: staged approvals owned by the run are
+    VOIDED in the same breath — the earlier behavior (leaving them
+    "independently answerable") left a cancelled run's $500 invoice
+    approval live in the inbox for five days."""
     _drop_session(operation_id)
     ops = state_store.load_list("operations")
     changed = False
@@ -929,6 +931,8 @@ def dismiss_operation(operation_id: str) -> dict:
             changed = True
     if changed:
         state_store.save("operations", ops)
+        from .approval_inbox_service import void_for_operation  # lazy: cycle
+        void_for_operation(operation_id, "owning run cancelled by the operator")
     return {"cancelled": changed, "operation_id": operation_id}
 
 
