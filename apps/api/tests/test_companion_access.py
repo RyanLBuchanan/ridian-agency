@@ -344,19 +344,33 @@ def test_resolve_backend_host_rules(monkeypatch):
 # 7. Companion admin surface (PC side)
 # --------------------------------------------------------------------------
 
+def _free_port() -> int:
+    """A port with nothing listening: bind to 0, read it back, release it.
+    The status tests probe THIS instead of the real port 8000 — on the dev
+    machine the LIVE app may be listening there, and these tests must not
+    depend on (or touch) it."""
+    import socket as _s
+    with _s.socket() as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 def test_status_reports_devices_and_restart_state(monkeypatch):
     """restart_required comes from the PROBE, not from RIDIAN_BOUND_HOST:
     an env var claiming 0.0.0.0 must NOT make the UI promise reachability
     that no socket backs (the probe pin lives in
     test_status_probes_the_listener_instead_of_trusting_the_setting)."""
     lan, device_id = _paired_lan()
-    out = _pc().get("/companion/status").json()
+    port = _free_port()
+    pc = TestClient(app, base_url=f"http://testserver:{port}",
+                    client=("127.0.0.1", 50000))
+    out = pc.get("/companion/status").json()
     assert out["enabled"] is True
     assert out["devices"][0]["id"] == device_id
     assert out["devices"][0]["name"] == "Pixel 7"
     assert out["url"].endswith("/companion")
     monkeypatch.setenv("RIDIAN_BOUND_HOST", "0.0.0.0")
-    out = _pc().get("/companion/status").json()
+    out = pc.get("/companion/status").json()
     assert out["bound_host"] == "0.0.0.0"        # reported, not trusted
     assert out["lan_listening"] is False
     assert out["restart_required"] is True
@@ -580,10 +594,27 @@ def test_non_ascii_pairing_code_is_a_wrong_code_not_a_crash():
 
 def test_status_probes_the_listener_instead_of_trusting_the_setting():
     """restart_required is answered by a real connect to our own LAN socket
-    — the settings toggle only takes effect at the next start."""
+    — the settings toggle only takes effect at the next start. Proven in
+    BOTH directions on a scratch port this test controls (never the real
+    port 8000, where the dev machine's LIVE app may be listening): a
+    listener the test opens is found; the same port closed is not."""
+    import socket as _s
+
     _enable()
-    out = _pc().get("/companion/status").json()
-    # Nothing is actually listening in-process under TestClient.
+    if not cs.lan_ip():
+        import pytest as _pytest
+        _pytest.skip("machine has no LAN address to probe")
+    with _s.socket() as srv:
+        srv.bind(("0.0.0.0", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        pc = TestClient(app, base_url=f"http://testserver:{port}",
+                        client=("127.0.0.1", 50000))
+        out = pc.get("/companion/status").json()
+        assert out["lan_listening"] is True      # the probe found OUR socket
+        assert out["restart_required"] is False
+    # Socket closed: the same port now honestly reports not-listening.
+    out = pc.get("/companion/status").json()
     assert out["lan_listening"] is False
     assert out["restart_required"] is True
     assert cs.lan_listener_reachable("", 8000) is False
@@ -798,7 +829,7 @@ def test_arms_length_type_and_touch_targets():
     desktop's exactly (test_visual_identity_matches_the_desktop); only the
     phone's own type-scale/touch tokens differ."""
     html = (_STATIC / "companion.html").read_text(encoding="utf-8")
-    assert "--fs-body: 1.125rem" in html          # 18px at the default root
+    assert "--fs-body: 1.25rem" in html           # 20px at the default root
     assert "--touch-min: 48px" in html
     nav_css = html.split("nav button {", 1)[1].split("}", 1)[0]
     assert "min-height: var(--touch-min)" in nav_css
@@ -814,3 +845,73 @@ def test_arms_length_type_and_touch_targets():
     assert "var(--color-muted)" in meta_css
     assert "var(--fs-sm)" in meta_css
     assert "var(--color-muted-soft)" not in meta_css
+
+
+def test_companion_brief_names_the_sender_like_the_desktop():
+    """FIELD BUG (v6.9.6): the companion's needs_reply line read
+    i.from_name / i.from_email — keys that exist on NO row that
+    normalize_thread/classify produce — so every item rendered as an
+    orphaned ": Subject" while the desktop (reading contact.name /
+    last_from) named the sender fine. Pin the companion to the row's REAL
+    keys, to the desktop's precedence (contact join first, then the bare
+    address), and to subject-alone when there is no sender."""
+    from app.services import inbox_service
+
+    raw = {"id": "t1", "messages": [{
+        "internalDate": "1756600000000",
+        "snippet": "renewal is due",
+        "payload": {"headers": [
+            {"name": "Subject", "value": "Business License"},
+            {"name": "From",
+             "value": "Dorothy de la Parra <dorothy@example.com>"},
+            {"name": "To", "value": "ryan@ridiantechnologies.com"},
+        ]},
+    }]}
+    row = inbox_service.normalize_thread(raw, "ryan@ridiantechnologies.com")
+    item = inbox_service.classify([row], contacts={
+        "dorothy@example.com": {"name": "Dorothy de la Parra",
+                                "contact_id": "c1", "in_pipeline": False},
+    })["needs_reply"][0]
+    assert item["contact"]["name"] == "Dorothy de la Parra"
+    assert item["last_from"] == "dorothy@example.com"
+    assert item["subject"] == "Business License"
+
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    entry = html.split('["needs_reply"', 1)[1].split("],", 1)[0]
+    # Every i.<key> the formatter reads must exist on the real row.
+    for key in set(_re.findall(r"\bi\.(\w+)", entry)):
+        assert key in item, f"companion reads i.{key}, which is not on the row"
+    # The desktop's precedence: contact join names the sender, else address.
+    assert entry.index("contact") < entry.index("last_from")
+    # The phantom keys are gone for good.
+    assert "from_name" not in html and "from_email" not in html
+    # No sender: the subject alone — never an orphaned ": Subject".
+    assert 'who ? ' in entry and ': (i.subject || "")' in entry
+
+
+def test_second_type_step_briefs_and_tabs_read_at_arms_length():
+    """v6.9.6: the operator's Android font scale is already raised, so the
+    APP carries the size — 20px body, 16px section eyebrows at full text
+    color, brief items in strong color, and a four-tab bar (no hamburger)
+    with an icon above each label and an unmistakable active state. Still
+    rem-based so the system setting multiplies on top."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert "--fs-body: 1.25rem" in html
+    assert "--fs-eyebrow: 1rem" in html
+    h2 = html.split("\nh2 {", 1)[1].split("}", 1)[0]
+    assert "var(--fs-eyebrow)" in h2 and "var(--color-text)" in h2
+    assert "muted" not in h2
+    # Brief card text is primary reading: strong, never the dimmest thing.
+    assert "#brief-body .card { color: var(--color-text-strong); }" in html
+    # Four tabs stay, each with an icon above its label.
+    nav = html.split("<nav>", 1)[1].split("</nav>", 1)[0]
+    assert len(_re.findall(r'data-tab="[a-z]+"', nav)) == 4
+    assert nav.count("<svg") == 4
+    btn = html.split("nav button {", 1)[1].split("}", 1)[0]
+    assert "flex-direction: column" in btn
+    assert "var(--fs-eyebrow)" in btn                # 16px labels
+    assert "border-top: 3px" in btn
+    # The active tab reads at a glance: accent text + bar + soft fill.
+    active = html.split("nav button.active {", 1)[1].split("}", 1)[0]
+    assert "var(--color-accent)" in active
+    assert "var(--color-accent-soft)" in active

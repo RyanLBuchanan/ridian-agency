@@ -68,13 +68,16 @@
   --space-3: 1rem;
   --space-4: 1.5rem;
 
-  /* Phone type scale — larger than the desktop's on purpose. Rem-based so
-     the reader's own browser font-size setting still scales everything. */
-  --fs-xs: 0.875rem;    /* 14px — badges, tab labels, eyebrows */
-  --fs-sm: 1rem;        /* 16px — meta lines, notes, log steps */
-  --fs-body: 1.125rem;  /* 18px — body, inputs, cards */
-  --fs-lead: 1.25rem;   /* 20px */
-  --touch-min: 48px;    /* minimum tap-target height: tabs and every button */
+  /* Phone type scale — larger than the desktop's on purpose, stepped up
+     again in v6.9.6: the operator reads at arm's length with Android font
+     scaling already raised, so the APP carries the size. Rem-based so the
+     system setting still multiplies on top rather than being relied on. */
+  --fs-xs: 0.9375rem;   /* 15px — badges, hints */
+  --fs-sm: 1.0625rem;   /* 17px — meta lines, notes, log steps, buttons */
+  --fs-body: 1.25rem;   /* 20px — body, inputs, cards */
+  --fs-lead: 1.375rem;  /* 22px */
+  --fs-eyebrow: 1rem;   /* 16px — section headings, tab labels */
+  --touch-min: 48px;    /* minimum tap-target height: every button */
 }
 
 [data-theme="dark"] {
@@ -155,7 +158,7 @@ header.brand {
 
 /* Fluid on any phone; capped only so tablet lines stay readable. */
 main {
-  padding: var(--space-3) var(--space-3) calc(84px + env(safe-area-inset-bottom));
+  padding: var(--space-3) var(--space-3) calc(112px + env(safe-area-inset-bottom));
   max-width: 680px; margin: 0 auto;
 }
 
@@ -165,19 +168,29 @@ nav {
   background: var(--color-surface); border-top: 1px solid var(--color-border);
   padding-bottom: env(safe-area-inset-bottom);
 }
+/* Four tabs, kept — but sized like tabs, not footnotes: icon above a
+   16px label, generous vertical padding (the whole column is the target,
+   min-height is a floor the content comfortably exceeds), and an active
+   state readable at a glance: accent text + 3px bar + soft accent fill. */
 nav button {
   flex: 1; background: none; border: 0; color: var(--color-muted);
-  font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  font: inherit; font-size: var(--fs-eyebrow); font-weight: 600;
   letter-spacing: 0.02em; min-height: var(--touch-min);
-  padding: 12px 4px 10px; position: relative;
-  border-top: 2px solid transparent; margin-top: -1px;
+  padding: 10px 4px 12px; position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 3px;
+  border-top: 3px solid transparent; margin-top: -1px;
 }
-nav button.active { color: var(--color-accent); border-top-color: var(--color-accent); }
+nav button svg { width: 26px; height: 26px; }
+nav button.active {
+  color: var(--color-accent); border-top-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
 nav button .cnt {
-  position: absolute; top: 5px; right: 20%;
+  position: absolute; top: 6px; right: 18%;
   background: var(--color-error-text); color: #fff;
   border-radius: var(--radius-pill);
-  font-size: 11.5px; font-weight: 700; min-width: 19px; padding: 1px 6px;
+  font-size: 12.5px; font-weight: 700; min-width: 20px; padding: 1px 6px;
 }
 
 /* ---------- cards ---------- */
@@ -197,11 +210,17 @@ nav button .cnt {
   margin-top: 4px; overflow-wrap: anywhere;
 }
 
+/* Section eyebrows (OBLIGATIONS DUE, TODAY'S CALENDAR) — full text color
+   at their own step, not small grey caps. */
 h2 {
-  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
-  font-weight: 700; color: var(--color-muted);
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700; color: var(--color-text);
   margin: var(--space-4) 2px var(--space-1);
 }
+
+/* Brief items are the page's primary reading — strong color, never the
+   dimmest thing on screen. */
+#brief-body .card { color: var(--color-text-strong); }
 
 /* ---------- buttons: the desktop .btn family ---------- */
 .btn {
@@ -227,7 +246,7 @@ h2 {
 
 /* ---------- badges ---------- */
 .badge {
-  display: inline-block; font-size: 12px; font-weight: 700;
+  display: inline-block; font-size: 13px; font-weight: 700;
   letter-spacing: 0.04em; border-radius: var(--radius-sm);
   padding: 2px 8px; vertical-align: 1px; border: 1px solid transparent;
 }
@@ -348,10 +367,10 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
     </section>
   </main>
   <nav>
-    <button data-tab="task" class="active">Task</button>
-    <button data-tab="due">Due<span class="cnt hidden" id="cnt-due"></span></button>
-    <button data-tab="brief">Brief</button>
-    <button data-tab="approvals">Approvals<span class="cnt hidden" id="cnt-appr"></span></button>
+    <button data-tab="task" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Task</button>
+    <button data-tab="due"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Due<span class="cnt hidden" id="cnt-due"></span></button>
+    <button data-tab="brief"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Brief</button>
+    <button data-tab="approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Approvals<span class="cnt hidden" id="cnt-appr"></span></button>
   </nav>
 </div>
 
@@ -523,7 +542,13 @@ async function loadDue() {
 const BRIEF_ORDER = [
   ["obligations_due", "Obligations due", (i) => `${i.status === "overdue" ? "OVERDUE " + i.days_overdue + "d — " : "Due today — "}${i.name}`],
   ["today_events", "Today's calendar", (i) => `${i.all_day ? "All day" : String(i.start || "").replace("T", " ").slice(11, 16)} — ${i.summary}`],
-  ["needs_reply", "Needs a reply", (i) => `${i.from_name || i.from_email || ""}: ${i.subject || ""}`],
+  // The sender is contact.name (the contacts join) or last_from — the SAME
+  // fields the desktop brief reads. No sender: the subject alone, never an
+  // orphaned ": Subject".
+  ["needs_reply", "Needs a reply", (i) => {
+    const who = (i.contact && i.contact.name) || i.last_from || "";
+    return who ? `${who}: ${i.subject || ""}` : (i.subject || "");
+  }],
   ["due_today", "Due today", (i) => `${i.overdue ? "OVERDUE — " : ""}${i.title} (${i.next_action || ""})`],
   ["due_this_week", "Due this week", (i) => `${i.title} — ${i.next_action_date || ""}`],
   ["stale_deals", "Gone quiet", (i) => i.title],
