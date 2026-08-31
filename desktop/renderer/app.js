@@ -3151,6 +3151,8 @@ function applySettingsToForm(settings) {
     }
   }
   if (els.settingsOutputsPath) els.settingsOutputsPath.textContent = settings.outputs_path || '—';
+  // Programmatic (re)load: the form now mirrors the stored truth.
+  _settingsDirty = false;
 }
 
 async function loadSettingsIntoForm() {
@@ -3193,7 +3195,22 @@ const WORKSPACE_VIEW_IDS = ['settings-view', 'brief-view', 'approvals-view',
                             'audit-view', 'obligations-view'];
 let _activeWorkspaceView = null;
 
+// v6.9.5: unsaved settings edits are the one thing navigation may not
+// silently discard. Set by any input/change inside the settings form,
+// cleared when the form is (re)loaded from the backend or saved.
+let _settingsDirty = false;
+
 function _showWorkspaceView(id) {
+  // Leaving Settings with unsaved edits requires consent — EVERY route out
+  // (another view, Escape, New chat, a thread click) funnels through here,
+  // so the guard cannot be bypassed by one forgotten call site.
+  if (_activeWorkspaceView === 'settings-view' && id !== 'settings-view'
+      && _settingsDirty) {
+    if (!window.confirm('You have unsaved settings changes. Discard them and leave?')) {
+      return false;
+    }
+    _settingsDirty = false;              // consent given — they are gone
+  }
   const main = document.querySelector('.operator-main');
   for (const viewId of WORKSPACE_VIEW_IDS) {
     const el = document.getElementById(viewId);
@@ -3205,6 +3222,7 @@ function _showWorkspaceView(id) {
   // and close a view that is no longer the one on screen.
   document.removeEventListener('keydown', _workspaceViewKeydown);
   if (id) document.addEventListener('keydown', _workspaceViewKeydown);
+  return true;
 }
 
 function _workspaceViewKeydown(e) {
@@ -3259,7 +3277,7 @@ async function _applyHotkeyFromForm() {
 function openSettings() {
   const view = document.getElementById('settings-view');
   if (!view) return;
-  _showWorkspaceView('settings-view');
+  if (!_showWorkspaceView('settings-view')) return;
   // Always open at the top. (The old modal auto-focused a mid-form field,
   // which scrolled it open mid-list — no autofocus, explicit scrollTop.)
   const scroll = view.querySelector('.settings-scroll');
@@ -3312,7 +3330,7 @@ function handleTipsKeydown(e) {
 }
 
 function closeSettings() {
-  _showWorkspaceView(null);
+  if (!_showWorkspaceView(null)) return;
   setSettingsStatus('');
 }
 
@@ -3355,7 +3373,7 @@ async function saveSettings(e) {
       throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     }
     cachedSettings = data;
-    applySettingsToForm(data);
+    applySettingsToForm(data);           // also clears _settingsDirty
     applyTheme(data.appearance);
     pollHealth();
     // Surface the Drive root-folder validation result inline. The save
@@ -3720,7 +3738,13 @@ if (els.tipsModal) {
 }
 if (els.settingsCloseBtn) els.settingsCloseBtn.addEventListener('click', closeSettings);
 if (els.settingsCancelBtn) els.settingsCancelBtn.addEventListener('click', closeSettings);
-if (els.settingsForm) els.settingsForm.addEventListener('submit', saveSettings);
+if (els.settingsForm) {
+  els.settingsForm.addEventListener('submit', saveSettings);
+  // Any user edit arms the unsaved-changes guard ('input' covers typing,
+  // 'change' covers selects and checkboxes).
+  els.settingsForm.addEventListener('input', () => { _settingsDirty = true; });
+  els.settingsForm.addEventListener('change', () => { _settingsDirty = true; });
+}
 if (els.settingsTestEmailBtn) els.settingsTestEmailBtn.addEventListener('click', testEmailSettings);
 const _rootFolderTestBtn = document.getElementById('settings-root-folder-test-btn');
 if (_rootFolderTestBtn) _rootFolderTestBtn.addEventListener('click', testRootFolderAccess);
@@ -6181,6 +6205,9 @@ async function _opEmailMe() {
 async function loadOperatorRun(run) {
   if (!run || !run.artifact_folder) return;
 
+  // v6.9.5: same rule as _opNewChat — a thread click from inside a view
+  // closes the view (or is refused by the unsaved-settings guard).
+  if (!_showWorkspaceView(null)) return;
   // Always land on the Operator surface (welcome view).
   setWorkspaceView('welcome');
   _opResetUI();
@@ -7684,6 +7711,12 @@ async function _railThreadsFill() {
 
 // New chat: abort any in-flight run, clear the thread, fresh composer.
 function _opNewChat() {
+  // v6.9.5: nav goes WHERE YOU CLICKED, whatever view is up. Route through
+  // the manager so an open Settings/Brief/etc. closes (and the unsaved-
+  // settings guard can refuse) BEFORE the chat pane is touched. This was
+  // the "New chat does nothing inside Settings" bug: the reset ran fine,
+  // against a display:none chat pane.
+  if (!_showWorkspaceView(null)) return;
   if (operatorState.abortController) {
     try { operatorState.abortController.abort(); } catch (_) {}
   }
@@ -7717,6 +7750,10 @@ function _opProjectChipUpdate() {
 }
 
 function _railSelectProject(projectId) {
+  // v6.9.5: selecting a project is navigation too — its chats and folder
+  // panel live in the chat pane, so an open view closes (or the unsaved-
+  // settings guard refuses and the selection stands unchanged).
+  if (!_showWorkspaceView(null)) return;
   // Clicking the active project again deselects (back to All chats).
   _activeProjectId = projectId === _activeProjectId ? '' : (projectId || '');
   try { window.localStorage.setItem(_ACTIVE_PROJECT_KEY, _activeProjectId); } catch (_) {}
@@ -7963,14 +8000,14 @@ async function loadMorningBrief() {
 
 function openMorningBrief() {
   if (!document.getElementById('brief-view')) return;
-  _showWorkspaceView('brief-view');
+  if (!_showWorkspaceView('brief-view')) return;
   const scroll = document.getElementById('brief-scroll');
   if (scroll) scroll.scrollTop = 0;
   loadMorningBrief();
 }
 
 function closeMorningBrief() {
-  _showWorkspaceView(null);
+  if (!_showWorkspaceView(null)) return;
 }
 
 const _railBriefBtn = document.getElementById('rail-brief-btn');
@@ -8058,12 +8095,12 @@ async function refreshApprovalsBadge() {
 
 function openApprovals() {
   if (!document.getElementById('approvals-view')) return;
-  _showWorkspaceView('approvals-view');
+  if (!_showWorkspaceView('approvals-view')) return;
   loadApprovals();
 }
 
 function closeApprovals() {
-  _showWorkspaceView(null);
+  if (!_showWorkspaceView(null)) return;
 }
 
 /* ============================================================ */
@@ -8124,12 +8161,12 @@ async function loadAuditLog() {
 
 function openAuditLog() {
   if (!document.getElementById('audit-view')) return;
-  _showWorkspaceView('audit-view');
+  if (!_showWorkspaceView('audit-view')) return;
   loadAuditLog();
 }
 
 function closeAuditLog() {
-  _showWorkspaceView(null);
+  if (!_showWorkspaceView(null)) return;
 }
 
 ['audit-from', 'audit-to', 'audit-type', 'audit-outcome'].forEach((id) => {
@@ -8307,12 +8344,12 @@ async function refreshObligationsDue() {
 
 function openObligations() {
   if (!document.getElementById('obligations-view')) return;
-  _showWorkspaceView('obligations-view');
+  if (!_showWorkspaceView('obligations-view')) return;
   loadObligations();
 }
 
 function closeObligations() {
-  _showWorkspaceView(null);
+  if (!_showWorkspaceView(null)) return;
 }
 
 const _railObligationsBtn = document.getElementById('rail-obligations-btn');

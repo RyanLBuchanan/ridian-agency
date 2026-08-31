@@ -356,6 +356,76 @@ app.whenReady().then(async () => {
     }
   }
 
+  // --- v6.9.5: navigation from INSIDE views ------------------------------
+  // The reported bug: "New chat" inside Settings did nothing visible. Any
+  // rail navigation must land where the user clicked, from any view, and
+  // unsaved settings edits must be guarded by a confirm, not discarded.
+  console.log('\n--- Nav from inside views ---');
+  const nav = await win.webContents.executeJavaScript(`(async () => {
+    const wait = () => new Promise((r) => setTimeout(r, 150));
+    const state = () => {
+      const views = ['settings-view','brief-view','approvals-view','audit-view','obligations-view']
+        .filter((id) => !document.getElementById(id).classList.contains('hidden'));
+      const main = getComputedStyle(document.querySelector('.operator-main')).display;
+      return { views, main };
+    };
+    const out = {};
+    // 1. New chat from inside Settings goes to the chat pane.
+    document.getElementById('rail-settings-btn').click(); await wait();
+    document.getElementById('rail-new-chat').click(); await wait();
+    out.newChatFromSettings = state();
+    // 2. Dirty settings + refuse the confirm -> navigation is refused.
+    document.getElementById('rail-settings-btn').click(); await wait();
+    const nameField = document.getElementById('settings-form').elements.namedItem('operator_name');
+    nameField.value = 'edited-but-not-saved';
+    nameField.dispatchEvent(new Event('input', { bubbles: true }));
+    const realConfirm = window.confirm;
+    let confirmAsked = 0;
+    window.confirm = () => { confirmAsked += 1; return false; };
+    document.getElementById('rail-new-chat').click(); await wait();
+    out.dirtyRefused = { views: state().views, main: state().main, confirmAsked };
+    // 3. Same edit, accept the confirm -> navigation proceeds.
+    window.confirm = () => { confirmAsked += 1; return true; };
+    document.getElementById('rail-new-chat').click(); await wait();
+    out.dirtyConfirmed = { views: state().views, main: state().main, confirmAsked };
+    window.confirm = realConfirm;
+    // 4. Every view reachable from inside every other (5x4 ordered pairs).
+    const RAIL = { 'settings-view': 'rail-settings-btn', 'brief-view': 'rail-brief-btn',
+                   'approvals-view': 'rail-approvals-btn', 'audit-view': 'rail-audit-btn',
+                   'obligations-view': 'rail-obligations-btn' };
+    let pairsOk = 0, pairsTried = 0; const pairFails = [];
+    for (const from of Object.keys(RAIL)) {
+      for (const to of Object.keys(RAIL)) {
+        if (from === to) continue;
+        pairsTried += 1;
+        document.getElementById(RAIL[from]).click(); await wait();
+        document.getElementById(RAIL[to]).click(); await wait();
+        const s = state();
+        if (s.views.length === 1 && s.views[0] === to && s.main === 'none') pairsOk += 1;
+        else pairFails.push(from + '->' + to + ':' + JSON.stringify(s));
+      }
+    }
+    out.crossNav = { pairsOk, pairsTried, pairFails };
+    if (typeof closeSettings === 'function') closeSettings();
+    return out;
+  })()`, true);
+  console.log(`  newChatFromSettings: views=[${nav.newChatFromSettings.views}] main=${nav.newChatFromSettings.main}`);
+  console.log(`  dirtyRefused: views=[${nav.dirtyRefused.views}] confirmAsked=${nav.dirtyRefused.confirmAsked}`);
+  console.log(`  dirtyConfirmed: views=[${nav.dirtyConfirmed.views}] main=${nav.dirtyConfirmed.main}`);
+  console.log(`  crossNav: ${nav.crossNav.pairsOk}/${nav.crossNav.pairsTried} pairs ok`);
+  if (nav.newChatFromSettings.views.length || nav.newChatFromSettings.main === 'none') {
+    allProblems.push('nav: New chat from Settings did not reach the chat pane');
+  }
+  if (nav.dirtyRefused.views.join() !== 'settings-view' || nav.dirtyRefused.confirmAsked !== 1) {
+    allProblems.push('nav: dirty-settings refusal did not hold the view');
+  }
+  if (nav.dirtyConfirmed.views.length || nav.dirtyConfirmed.main === 'none') {
+    allProblems.push('nav: dirty-settings confirm did not release the view');
+  }
+  if (nav.crossNav.pairsOk !== nav.crossNav.pairsTried) {
+    allProblems.push('nav: cross-view pairs failed: ' + nav.crossNav.pairFails.join('; '));
+  }
+
   console.log('\n--- Settings view ---');
   await win.webContents.executeJavaScript(
     '(() => { if (typeof closeSettings === "function") closeSettings(); })()', true);

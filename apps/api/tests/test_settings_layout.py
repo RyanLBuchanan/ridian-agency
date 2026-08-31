@@ -119,6 +119,37 @@ def test_switching_views_never_leaves_two_owners_of_the_cell(harness_output):
     assert width > 400, f"chat pane collapsed: {after_close}"
 
 
+def test_nav_from_inside_views_lands_where_clicked(harness_output):
+    """v6.9.5, THE reported bug: "New chat" inside Settings did nothing —
+    the reset ran against a display:none chat pane. Measured in Chromium:
+    New chat from Settings reaches the chat pane; a dirty settings form
+    refuses navigation exactly once via confirm and holds the view; consent
+    releases it; and every view opens from inside every other (20 ordered
+    pairs through the rail buttons)."""
+    nav = harness_output.split("Nav from inside views", 1)[1]
+    assert "newChatFromSettings: views=[] main=flex" in nav, nav[:600]
+    assert "dirtyRefused: views=[settings-view] confirmAsked=1" in nav, nav[:600]
+    assert "dirtyConfirmed: views=[] main=flex" in nav, nav[:600]
+    assert "crossNav: 20/20 pairs ok" in nav, nav[:600]
+
+
+def test_chat_pane_navigation_routes_through_the_manager():
+    """Structural: the three chat-pane navigations consult the view manager
+    (and therefore the unsaved-settings guard) BEFORE touching the pane."""
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    for fn in ("_opNewChat", "loadOperatorRun", "_railSelectProject"):
+        head = app_js.split(f"function {fn}(", 1)[1][:1200]
+        assert "if (!_showWorkspaceView(null)) return;" in head, \
+            f"{fn} does not route through the view manager"
+    # The guard lives in the manager itself — the one unbypassable spot.
+    mgr = app_js.split("function _showWorkspaceView(", 1)[1][:1600]
+    assert "_settingsDirty" in mgr and "confirm(" in mgr
+    # Dirty is armed by form edits and cleared by load and by save-success
+    # (applySettingsToForm runs in both paths).
+    assert "els.settingsForm.addEventListener('input', () => { _settingsDirty = true; })" in app_js
+    assert app_js.count("_settingsDirty = false") >= 2
+
+
 def test_all_four_views_route_through_one_manager():
     """Structural pin: no view may hide/show .operator-main on its own."""
     app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
