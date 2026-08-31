@@ -20,8 +20,11 @@
   font-display: block;
 }
 
-/* Tokens lifted verbatim from the desktop renderer (styles.css) so the phone
-   and the PC read as one product, not two that resemble each other. */
+/* PALETTE lifted verbatim from the desktop renderer (styles.css) so the
+   phone and the PC read as one product, not two that resemble each other —
+   pinned by test_visual_identity_matches_the_desktop. The TYPE SCALE and
+   touch tokens below it are deliberately the phone's own: this surface is
+   read at arm's length and driven by thumbs. */
 :root {
   --color-bg: #f7f8fa;
   --color-bg-soft: #f1f3f7;
@@ -65,10 +68,13 @@
   --space-3: 1rem;
   --space-4: 1.5rem;
 
-  --fs-xs: 0.78rem;
-  --fs-sm: 0.86rem;
-  --fs-body: 0.98rem;
-  --fs-lead: 1.06rem;
+  /* Phone type scale — larger than the desktop's on purpose. Rem-based so
+     the reader's own browser font-size setting still scales everything. */
+  --fs-xs: 0.875rem;    /* 14px — badges, tab labels, eyebrows */
+  --fs-sm: 1rem;        /* 16px — meta lines, notes, log steps */
+  --fs-body: 1.125rem;  /* 18px — body, inputs, cards */
+  --fs-lead: 1.25rem;   /* 20px */
+  --touch-min: 48px;    /* minimum tap-target height: tabs and every button */
 }
 
 [data-theme="dark"] {
@@ -116,7 +122,7 @@ body {
   /* The desktop's exact stack: Inter when installed, else the platform face. */
   font-family: Inter, 'Segoe UI', Roboto, Arial, sans-serif;
   font-size: var(--fs-body);
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
 }
@@ -133,9 +139,11 @@ header.brand {
 }
 .brand-mark { width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0; object-fit: contain; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
-.brand-name { font-weight: 650; font-size: 1rem; color: var(--color-text-strong); }
+.brand-name { font-weight: 650; font-size: var(--fs-body); color: var(--color-text-strong); }
+/* The eyebrow names the machine this window looks through to — it has to
+   be scannable at arm's length, so full text color, not a faded muted. */
 .brand-sub {
-  font-size: var(--fs-xs); color: var(--color-muted-soft);
+  font-size: var(--fs-xs); color: var(--color-text); font-weight: 600;
   letter-spacing: 0.04em; text-transform: uppercase; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -145,7 +153,11 @@ header.brand {
 }
 .brand-dot.is-stale { background: var(--color-warn-text); }
 
-main { padding: var(--space-3) var(--space-3) calc(76px + env(safe-area-inset-bottom)); }
+/* Fluid on any phone; capped only so tablet lines stay readable. */
+main {
+  padding: var(--space-3) var(--space-3) calc(84px + env(safe-area-inset-bottom));
+  max-width: 680px; margin: 0 auto;
+}
 
 /* ---------- bottom nav ---------- */
 nav {
@@ -154,17 +166,18 @@ nav {
   padding-bottom: env(safe-area-inset-bottom);
 }
 nav button {
-  flex: 1; background: none; border: 0; color: var(--color-muted-soft);
+  flex: 1; background: none; border: 0; color: var(--color-muted);
   font: inherit; font-size: var(--fs-xs); font-weight: 600;
-  letter-spacing: 0.02em; padding: 11px 4px 9px; position: relative;
+  letter-spacing: 0.02em; min-height: var(--touch-min);
+  padding: 12px 4px 10px; position: relative;
   border-top: 2px solid transparent; margin-top: -1px;
 }
 nav button.active { color: var(--color-accent); border-top-color: var(--color-accent); }
 nav button .cnt {
-  position: absolute; top: 4px; right: 20%;
+  position: absolute; top: 5px; right: 20%;
   background: var(--color-error-text); color: #fff;
   border-radius: var(--radius-pill);
-  font-size: 10px; font-weight: 700; min-width: 17px; padding: 1px 5px;
+  font-size: 11.5px; font-weight: 700; min-width: 19px; padding: 1px 6px;
 }
 
 /* ---------- cards ---------- */
@@ -173,26 +186,29 @@ nav button .cnt {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-soft);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   margin-bottom: var(--space-2);
 }
 .card-title { font-weight: 600; color: var(--color-text-strong); }
-.card .meta {
-  color: var(--color-muted-soft); font-size: var(--fs-sm);
-  margin-top: 2px; overflow-wrap: anywhere;
+/* Meta lines carry real data ("next: 2026-09-01", the staged command) —
+   the stronger muted, at note size, so they scan without leaning in. */
+.meta {
+  color: var(--color-muted); font-size: var(--fs-sm);
+  margin-top: 4px; overflow-wrap: anywhere;
 }
 
 h2 {
   font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
-  font-weight: 700; color: var(--color-muted-soft);
+  font-weight: 700; color: var(--color-muted);
   margin: var(--space-4) 2px var(--space-1);
 }
 
 /* ---------- buttons: the desktop .btn family ---------- */
 .btn {
   font: inherit; font-size: var(--fs-sm); font-weight: 600;
-  border-radius: var(--radius-md); padding: 0.55rem 1rem; cursor: pointer;
+  border-radius: var(--radius-md); padding: 0.55rem 1.1rem; cursor: pointer;
   border: 1px solid transparent; line-height: 1.2;
+  min-height: var(--touch-min);
   display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
   white-space: nowrap;
   transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease;
@@ -205,21 +221,22 @@ h2 {
   border-color: var(--color-border-strong);
 }
 .btn-ghost:active:not(:disabled) { background: var(--color-bg-soft); }
-.btn-compact { font-size: var(--fs-xs); padding: 0.4rem 0.8rem; }
+/* "Compact" is horizontal density only — the touch height never shrinks. */
+.btn-compact { font-size: var(--fs-sm); padding: 0.4rem 0.9rem; }
 .row-btns { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 
 /* ---------- badges ---------- */
 .badge {
-  display: inline-block; font-size: 10.5px; font-weight: 700;
+  display: inline-block; font-size: 12px; font-weight: 700;
   letter-spacing: 0.04em; border-radius: var(--radius-sm);
-  padding: 2px 7px; vertical-align: 1px; border: 1px solid transparent;
+  padding: 2px 8px; vertical-align: 1px; border: 1px solid transparent;
 }
 .badge.due { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-border); }
 .badge.over { background: var(--color-error-bg); color: var(--color-error-text); border-color: var(--color-error-border); }
 .badge.stale { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-border); }
 
 /* ---------- text states ---------- */
-.note { color: var(--color-muted-soft); font-size: var(--fs-sm); }
+.note { color: var(--color-muted); font-size: var(--fs-sm); }
 .err { color: var(--color-error-text); font-size: var(--fs-sm); white-space: pre-wrap; }
 .okline { color: var(--color-success); font-size: var(--fs-sm); font-weight: 600; }
 
@@ -240,11 +257,13 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
 .composer-actions { display: flex; align-items: center; gap: var(--space-1); margin-top: 4px; }
 .composer-hint { color: var(--color-muted-soft); font-size: var(--fs-xs); margin-right: auto; }
 
-/* ---------- pairing ---------- */
-#pair-view { max-width: 420px; margin: 10vh auto 0; padding: 0 var(--space-4); text-align: center; }
-#pair-view img { width: 64px; height: 64px; border-radius: 16px; margin-bottom: var(--space-3); }
-#pair-view h1 { font-size: 1.25rem; color: var(--color-text-strong); margin: 0 0 var(--space-2); }
+/* ---------- pairing + boot failure (same centered treatment) ---------- */
+#pair-view, #boot-view { max-width: 420px; margin: 10vh auto 0; padding: 0 var(--space-4); text-align: center; }
+#pair-view img, #boot-view img { width: 64px; height: 64px; border-radius: 16px; margin-bottom: var(--space-3); }
+#pair-view h1, #boot-view h1 { font-size: var(--fs-lead); color: var(--color-text-strong); margin: 0 0 var(--space-2); }
 #pair-view .note { text-align: left; }
+#boot-view .err { text-align: left; margin-bottom: var(--space-3); }
+#boot-retry { width: 100%; }
 #pair-view .field {
   background: var(--color-surface); border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md); padding: 0.6rem 0.8rem; margin: var(--space-2) 0;
@@ -254,10 +273,12 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
 #pair-btn { width: 100%; }
 
 /* ---------- run log ---------- */
-#run-log .step { color: var(--color-muted); font-size: var(--fs-sm); padding: 2px 0; }
+#run-log .step { color: var(--color-muted); font-size: var(--fs-sm); padding: 4px 0; }
 #run-log .step.done::before { content: "\2713  "; color: var(--color-success); font-weight: 700; }
 #run-log .step.run::before { content: "\2026  "; color: var(--color-warn-text); font-weight: 700; }
-#run-log .msg { padding: 6px 0; white-space: pre-wrap; }
+/* Response text is the longest read on the page — breathing room between
+   paragraphs so it never becomes a wall. */
+#run-log .msg { padding: 10px 0; white-space: pre-wrap; line-height: 1.65; }
 .qbox {
   background: var(--color-accent-soft); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); padding: var(--space-2); margin: var(--space-2) 0;
@@ -277,6 +298,15 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
   <div class="field"><input type="text" id="pair-name" placeholder="This device's name (e.g. Pixel 7)"></div>
   <button class="btn btn-primary" id="pair-btn">Pair</button>
   <p class="err" id="pair-err"></p>
+</div>
+
+<!-- Boot failure that is NOT the pairing 401: a blank page is a fake state
+     too, so name the failure and offer the retry. -->
+<div id="boot-view" class="hidden">
+  <img src="/static/companion-icon-192.png" alt="">
+  <h1>Can't reach the PC</h1>
+  <p class="err" id="boot-msg"></p>
+  <button class="btn btn-primary" id="boot-retry">Retry</button>
 </div>
 
 <div id="app-view" class="hidden">
@@ -349,19 +379,58 @@ function showPair() {
   $("pair-code").focus();
 }
 
+/* Every request gets a hard deadline. Over a Tailscale relay a dropped or
+   half-open connection leaves fetch pending FOREVER on mobile — it neither
+   resolves nor rejects, so without a deadline "Loading..." is a state the
+   page can never leave. Reads are safe to abort and retry; writes get a
+   longer leash (the PC may genuinely be executing the action) and a message
+   that is honest about not knowing the outcome. */
+const READ_TIMEOUT_MS = 45000;
+const WRITE_TIMEOUT_MS = 120000;
+
 async function api(path, opts) {
   opts = opts || {};
+  const method = (opts.method || "GET").toUpperCase();
   const headers = Object.assign({}, opts.headers);
-  if ((opts.method || "GET") !== "GET") {
+  if (method !== "GET") {
     headers["X-Ridian-Companion"] = "1";
     if (opts.body) headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  const ms = method === "GET" ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  let res;
+  try {
+    res = await fetch(path, Object.assign({}, opts, { headers, signal: ctrl.signal }));
+  } catch (e) {
+    if (ctrl.signal.aborted) {
+      throw new Error(method === "GET"
+        ? `The PC did not answer within ${Math.round(ms / 1000)}s — the ` +
+          "connection may be slow or the PC busy."
+        : `No answer from the PC within ${Math.round(ms / 1000)}s — the ` +
+          "action may still have completed on the PC. Check before retrying.");
+    }
+    throw new Error("Could not reach the PC: " + (e.message || "network error"));
+  } finally { clearTimeout(timer); }
   if (res.status === 401) { showPair(); throw new Error("Not paired."); }
   let data = null;
   try { data = await res.json(); } catch (_e) { /* non-JSON */ }
   if (!res.ok) throw new Error((data && data.detail) || ("HTTP " + res.status));
   return data;
+}
+
+/* Every load ends in one of three honest states: content, an error with a
+   Retry, or the explicit timeout above (also with Retry). "Loading..." is a
+   transit state, never a destination. */
+function failState(id, e, retry) {
+  const box = document.createElement("div");
+  box.className = "card";
+  box.innerHTML = `<p class="err">${esc(e.message)}</p>
+    <div class="row-btns"><button class="btn btn-ghost">Retry</button></div>`;
+  box.querySelector("button").addEventListener("click", retry);
+  const host = $(id);
+  host.innerHTML = "";
+  host.appendChild(box);
 }
 
 /* ---------------- pairing ---------------- */
@@ -446,7 +515,7 @@ async function loadDue() {
           <div class="meta">Task: ${esc(o.task)}</div></div>`).join("")
       : '<p class="note">No obligations yet &mdash; add them on the PC.</p>';
   } catch (e) {
-    $("due-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    failState("due-list", e, loadDue);
   }
 }
 
@@ -475,7 +544,7 @@ async function loadBrief() {
       return `<h2>${esc(title)}</h2>${body}`;
     }).join("");
   } catch (e) {
-    $("brief-body").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    failState("brief-body", e, loadBrief);
   }
 }
 
@@ -519,7 +588,7 @@ async function loadApprovals() {
       $("appr-list").appendChild(el);
     });
   } catch (e) {
-    $("appr-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    failState("appr-list", e, loadApprovals);
   }
 }
 
@@ -534,9 +603,23 @@ function sseBlocks(block, onEvent) {
   if (data) onEvent(ev, (() => { try { return JSON.parse(data); } catch (_e) { return {}; } })());
 }
 async function streamRun(url, body) {
-  const res = await fetch(url, { method: "POST", headers: {
-    "Content-Type": "application/json", "Accept": "text/event-stream",
-    "X-Ridian-Companion": "1" }, body: JSON.stringify(body) });
+  // Deadline on the HANDSHAKE only: "Starting..." must not be a state the
+  // page can never leave. Once the PC answers and the stream is live, a run
+  // is open-ended BY DESIGN — the timer is cleared before the first read.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), READ_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(url, { method: "POST", headers: {
+      "Content-Type": "application/json", "Accept": "text/event-stream",
+      "X-Ridian-Companion": "1" }, body: JSON.stringify(body),
+      signal: ctrl.signal });
+  } catch (e) {
+    throw new Error(ctrl.signal.aborted
+      ? `The PC did not answer within ${Math.round(READ_TIMEOUT_MS / 1000)}s` +
+        ' — the run may not have started. Check "Waiting on you" or retry.'
+      : "Could not reach the PC: " + (e.message || "network error"));
+  } finally { clearTimeout(timer); }
   if (res.status === 401) { showPair(); return; }
   if (!res.ok) {
     let d = null; try { d = await res.json(); } catch (_e) {}
@@ -683,7 +766,7 @@ async function loadAwaiting() {
       $("awaiting-list").appendChild(el);
     });
   } catch (e) {
-    $("awaiting-list").innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    failState("awaiting-list", e, loadAwaiting);
   }
 }
 
@@ -703,8 +786,16 @@ async function loadAwaiting() {
     setInterval(() => {
       if (!$("app-view").classList.contains("hidden")) { loadDue(); loadApprovals(); }
     }, 60000);
-  } catch (_e) { /* showPair already ran on 401 */ }
+  } catch (e) {
+    // A 401 already swapped in the pairing view. Any OTHER boot failure
+    // must not strand a blank page: name it and offer the retry.
+    if ($("pair-view").classList.contains("hidden")) {
+      $("boot-msg").textContent = e.message || "Could not reach the PC.";
+      $("boot-view").classList.remove("hidden");
+    }
+  }
 })();
+$("boot-retry").addEventListener("click", () => location.reload());
 </script>
 </body>
 </html>

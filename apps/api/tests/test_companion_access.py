@@ -726,3 +726,91 @@ def test_desktop_settings_block_is_wired():
     index = (_RENDERER / "index.html").read_text(encoding="utf-8")
     assert 'name="companion_enabled"' in index
     assert 'id="settings-companion-status"' in index
+
+
+# --------------------------------------------------------------------------
+# 9. Honest loading — "Loading..." must END (v6.9.5)
+#
+# Field bug: over a Tailscale relay the Brief tab sat on "Loading..."
+# indefinitely. Two unbounded waits stacked. The page's fetch had no
+# deadline, so a dropped/half-open relay connection left the promise
+# forever unsettled — the render never fired because there was nothing to
+# render, and the catch never fired because nothing rejected. Underneath,
+# /morning-brief runs up to ~29 SEQUENTIAL Google/QuickBooks round trips at
+# googleapiclient's 60s-per-socket-op default, so a sick source pushed the
+# response out for minutes before the per-section try/excepts could fire.
+# Both ends are now bounded: every load resolves to content, an honest
+# error with a Retry, or an explicit timeout message.
+# --------------------------------------------------------------------------
+
+
+def test_google_service_builders_carry_a_socket_timeout():
+    """A stalled Google socket must raise within seconds — surfacing as the
+    brief's honest per-section "unreachable" note — never hold the whole
+    brief for googleapiclient's 60s-per-socket-op default."""
+    from google.oauth2.credentials import Credentials
+
+    from app.services import calendar_service, gmail_service, inbox_service
+
+    creds = Credentials(token="t")
+    for mod in (inbox_service, calendar_service, gmail_service):
+        svc = mod._build_service(creds)
+        # AuthorizedHttp wraps the actual httplib2.Http carrying the timeout.
+        assert svc._http.http.timeout == mod._HTTP_TIMEOUT_SECONDS, mod.__name__
+        assert 5 <= mod._HTTP_TIMEOUT_SECONDS <= 30, mod.__name__
+
+
+def test_companion_fetch_has_a_deadline_and_the_stream_does_not():
+    """api() aborts a fetch that will never settle and names the state; the
+    SSE run stream gets a deadline on the HANDSHAKE only — a live run is
+    open-ended by design, so the timer is released before the first read."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert "AbortController" in html
+    assert "READ_TIMEOUT_MS" in html and "WRITE_TIMEOUT_MS" in html
+    # Reads say the PC went quiet; writes are honest about the unknown.
+    assert "did not answer within" in html
+    assert "may still have completed" in html
+    stream_fn = html.split("async function streamRun", 1)[1].split(
+        "\nfunction ", 1)[0]
+    assert "signal: ctrl.signal" in stream_fn
+    assert stream_fn.index("clearTimeout") < stream_fn.index("getReader")
+
+
+def test_every_loader_fails_to_a_retry_not_a_dead_end():
+    """"Loading..." is a transit state, never a destination: each tab's
+    catch renders the shared failState (message + Retry), and a boot
+    failure that is not the pairing 401 may not strand a blank page."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert "function failState" in html and ">Retry</button>" in html
+    for target, retry in (("due-list", "loadDue"),
+                          ("brief-body", "loadBrief"),
+                          ("appr-list", "loadApprovals"),
+                          ("awaiting-list", "loadAwaiting")):
+        assert f'failState("{target}", e, {retry})' in html, target
+    assert 'id="boot-view"' in html
+    assert "location.reload()" in html
+
+
+def test_arms_length_type_and_touch_targets():
+    """READABILITY PIN: the phone is read at arm's length — >=17px body
+    text, >=48px touch height on the tabs and every button, and the
+    eyebrow/meta lines at real text contrast. The PALETTE stays the
+    desktop's exactly (test_visual_identity_matches_the_desktop); only the
+    phone's own type-scale/touch tokens differ."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert "--fs-body: 1.125rem" in html          # 18px at the default root
+    assert "--touch-min: 48px" in html
+    nav_css = html.split("nav button {", 1)[1].split("}", 1)[0]
+    assert "min-height: var(--touch-min)" in nav_css
+    btn_css = html.split(".btn {", 1)[1].split("}", 1)[0]
+    assert "min-height: var(--touch-min)" in btn_css
+    # The header eyebrow (CONNECTED TO ...) reads at full text color.
+    sub_css = html.split(".brand-sub {", 1)[1].split("}", 1)[0]
+    assert "var(--color-text)" in sub_css
+    assert "muted" not in sub_css
+    # Card meta lines ("next: 2026-09-01") scan at note size in the
+    # stronger muted, not the faded muted-soft.
+    meta_css = html.split(".meta {", 1)[1].split("}", 1)[0]
+    assert "var(--color-muted)" in meta_css
+    assert "var(--fs-sm)" in meta_css
+    assert "var(--color-muted-soft)" not in meta_css

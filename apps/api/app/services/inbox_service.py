@@ -26,6 +26,8 @@ import logging
 from email.utils import parseaddr
 from typing import Optional
 
+import google_auth_httplib2
+import httplib2
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -53,8 +55,17 @@ class InboxError(Exception):
         super().__init__(detail)
 
 
+# Per-socket-op timeout. googleapiclient's own default is 60s, and triage
+# makes up to ~27 sequential calls — at 60s a stall, a sick connection reads
+# as "Loading... forever" from the phone. 15s turns a stalled socket into
+# this module's honest InboxError (→ the brief's "unreachable" note) fast.
+_HTTP_TIMEOUT_SECONDS = 15
+
+
 def _build_service(creds: Credentials):
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    http = google_auth_httplib2.AuthorizedHttp(
+        creds, http=httplib2.Http(timeout=_HTTP_TIMEOUT_SECONDS))
+    return build("gmail", "v1", http=http, cache_discovery=False)
 
 
 def _has_read_scope(creds: Optional[Credentials]) -> bool:

@@ -27,6 +27,8 @@ import logging
 from email.message import EmailMessage
 from typing import Optional
 
+import google_auth_httplib2
+import httplib2
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -60,8 +62,17 @@ class GmailError(Exception):
         super().__init__(detail)
 
 
+# Per-socket-op timeout (googleapiclient defaults to 60s). get_user_email()
+# sits on the morning-brief path; a stalled socket must raise within
+# seconds, not hold the whole brief. Timeout is per socket op, so a large
+# draft body that keeps flowing never trips it.
+_HTTP_TIMEOUT_SECONDS = 15
+
+
 def _build_service(creds: Credentials):
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    http = google_auth_httplib2.AuthorizedHttp(
+        creds, http=httplib2.Http(timeout=_HTTP_TIMEOUT_SECONDS))
+    return build("gmail", "v1", http=http, cache_discovery=False)
 
 
 def _has_compose_scope(creds: Optional[Credentials]) -> bool:

@@ -19,6 +19,8 @@ import datetime as _dt
 import logging
 from typing import Optional
 
+import google_auth_httplib2
+import httplib2
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -48,8 +50,16 @@ class CalendarError(Exception):
         super().__init__(detail)
 
 
+# Per-socket-op timeout (googleapiclient defaults to 60s). A stalled
+# Calendar socket must surface as CalendarError → the brief's honest
+# "Calendar unreachable" note within seconds, never a near-indefinite hang.
+_HTTP_TIMEOUT_SECONDS = 15
+
+
 def _build_service(creds: Credentials):
-    return build("calendar", "v3", credentials=creds, cache_discovery=False)
+    http = google_auth_httplib2.AuthorizedHttp(
+        creds, http=httplib2.Http(timeout=_HTTP_TIMEOUT_SECONDS))
+    return build("calendar", "v3", http=http, cache_discovery=False)
 
 
 def _has_calendar_scope(creds: Optional[Credentials]) -> bool:
