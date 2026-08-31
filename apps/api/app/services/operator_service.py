@@ -511,6 +511,13 @@ async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
         except OSError:
             pass
         operation_log_service.upsert_operation(snapshot)
+        # v6.9.7: a run parking on a question is one of the three notifiable
+        # moments. Fire-and-forget; the pause itself never depends on it.
+        try:
+            from . import push_service
+            push_service.notify_run_parked(snapshot)
+        except Exception:  # noqa: BLE001 — notification is never load-bearing
+            log.warning("operator.push_notify_failed", exc_info=True)
         await emit({"event": "complete", "data": snapshot})
         return snapshot
     snapshot = await _persist_and_complete(emit, record, folder)

@@ -45,6 +45,7 @@ from .services.export_service import (  # noqa: E402
     open_artifact_folder,
 )
 from .services import companion_service  # noqa: E402
+from .services import companion_tls  # noqa: E402
 from .services import dashboard_service  # noqa: E402
 from .services import gmail_service  # noqa: E402
 from .services import google_drive_service  # noqa: E402
@@ -53,6 +54,7 @@ from .services import operation_log_service  # noqa: E402
 from .services import operator_service  # noqa: E402
 from .services import pdf_service  # noqa: E402
 from .services import project_service  # noqa: E402
+from .services import push_service  # noqa: E402
 from .services import quickbooks_service  # noqa: E402
 from .services import speech_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
@@ -97,7 +99,20 @@ log = logging.getLogger("ridian.api")
 # v4.2: bundled resource in the frozen build; source tree in dev.
 STATIC_DIR = resource_base() / "app" / "static"
 
-app = FastAPI(title="Ridian Agency API", version="0.1.0")
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    """v6.9.7 item 3: the launch half of the obligations model. Whatever
+    became notifiable while the PC was off is pushed now, once — in a
+    background thread, so boot never waits on the push service. A no-op
+    when push is disabled (the default)."""
+    push_service.startup_catch_up()
+    yield
+
+
+app = FastAPI(title="Ridian Agency API", version="0.1.0", lifespan=_lifespan)
 
 # The Electron renderer makes cross-origin fetches against 127.0.0.1:8000.
 # Allow any origin so the desktop GUI, the bundled web console, and curl all
@@ -220,6 +235,56 @@ async def companion_manifest():
                         media_type="application/manifest+json")
 
 
+@app.get("/companion-sw.js")
+async def companion_service_worker():
+    """The push service worker. Served from the root path so its scope may
+    cover /companion; the header widens max-scope for exactly that."""
+    return FileResponse(STATIC_DIR / "companion-sw.js",
+                        media_type="text/javascript",
+                        headers={"Service-Worker-Allowed": "/companion"})
+
+
+class PushSubscribeRequest(BaseModel):
+    """The browser's PushSubscription.toJSON(). The DEVICE is never taken
+    from the body — the gate identified it from the paired cookie."""
+    endpoint: str = Field(..., max_length=1024)
+    keys: dict = Field(default_factory=dict)
+
+
+def _gated_device(request: Request) -> dict:
+    device = request.scope.get("state", {}).get("companion_device")
+    if device is None:
+        # Loopback reaches every endpoint, but a push subscription belongs
+        # to a PHONE — there is no device record to attach it to here.
+        raise HTTPException(status_code=400,
+                            detail="Subscribe from the paired phone, not the PC.")
+    return device
+
+
+@app.post("/companion/push/subscribe")
+async def companion_push_subscribe(payload: PushSubscribeRequest,
+                                   request: Request) -> dict:
+    device = _gated_device(request)
+    if not push_service.enabled():
+        raise HTTPException(status_code=400,
+                            detail="Notifications are switched off on the PC "
+                                   "(Settings → Phone).")
+    try:
+        push_service.save_subscription(
+            device.get("id", ""),
+            {"endpoint": payload.endpoint, "keys": payload.keys})
+    except push_service.SubscriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@app.post("/companion/push/unsubscribe")
+async def companion_push_unsubscribe(request: Request) -> dict:
+    device = _gated_device(request)
+    return {"ok": True,
+            "removed": push_service.drop_subscription(device.get("id", ""))}
+
+
 @app.post("/companion/pair")
 async def companion_pair(payload: CompanionPairRequest) -> JSONResponse:
     try:
@@ -251,7 +316,16 @@ async def companion_me(request: Request) -> dict:
     device = request.scope.get("state", {}).get("companion_device")
     if device is not None:
         return {**base, "device_id": device.get("id"),
-                "name": device.get("name")}
+                "name": device.get("name"),
+                # v6.9.7: everything the page needs to offer notifications —
+                # the toggle's state, the public application-server key, and
+                # whether THIS device already holds a server-side subscription.
+                "push": {
+                    "enabled": push_service.enabled(),
+                    "key": push_service.public_key(),
+                    "subscribed": push_service.device_is_subscribed(
+                        device.get("id", "")),
+                }}
     # Only a loopback caller can reach here without a device (the gate
     # refuses unpaired off-box requests before the route runs).
     return {**base, "loopback": True}
@@ -289,6 +363,12 @@ async def companion_status(request: Request) -> dict:
         # one works anywhere both devices are signed in to Tailscale.
         "tailnet_ip": tailnet,
         "tailnet_url": f"http://{tailnet}:{port}/companion" if tailnet else "",
+        # v6.9.7: the HTTPS entry point (Web Push exists only in a secure
+        # context) and the push system's honest state. https_url is set only
+        # when the TLS listener actually started; https_error names why not.
+        "https_url": companion_tls.state["url"],
+        "https_error": companion_tls.state["error"],
+        "push": push_service.status(),
         "devices": companion_service.list_devices(),
         "pairing_locked": companion_service.pairing_locked(),
     }
@@ -396,6 +476,7 @@ class SettingsView(BaseModel):
     # v6.9: "true" = bind the LAN for the phone companion (takes effect at
     # next backend start). Blank/default = loopback only.
     companion_enabled: str = ""
+    companion_push_enabled: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
     # so the renderer can show a clear, actionable warning if the configured
@@ -437,6 +518,7 @@ class SettingsUpdate(BaseModel):
     operator_global_hotkey: str | None = None
     appearance: str | None = None
     companion_enabled: str | None = None
+    companion_push_enabled: str | None = None
 
 
 class KeyTestResponse(BaseModel):
@@ -996,6 +1078,16 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
     settings_service.save_settings(updates)
     settings_service.apply_to_environment()
 
+    # v6.9.7: turning notifications ON generates the DPAPI-wrapped VAPID
+    # keypair right here on the PC (loopback-only endpoint). A failure is
+    # recorded and shown in the Settings push status — never swallowed.
+    if str(updates.get("companion_push_enabled") or "").lower() == "true":
+        try:
+            await asyncio.to_thread(push_service.ensure_vapid)
+        except Exception as exc:  # noqa: BLE001 — surfaced via status
+            push_service._state["last_error"] = f"VAPID key generation failed: {exc}"
+            log.warning("push.vapid_generation_failed %s", exc)
+
     view = _settings_view_with_outputs()
 
     # Post-save validation — only when the operator actually touched the field.
@@ -1219,6 +1311,7 @@ async def memory_profile_save(payload: ProfilePayload) -> dict:
 
 @app.get("/dashboard")
 async def dashboard_get() -> dict:
+    push_service.maybe_evaluate()          # v6.9.7: throttled, thread, no timer
     return dashboard_service.build_dashboard()
 
 
@@ -1226,6 +1319,7 @@ async def dashboard_get() -> dict:
 async def morning_brief_get() -> dict:
     """v6.0 Phase 2: the assembled read-only brief for the workspace view."""
     from .services import brief_service
+    push_service.maybe_evaluate()          # v6.9.7: throttled, thread, no timer
     return await asyncio.to_thread(brief_service.build_brief)
 
 
@@ -1268,6 +1362,7 @@ class ObligationRequest(BaseModel):
 async def obligations_list() -> dict:
     """v6.8: obligations + what's due, computed ON DEMAND — never a timer."""
     from .services import obligations_service
+    push_service.maybe_evaluate()          # v6.9.7: throttled, thread, no timer
     obs = obligations_service.list_obligations()
     return {"obligations": [
         {**ob, "next_due": obligations_service.next_due(ob),
@@ -1331,6 +1426,7 @@ class ApprovalAnswerRequest(BaseModel):
 async def approvals_list() -> dict:
     """v6.0 Phase 3: every staged-but-unanswered approval, stale-flagged."""
     from .services import approval_inbox_service
+    push_service.maybe_evaluate()          # v6.9.7: throttled, thread, no timer
     pending = await asyncio.to_thread(approval_inbox_service.list_pending)
     return {"approvals": pending, "count": len(pending)}
 

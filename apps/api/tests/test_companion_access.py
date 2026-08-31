@@ -259,6 +259,10 @@ def test_allowlist_matcher_semantics():
         ("POST", "/operations/op_1/dismiss"),
         ("POST", "/operations/op_1/background"),
         ("GET", "/operations/op_1"), ("GET", "/companion/me"),
+        # v6.9.7 Web Push: the SW script and the device's OWN subscription.
+        ("GET", "/companion-sw.js"),
+        ("POST", "/companion/push/subscribe"),
+        ("POST", "/companion/push/unsubscribe"),
     ]
     for m, p in allowed:
         assert cs.device_request_allowed(m, p), f"{m} {p} should be allowed"
@@ -820,6 +824,120 @@ def test_every_loader_fails_to_a_retry_not_a_dead_end():
         assert f'failState("{target}", e, {retry})' in html, target
     assert 'id="boot-view"' in html
     assert "location.reload()" in html
+
+
+# --------------------------------------------------------------------------
+# 10. Web Push (v6.9.7) — device-bound subscriptions, honest surfaces
+# --------------------------------------------------------------------------
+
+def _enable_push():
+    settings_service.save_settings({"companion_push_enabled": "true"})
+
+
+def test_paired_phone_can_subscribe_and_unsubscribe_its_own_device():
+    from app.services import push_service
+    lan, device_id = _paired_lan()
+    _enable_push()
+    sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
+           "keys": {"p256dh": "pk", "auth": "ak"}}
+    r = lan.post("/companion/push/subscribe", headers=HDR, json=sub)
+    assert r.status_code == 200, r.text
+    assert push_service.device_is_subscribed(device_id)
+    r = lan.post("/companion/push/unsubscribe", headers=HDR, json={})
+    assert r.status_code == 200 and r.json()["removed"] is True
+    assert not push_service.device_is_subscribed(device_id)
+
+
+def test_subscribe_refused_from_loopback_when_disabled_and_when_unpaired():
+    lan, _device = _paired_lan()
+    sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
+           "keys": {"p256dh": "pk", "auth": "ak"}}
+    # Push toggle off: an honest 400, not a stored-but-dead subscription.
+    r = lan.post("/companion/push/subscribe", headers=HDR, json=sub)
+    assert r.status_code == 400 and "switched off" in r.json()["detail"]
+    _enable_push()
+    # Loopback has no device record to attach a subscription to.
+    r = _pc().post("/companion/push/subscribe", json=sub)
+    assert r.status_code == 400 and "paired phone" in r.json()["detail"]
+    # Unpaired off-box: the gate refuses before the route runs.
+    assert _lan().post("/companion/push/subscribe", headers=HDR,
+                       json=sub).status_code == 401
+
+
+def test_service_worker_is_served_to_paired_devices_with_scope_header():
+    lan, _device = _paired_lan()
+    r = lan.get("/companion-sw.js")
+    assert r.status_code == 200
+    assert r.headers["service-worker-allowed"] == "/companion"
+    assert "notificationclick" in r.text
+    assert _lan().get("/companion-sw.js").status_code == 401
+
+
+def test_host_header_admits_exactly_our_own_tsnet_name(monkeypatch):
+    """The HTTPS listener (Web Push needs a secure context) serves at this
+    machine's ts.net name — the ONE non-IP Host admitted. Anything else is
+    still DNS-rebinding and still refused."""
+    from app.services import companion_tls
+    assert not cs.host_header_ok("razerblade.tail1234.ts.net:8443")
+    monkeypatch.setitem(companion_tls.state, "host", "razerblade.tail1234.ts.net")
+    assert cs.host_header_ok("razerblade.tail1234.ts.net:8443")
+    assert cs.host_header_ok("RAZERBLADE.tail1234.ts.net")
+    assert not cs.host_header_ok("evil.example.com:8443")
+    assert not cs.host_header_ok("razerblade.tail1234.ts.net.evil.com")
+
+
+def test_status_and_me_carry_the_push_state(monkeypatch, tmp_path):
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "VAPID_PATH",
+                        tmp_path / "vapid.bin")
+    lan, _device = _paired_lan()
+    # Enabling the toggle through /settings generates the DPAPI-wrapped key.
+    out = _pc().post("/settings",
+                     json={"companion_push_enabled": "true"}).json()
+    assert out["companion_push_enabled"] == "true"
+    raw = (tmp_path / "vapid.bin").read_bytes()
+    assert raw.startswith(b"RIDIAN-DPAPI-1\n") and b"BEGIN" not in raw
+    status = _pc().get("/companion/status").json()
+    assert status["push"]["enabled"] is True
+    assert status["push"]["vapid_ready"] is True
+    assert status["push"]["subscribed_devices"] == 0
+    assert "last_error" in status["push"] and "https_error" in status
+    me = lan.get("/companion/me").json()
+    assert me["push"]["enabled"] is True
+    assert me["push"]["key"] and me["push"]["subscribed"] is False
+
+
+def test_companion_page_wires_push_honestly():
+    """The page offers push only where it can exist, says so where it
+    cannot (plain-http origin), and lands notification taps on their tab."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert 'id="push-card"' in html and "setupPush" in html
+    assert "isSecureContext" in html          # names the HTTPS requirement
+    assert "https://&hellip;ts.net" in html
+    assert 'register("/companion-sw.js"' in html
+    assert '{ scope: "/companion" }' in html
+    assert "applicationServerKey" in html and "userVisibleOnly" in html
+    # Tap-to-tab: SW message when open, #hash when opened by the tap.
+    assert "location.hash.slice(1)" in html
+    assert 'navigator.serviceWorker.addEventListener("message"' in html
+    # The SW itself: push + click handlers, tag dedup, and NO fetch handler
+    # (the page's honest loading states must never be masked by a cache).
+    sw = (_STATIC / "companion-sw.js").read_text(encoding="utf-8")
+    assert 'addEventListener("push"' in sw
+    assert 'addEventListener("notificationclick"' in sw
+    assert "openWindow" in sw and '"/companion#" + tab' in sw
+    assert "tag" in sw
+    assert 'addEventListener("fetch"' not in sw
+
+
+def test_desktop_settings_carry_the_push_toggle_and_status():
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    assert "'companion_push_enabled'" in app_js
+    assert "_companionPushStatus" in app_js
+    assert "PUSH PROBLEM" in app_js           # failure always names itself
+    index = (_RENDERER / "index.html").read_text(encoding="utf-8")
+    assert 'name="companion_push_enabled"' in index
+    assert 'id="settings-push-status"' in index
 
 
 def test_arms_length_type_and_touch_targets():

@@ -211,6 +211,12 @@ _DEVICE_ALLOWED_EXACT = frozenset({
     ("POST", "/approvals/answer"),
     ("POST", "/operations/run"),
     ("GET", "/operations/recent"),
+    # v6.9.7 Web Push: the service worker script, and the paired device
+    # registering/clearing ITS OWN push subscription (the endpoint reads the
+    # device from the gate's scope — no device id is accepted from the body).
+    ("GET", "/companion-sw.js"),
+    ("POST", "/companion/push/subscribe"),
+    ("POST", "/companion/push/unsubscribe"),
 })
 _OB_ACTION_RE = re.compile(r"^/obligations/[A-Za-z0-9_-]+/(complete|dismiss)$")
 _OP_ACTION_RE = re.compile(r"^/operations/[A-Za-z0-9_-]+/(continue|dismiss|background)$")
@@ -271,7 +277,13 @@ def host_header_ok(host_header: str) -> bool:
     """DNS-rebinding defense for off-box requests: the phone reaches the PC
     by literal IP, so a non-IP Host header (some DNS name an attacker's page
     resolved here) is refused outright. localhost forms are fine — those
-    requests are loopback and never reach this check."""
+    requests are loopback and never reach this check.
+
+    v6.9.7 exception, exact-match only: the HTTPS listener serves at this
+    machine's OWN ts.net name (Web Push needs a secure context), so that
+    one hostname — known-good because companion_tls set it when the
+    listener started — is admitted. An attacker's domain resolving to this
+    PC still presents THEIR Host header and is still refused."""
     raw = str(host_header or "").strip()
     if not raw:
         return False
@@ -283,7 +295,9 @@ def host_header_ok(host_header: str) -> bool:
         ipaddress.ip_address(hostname)
         return True
     except ValueError:
-        return False
+        from . import companion_tls
+        own = (companion_tls.state.get("host") or "").strip().lower()
+        return bool(own) and hostname.lower() == own
 
 
 def lan_listener_reachable(ip: str, port: int) -> bool:

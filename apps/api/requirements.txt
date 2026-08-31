@@ -22,3 +22,7 @@ beautifulsoup4>=4.12.0  # fallback extractor (uses lxml when available)
 # PDF-as-source (upload a PDF, extract its text to ground a run)
 pypdf>=5.0.0
 python-multipart>=0.0.9  # FastAPI UploadFile (PDF upload endpoints)
+
+# v6.9.7 companion Web Push (VAPID + aes128gcm). Pulls py-vapid + http-ece;
+# cryptography is already a transitive dependency of the Google stack.
+pywebpush>=2.0.0

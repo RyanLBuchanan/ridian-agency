@@ -212,12 +212,15 @@ const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_pas
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
-const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive', 'companion_enabled'];
+const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive', 'companion_enabled',
+  'companion_push_enabled'];
 // Per-field default when the key is missing entirely — must mirror the
-// backend: auto-upload defaults ON, companion (a network surface) OFF.
+// backend: auto-upload defaults ON, companion (a network surface) OFF,
+// push notifications OFF.
 const SETTINGS_BOOL_DEFAULTS = {
   operator_auto_upload_drive: 'true',
   companion_enabled: 'false',
+  companion_push_enabled: 'false',
 };
 
 /* ============================================================ */
@@ -6549,6 +6552,7 @@ async function _companionRefresh() {
     // lan_listening is PROBED (a real connect to our own LAN socket), so
     // the dot means "verified reachable", never "the setting says so".
     _setKeyDot('settings-dot-companion', s.enabled ? (s.lan_listening || null) : null);
+    _companionPushStatus(s);
     if (!s.enabled) {
       el.textContent = 'Off — the backend answers this PC only. Checking the box opens the backend on EVERY network interface this PC has (Wi-Fi, Ethernet, VPN and Tailscale alike), not just Wi-Fi. Traffic is plain HTTP, so use it on networks you trust; every device must pair first, and a paired phone still reaches only the brief, obligations, approvals and tasks.';
       return;
@@ -6612,6 +6616,42 @@ async function _companionRefresh() {
   } catch (_e) {
     el.textContent = '';                       // backend not up — stay quiet
   }
+}
+
+// v6.9.7: push-notification status — honest in BOTH directions. A working
+// setup names the subscribed phones and the last delivery; a broken one
+// names the failure (push service unreachable, expired subscription, no
+// HTTPS). A notification system that quietly stops working is the worst
+// kind of fake success, so the error line always wins the sentence.
+function _companionPushStatus(s) {
+  const pushEl = document.getElementById('settings-push-status');
+  if (!pushEl) return;
+  const p = s.push || {};
+  if (!s.enabled) {
+    pushEl.textContent = p.enabled
+      ? 'Waiting on the phone companion above — enable it first.'
+      : '';
+    return;
+  }
+  if (!p.enabled) {
+    pushEl.textContent = 'Off — the PC never contacts the phone. Turning this on notifies paired phones when an obligation comes due, an approval stages, or a run parks on a question. Nothing else notifies.';
+    return;
+  }
+  const bits = [];
+  bits.push(p.subscribed_devices
+    ? `${p.subscribed_devices} phone${p.subscribed_devices > 1 ? 's' : ''} subscribed`
+    : 'no phone subscribed yet — open the companion on the phone at the HTTPS address and tap "Enable on this phone"');
+  if (s.https_url) {
+    bits.push(`push needs the HTTPS address: ${s.https_url}`);
+  } else if (s.https_error) {
+    bits.push(`HTTPS unavailable: ${s.https_error}`);
+  }
+  if (p.last_error) {
+    bits.push(`PUSH PROBLEM: ${p.last_error}`);
+  } else if (p.last_success_iso) {
+    bits.push(`last delivered ${p.last_success_iso.slice(0, 16).replace('T', ' ')}`);
+  }
+  pushEl.textContent = bits.join(' · ');
 }
 
 const _companionCodeBtn = document.getElementById('settings-companion-code');

@@ -82,6 +82,11 @@ SETTABLE_KEYS: tuple[str, ...] = (
     # CompanionGate middleware (main.py) refuses every non-loopback request
     # unless this is "true" AND the request carries a paired device token.
     "companion_enabled",
+    # v6.9.7: Web Push notifications to paired phones. OFF by default —
+    # "true" lets push_service evaluate and send; enabling generates the
+    # DPAPI-wrapped VAPID keypair. Notifiable moments are pinned to three:
+    # obligation due, approval staged, run parked.
+    "companion_push_enabled",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when

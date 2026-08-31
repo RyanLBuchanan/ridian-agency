@@ -340,6 +340,7 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
   <main>
     <!-- Task is the landing surface: an agent app opens on its command line. -->
     <section id="tab-task">
+      <div class="card" id="push-card" hidden></div>
       <div class="composer">
         <textarea id="task-input" enterkeyhint="send"
           placeholder="Tell Ridian what to do. It runs on the PC, through every gate."></textarea>
@@ -769,6 +770,90 @@ $("task-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runTask(); }
 });
 
+/* ---------------- push notifications (v6.9.7) ---------------- */
+function pushKeyBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+function pushCard(html) {
+  const el = $("push-card");
+  el.hidden = false;
+  el.innerHTML = html;
+}
+async function setupPush(me) {
+  const p = me.push || {};
+  $("push-card").hidden = true;
+  if (!p.enabled) {
+    // Toggled off on the PC: release this browser's subscription too.
+    try {
+      const reg = await navigator.serviceWorker.getRegistration("/companion");
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) {
+        await sub.unsubscribe();
+        await api("/companion/push/unsubscribe", { method: "POST" });
+      }
+    } catch (_e) { /* nothing to release */ }
+    return;
+  }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    pushCard('<div class="card-title">Notifications</div>' +
+      '<p class="note">This browser cannot receive Web Push.</p>');
+    return;
+  }
+  if (!window.isSecureContext) {
+    // HONEST: push does not exist on a plain-http origin. Name the fix
+    // instead of failing silently or pretending.
+    pushCard('<div class="card-title">Notifications</div>' +
+      '<p class="note">Push needs the HTTPS address. On the PC, open ' +
+      'Settings &rarr; Phone and use the <b>https://&hellip;ts.net</b> ' +
+      'link there instead of this address.</p>');
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register("/companion-sw.js",
+      { scope: "/companion" });
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      // Heal the server-side record if it was lost (e.g. re-pairing).
+      if (!p.subscribed) {
+        await api("/companion/push/subscribe",
+          { method: "POST", body: JSON.stringify(existing.toJSON()) });
+      }
+      return;                       // subscribed — no card, no nagging
+    }
+    if (Notification.permission === "denied") {
+      pushCard('<div class="card-title">Notifications</div>' +
+        '<p class="note">Blocked for this site in the browser &mdash; allow ' +
+        'notifications in the browser\'s site settings, then reopen.</p>');
+      return;
+    }
+    pushCard('<div class="card-title">Notifications</div>' +
+      '<p class="note">Get notified when something comes due, an approval ' +
+      'stages, or a run needs your answer.</p>' +
+      '<div class="row-btns"><button class="btn btn-primary" id="push-enable">' +
+      'Enable on this phone</button></div>');
+    $("push-enable").addEventListener("click", async () => {
+      try {
+        if (await Notification.requestPermission() !== "granted") {
+          throw new Error("Permission was not granted.");
+        }
+        const sub = await reg.pushManager.subscribe(
+          { userVisibleOnly: true, applicationServerKey: pushKeyBytes(p.key) });
+        await api("/companion/push/subscribe",
+          { method: "POST", body: JSON.stringify(sub.toJSON()) });
+        pushCard('<p class="okline">Notifications on. Close the app freely ' +
+          '&mdash; the PC will reach you.</p>');
+        setTimeout(() => { $("push-card").hidden = true; }, 4000);
+      } catch (e) {
+        pushCard(`<p class="err">${esc(e.message)}</p>`);
+      }
+    });
+  } catch (e) {
+    pushCard(`<p class="err">Notifications setup failed: ${esc(e.message)}</p>`);
+  }
+}
+
 /* ---------------- parked runs ---------------- */
 async function loadAwaiting() {
   try {
@@ -808,6 +893,16 @@ async function loadAwaiting() {
     // Task is the landing surface: ready to type the moment it opens.
     $("task-input").focus({ preventScroll: true });
     loadAwaiting(); loadDue(); loadApprovals();
+    // v6.9.7 item 5: a notification tap lands on its tab — via SW message
+    // when this page is already open, via the #hash when it had to open.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", (e) => {
+        if (e.data && TABS.includes(e.data.tab)) openTab(e.data.tab);
+      });
+    }
+    const wanted = location.hash.slice(1);
+    if (TABS.includes(wanted)) openTab(wanted);
+    setupPush(me);
     setInterval(() => {
       if (!$("app-view").classList.contains("hidden")) { loadDue(); loadApprovals(); }
     }, 60000);

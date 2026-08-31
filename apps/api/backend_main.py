@@ -60,6 +60,19 @@ def main() -> None:
     host = resolve_backend_host(
         settings_service.get_bool_setting("companion_enabled", default=False))
     os.environ["RIDIAN_BOUND_HOST"] = host
+    # v6.9.7: Web Push exists only in a secure context, so when the
+    # companion is on the network we also try a Tailscale-HTTPS listener
+    # (same app, same gate — TLS adds transport privacy, never access).
+    # Every failure mode lands in companion_tls.state and shows in
+    # Settings; the plain listener below never waits on this.
+    if host == "0.0.0.0":
+        try:
+            from app.services import companion_tls
+            companion_tls.start_if_possible(
+                app, port=int(os.environ.get("RIDIAN_TLS_PORT",
+                                             str(companion_tls.DEFAULT_TLS_PORT))))
+        except Exception as exc:  # noqa: BLE001 — never block the main bind
+            sys.stderr.write(f"tls listener skipped: {exc}\n")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

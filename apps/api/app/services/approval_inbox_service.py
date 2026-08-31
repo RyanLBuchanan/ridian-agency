@@ -104,6 +104,13 @@ def stage_from_tool(tool_name: str, kwargs: dict, result: dict) -> Optional[dict
     state_store.save(_STORE, items)
     log.info("approvals.staged id=%s tool=%s op=%s", entry["id"], tool_name,
              entry["operation_id"])
+    # v6.9.7: an approval staging is one of the three notifiable moments.
+    # Fire-and-forget — staging must never wait on or fail with a push.
+    try:
+        from . import push_service
+        push_service.notify_approval_staged(entry)
+    except Exception:  # noqa: BLE001 — notification is never load-bearing
+        log.warning("approvals.push_notify_failed", exc_info=True)
     return entry
 
 
