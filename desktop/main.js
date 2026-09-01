@@ -133,6 +133,10 @@ async function startBackendIfNeeded() {
     cwd: path.dirname(exe),
     windowsHide: true,
     stdio: 'ignore',
+    // v6.9.10: the backend serves the INSTALLER version to /health,
+    // /companion/me and the stamped companion page — one source of truth
+    // (this package's version), visible on every surface.
+    env: { ...process.env, RIDIAN_APP_VERSION: app.getVersion() },
   });
   _backendChild.on('exit', () => { _backendChild = null; });
   return true;

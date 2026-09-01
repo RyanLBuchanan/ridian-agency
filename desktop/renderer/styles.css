@@ -4755,6 +4755,13 @@ body {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
+
+/* v6.9.10: the installed version, right-aligned in the Settings header. */
+.settings-version {
+  margin-left: auto;
+  color: var(--color-muted-soft);
+  font-size: 0.85rem;
+}
 .settings-title {
   margin: 0;
   font-size: 1.1rem;

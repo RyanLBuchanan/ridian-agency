@@ -53,20 +53,28 @@ def _tailscale_exe() -> Optional[str]:
 
 
 def _dns_name(exe: str) -> str:
-    """This node's ts.net name, from the CLI's own status. Raises with an
-    operator-honest message on every failure mode."""
+    """This node's ts.net name, from the CLI's own status. Every failure
+    message NAMES THE FIX, not just the condition — 'Tailscale is NoState'
+    tells the operator nothing to do; 'start Tailscale, then restart
+    Ridian' does."""
     out = subprocess.run([exe, "status", "--json"], capture_output=True,
                          timeout=_CLI_TIMEOUT_SECONDS, text=True)
     if out.returncode != 0:
-        raise RuntimeError(f"tailscale status failed: {out.stderr.strip()[:200]}")
+        raise RuntimeError(
+            f"Could not ask Tailscale for its status "
+            f"({out.stderr.strip()[:150]}) — start Tailscale from the "
+            "system tray, then restart Ridian.")
     data = json.loads(out.stdout)
     if data.get("BackendState") != "Running":
-        raise RuntimeError(f"Tailscale is {data.get('BackendState', 'absent')}, "
-                           "not Running.")
+        raise RuntimeError(
+            f"Tailscale isn't running on this PC (state: "
+            f"{data.get('BackendState', 'absent')}) — start Tailscale from "
+            "the system tray and sign in, then restart Ridian.")
     name = str((data.get("Self") or {}).get("DNSName") or "").rstrip(".")
     if not name:
-        raise RuntimeError("Tailscale reports no DNS name — enable MagicDNS "
-                           "in the tailnet admin console.")
+        raise RuntimeError(
+            "This PC has no MagicDNS name — enable DNS → MagicDNS in the "
+            "Tailscale admin console, then restart Ridian.")
     return name
 
 
@@ -88,8 +96,10 @@ def ensure_cert() -> tuple[str, Path, Path]:
     also how renewal happens — at startup, no cron)."""
     exe = _tailscale_exe()
     if not exe:
-        raise RuntimeError("tailscale.exe not found — notifications need "
-                           "Tailscale installed on this PC.")
+        raise RuntimeError(
+            "Tailscale isn't installed on this PC (tailscale.exe not found) "
+            "— install it from tailscale.com and sign in, then restart "
+            "Ridian.")
     host = _dns_name(exe)
     cert, key = _cert_paths(host)
     if cert.exists() and key.exists():
@@ -104,9 +114,9 @@ def ensure_cert() -> tuple[str, Path, Path]:
         capture_output=True, timeout=_CLI_TIMEOUT_SECONDS, text=True)
     if out.returncode != 0:
         raise RuntimeError(
-            f"'tailscale cert' failed for {host}: {out.stderr.strip()[:300]} "
-            "— enable HTTPS certificates in the Tailscale admin console "
-            "(DNS -> HTTPS Certificates).")
+            f"'tailscale cert' failed for {host}: {out.stderr.strip()[:250]} "
+            "— enable DNS → HTTPS Certificates in the Tailscale admin "
+            "console, then restart Ridian.")
     log.info("tls.cert_obtained host=%s", host)
     return host, cert, key
 
@@ -143,7 +153,8 @@ def start_if_possible(app, port: int = DEFAULT_TLS_PORT) -> bool:
     try:
         server = _make_server(app, port, cert, key)
     except Exception as exc:  # noqa: BLE001
-        state["error"] = f"HTTPS listener could not be configured: {exc}"
+        state["error"] = (f"HTTPS listener could not be configured: {exc} — "
+                          "check backend.log, then restart Ridian.")
         log.warning("tls.config_failed %s", exc)
         return False
     thread = threading.Thread(target=server.run, daemon=True, name="ridian-tls")
@@ -153,13 +164,16 @@ def start_if_possible(app, port: int = DEFAULT_TLS_PORT) -> bool:
     while not getattr(server, "started", False):
         if not thread.is_alive():
             state["error"] = (f"HTTPS listener died before binding port {port} "
-                              "— the port may be in use, or the certificate "
-                              "unreadable. See backend.log.")
+                              "— close whatever else is using that port (or "
+                              "set RIDIAN_TLS_PORT to a free one), then "
+                              "restart Ridian. Details in backend.log.")
             log.warning("tls.bind_failed port=%s", port)
             return False
         if _time.monotonic() > deadline:
             state["error"] = (f"HTTPS listener did not confirm its bind on "
-                              f"port {port} within {_BIND_WAIT_SECONDS}s.")
+                              f"port {port} within {_BIND_WAIT_SECONDS}s — "
+                              "restart Ridian; if it repeats, check "
+                              "backend.log.")
             log.warning("tls.bind_timeout port=%s", port)
             return False
         _time.sleep(0.2)

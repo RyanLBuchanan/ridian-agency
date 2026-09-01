@@ -24,10 +24,12 @@ the LAN, which turns every endpoint into a network surface. The rules:
      loopback-only even with a valid token. The allowlist lives in
      main.py next to the middleware and is pinned by test.
 
-Pairing codes and per-device last-seen live in MEMORY only: codes die
-with the process on purpose, and last-seen is display metadata that must
-not trigger a state write (every state_store.save snapshots first — a
-per-request write would churn backups).
+Pairing codes live in MEMORY only: codes die with the process on purpose.
+Per-device last-seen is memory-FIRST (fresh, per request) with a
+day-throttled persisted copy (v6.9.10): every state_store.save snapshots
+first, so a per-request write would churn backups — the record is written
+at most once per device per 24h, which is enough to tell three same-named
+pairings apart across restarts and to prune the dead ones.
 """
 
 from __future__ import annotations
@@ -89,6 +91,7 @@ def generate_pairing_code() -> dict:
     active code and — because it is an explicit operator action on the PC —
     clears a lockout."""
     global _active_code, _code_expires_at, _failed_attempts, _locked_until
+    prune_stale_devices()                    # operator moment; already writes
     _active_code = "".join(secrets.choice(_CODE_ALPHABET)
                            for _ in range(_CODE_LENGTH))
     _code_expires_at = _now() + CODE_TTL_SECONDS
@@ -128,6 +131,7 @@ def pair(code: str, device_name: str = "") -> dict:
                                  "Generate a new code on the PC.")
         raise CompanionError("wrong pairing code.")
     _active_code = None                      # single-use
+    prune_stale_devices()                    # pairing writes anyway
     token = secrets.token_urlsafe(32)
     entry = {
         "id": "cd_" + uuid.uuid4().hex[:12],
@@ -143,21 +147,46 @@ def pair(code: str, device_name: str = "") -> dict:
     return {"device_id": entry["id"], "name": entry["name"], "token": token}
 
 
+# Persist a device's last-seen at most this often — one write (and one
+# snapshot) per device per day, never per request.
+_LAST_SEEN_PERSIST_HOURS = 24
+# Prune pairings unseen this long. The companion cookie's max-age is 30
+# days, so a 45-days-unseen pairing's credential expired two weeks ago —
+# removing the record costs no working access, it only clears clutter
+# (and dead hashes). Re-pairing costs one code.
+PRUNE_UNSEEN_DAYS = 45
+
+
 def verify_token(raw_token: str) -> Optional[dict]:
-    """Device record for a valid token, else None. READ-ONLY — last-seen is
-    recorded in memory only, never written to state."""
+    """Device record for a valid token, else None. Last-seen: memory
+    always; persisted onto the record at most once per 24h so same-named
+    pairings stay distinguishable across restarts."""
     if not raw_token:
         return None
     digest = hashlib.sha256(str(raw_token).encode()).hexdigest()
-    for device in state_store.load_list(_STORE):
+    devices = state_store.load_list(_STORE)
+    for device in devices:
         if compare_digest(digest, str(device.get("token_sha256") or "")):
             _last_seen[device.get("id")] = _now()
+            now_dt = _dt.datetime.now()
+            stale = True
+            try:
+                stale = (now_dt - _dt.datetime.fromisoformat(
+                    device.get("last_seen_iso") or "")
+                ) > _dt.timedelta(hours=_LAST_SEEN_PERSIST_HOURS)
+            except ValueError:
+                pass                          # absent/unparseable = stale
+            if stale:
+                device["last_seen_iso"] = now_dt.isoformat(timespec="seconds")
+                state_store.save(_STORE, devices)
             return device
     return None
 
 
 def list_devices() -> list:
-    """For the Settings view — hashes are NOT included."""
+    """For the Settings view — hashes are NOT included. last_seen prefers
+    the in-memory stamp (fresh to the minute) and falls back to the
+    day-granular persisted one, so three same-named pairings read apart."""
     out = []
     for device in state_store.load_list(_STORE):
         seen = _last_seen.get(device.get("id"))
@@ -166,9 +195,41 @@ def list_devices() -> list:
             "name": device.get("name"),
             "created_iso": device.get("created_iso"),
             "last_seen_iso": (_dt.datetime.fromtimestamp(seen)
-                              .isoformat(timespec="seconds") if seen else ""),
+                              .isoformat(timespec="seconds") if seen
+                              else (device.get("last_seen_iso") or "")),
         })
     return out
+
+
+def prune_stale_devices(now: Optional[_dt.datetime] = None) -> int:
+    """Remove pairings unseen for PRUNE_UNSEEN_DAYS+ (basis: persisted
+    last-seen, else the pairing date; a device seen THIS session always
+    survives; unparseable dates are kept — never guess-revoke). Called at
+    the operator-action moments that already write: code generation and
+    pairing. Returns how many were removed."""
+    now = now or _dt.datetime.now()
+    cutoff = now - _dt.timedelta(days=PRUNE_UNSEEN_DAYS)
+    items = state_store.load_list(_STORE)
+    kept: list[dict] = []
+    removed = 0
+    for device in items:
+        basis = (device.get("last_seen_iso") or device.get("created_iso") or "")
+        try:
+            alive = _dt.datetime.fromisoformat(basis) > cutoff
+        except ValueError:
+            alive = True
+        if device.get("id") in _last_seen:
+            alive = True
+        if alive:
+            kept.append(device)
+        else:
+            removed += 1
+            _last_seen.pop(device.get("id"), None)
+            log.info("companion.device_pruned id=%s unseen_since=%s",
+                     device.get("id"), basis)
+    if removed:
+        state_store.save(_STORE, kept)
+    return removed
 
 
 def revoke_device(device_id: str) -> bool:

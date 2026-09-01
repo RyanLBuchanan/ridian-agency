@@ -99,6 +99,14 @@ log = logging.getLogger("ridian.api")
 # v4.2: bundled resource in the frozen build; source tree in dev.
 STATIC_DIR = resource_base() / "app" / "static"
 
+
+def app_version() -> str:
+    """The INSTALLER version, passed down by the desktop supervisor
+    (RIDIAN_APP_VERSION = app.getVersion() at spawn). "dev" when absent —
+    the dev flow starts uvicorn externally and has no installer version.
+    Read per-call so tests can vary it."""
+    return (os.environ.get("RIDIAN_APP_VERSION") or "").strip() or "dev"
+
 from contextlib import asynccontextmanager  # noqa: E402
 
 
@@ -226,7 +234,14 @@ class CompanionPairRequest(BaseModel):
 
 @app.get("/companion")
 async def companion_page():
-    return FileResponse(STATIC_DIR / "companion.html", media_type="text/html")
+    """v6.9.10: the page is STAMPED with the serving version at request
+    time, so a phone showing an old number is provably on a stale copy —
+    and Cache-Control: no-cache makes that unlikely to begin with (the
+    browser revalidates whenever the PC is reachable)."""
+    html = (STATIC_DIR / "companion.html").read_text(encoding="utf-8")
+    return Response(content=html.replace("__RIDIAN_VERSION__", app_version()),
+                    media_type="text/html",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/companion/manifest.json")
@@ -312,6 +327,8 @@ async def companion_me(request: Request) -> dict:
         "pc_name": companion_service.pc_name(),
         "company": (saved.get("company_name") or "").strip(),
         "appearance": (saved.get("appearance") or "system").strip().lower(),
+        # v6.9.10: lets the page detect that IT is a stale cached copy.
+        "app_version": app_version(),
     }
     device = request.scope.get("state", {}).get("companion_device")
     if device is not None:
@@ -352,6 +369,7 @@ async def companion_status(request: Request) -> dict:
         companion_service.lan_listener_reachable, ip, port)
     return {
         "enabled": enabled,
+        "app_version": app_version(),
         "bound_host": os.environ.get("RIDIAN_BOUND_HOST", ""),
         "lan_listening": listening,
         "restart_required": bool(enabled and not listening),
@@ -711,6 +729,8 @@ async def health() -> dict:
     return {
         "status": "ok",
         "service": "ridian-agency",
+        # v6.9.10: the installer version, for the window title + Settings.
+        "app_version": app_version(),
         "model": settings_service.get_effective_value("ANTHROPIC_MODEL") or "claude-opus-4-8",
         "anthropic_key_loaded": bool(settings_service.get_effective_value("ANTHROPIC_API_KEY")),
         "openai_key_loaded": bool(settings_service.get_effective_value("OPENAI_API_KEY")),

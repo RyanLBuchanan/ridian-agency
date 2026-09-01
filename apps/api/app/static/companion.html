@@ -321,6 +321,7 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
   <div class="field"><input type="text" id="pair-name" placeholder="This device's name (e.g. Pixel 7)"></div>
   <button class="btn btn-primary" id="pair-btn">Pair</button>
   <p class="err" id="pair-err"></p>
+  <p class="note">Ridian Companion v__RIDIAN_VERSION__</p>
 </div>
 
 <!-- Boot failure that is NOT the pairing 401: a blank page is a fake state
@@ -372,6 +373,9 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
     <section id="tab-approvals" class="hidden">
       <div id="appr-list" class="note">Loading...</div>
     </section>
+    <!-- STAMPED at serve time: a phone showing an old number here is
+         provably rendering a stale cached copy of this page. -->
+    <p class="note" id="version-line">Ridian Companion v__RIDIAN_VERSION__</p>
   </main>
   <nav>
     <button data-tab="task" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Task</button>
@@ -383,6 +387,9 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
 
 <script>
 "use strict";
+// Replaced at serve time. If this page is a stale cache, this constant
+// carries the OLD version while /companion/me reports the live one.
+const PAGE_VERSION = "__RIDIAN_VERSION__";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -925,6 +932,15 @@ async function loadAwaiting() {
     const wanted = location.hash.slice(1);
     if (TABS.includes(wanted)) openTab(wanted);
     setupPush(me);
+    // v6.9.10: stale-page detection — the stamped PAGE_VERSION vs what
+    // the PC reports live. A mismatch is named, with the fix.
+    if (me.app_version && me.app_version !== PAGE_VERSION) {
+      const vl = $("version-line");
+      vl.className = "err";
+      vl.textContent = `This page is v${PAGE_VERSION} but the PC runs ` +
+        `v${me.app_version} — you are on an old cached page. Close and ` +
+        "reopen the companion (or pull down to refresh).";
+    }
     setInterval(() => {
       if (!$("app-view").classList.contains("hidden")) { loadDue(); loadApprovals(); }
     }, 60000);

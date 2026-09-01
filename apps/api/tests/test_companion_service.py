@@ -115,16 +115,22 @@ def test_verify_round_trip_and_reject():
     assert cs.verify_token(None) is None
 
 
-def test_verify_never_writes_state():
+def test_verify_writes_last_seen_once_then_throttles():
+    """v6.9.10 contract change, deliberate: last-seen persists so
+    same-named pairings read apart across restarts — but at most ONE write
+    per device per 24h. Per-request write churn stays forbidden: after the
+    first verify, further verifies are byte-silent."""
     code = cs.generate_pairing_code()["code"]
     raw = cs.pair(code)["token"]
+    assert cs.verify_token(raw)               # the one daily persist
     before = _state_bytes()
     snaps = [s["id"] for s in state_store.list_snapshots()]
     for _ in range(3):
         assert cs.verify_token(raw)
-    assert _state_bytes() == before
+    assert _state_bytes() == before           # throttled: no further writes
     assert [s["id"] for s in state_store.list_snapshots()] == snaps
-    # ...but last-seen still surfaces, from memory.
+    # The persisted stamp survives a "restart" (memory cleared).
+    cs._last_seen.clear()
     assert cs.list_devices()[0]["last_seen_iso"]
 
 

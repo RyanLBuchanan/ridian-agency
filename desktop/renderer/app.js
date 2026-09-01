@@ -3633,8 +3633,21 @@ async function pollHealth() {
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       setOpenAIKeyState(!!data.anthropic_key_loaded);
+      if (data.app_version) _applyVersion(data.app_version);
     }
   } catch (_) { setBackendStatus(false); }
+}
+
+// v6.9.10: the running version, readable without hunting — window title
+// and the Settings header. One source: /health's app_version (the
+// installer version the supervisor passed down; "dev" outside a build).
+let _versionApplied = '';
+function _applyVersion(v) {
+  if (v === _versionApplied) return;
+  _versionApplied = v;
+  document.title = `Ridian Operator v${v}`;
+  const el = document.getElementById('settings-version');
+  if (el) el.textContent = `v${v}`;
 }
 
 function startHealthPolling() {
@@ -6597,7 +6610,15 @@ async function _companionRefresh() {
     (s.devices || []).forEach((d) => {
       const row = document.createElement('span');
       row.className = 'settings-companion-device';
-      row.textContent = ` · ${d.name}${d.last_seen_iso ? ` (seen ${d.last_seen_iso.slice(0, 16).replace('T', ' ')})` : ''} `;
+      // v6.9.10: three "Pixel 7"s must read apart — pairing date always,
+      // last-seen when known (day-persisted, so it survives restarts),
+      // and an honest "never seen" otherwise. Unseen-45d+ pairings are
+      // pruned automatically at the next pairing-code generation.
+      const paired = String(d.created_iso || '').slice(0, 10);
+      const seen = d.last_seen_iso
+        ? `last seen ${d.last_seen_iso.slice(0, 16).replace('T', ' ')}`
+        : 'never seen';
+      row.textContent = ` · ${d.name} (paired ${paired} · ${seen}) `;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn-ghost btn-compact';

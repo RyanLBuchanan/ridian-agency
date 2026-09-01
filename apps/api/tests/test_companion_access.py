@@ -989,6 +989,104 @@ def test_desktop_settings_carry_the_push_toggle_and_status():
     assert 'id="settings-push-status"' in index
 
 
+# --------------------------------------------------------------------------
+# 11. v6.9.10 — the running version is readable, failures name their fix,
+#     and same-named pairings read apart (and prune when long dead)
+# --------------------------------------------------------------------------
+
+def test_version_is_stamped_on_every_surface(monkeypatch):
+    """One source of truth (the supervisor's RIDIAN_APP_VERSION): /health
+    for the window title + Settings, /companion/me for the phone, and the
+    PAGE ITSELF stamped at serve time — a phone showing an old number is
+    provably on a stale cached copy."""
+    monkeypatch.setenv("RIDIAN_APP_VERSION", "9.9.9-test")
+    assert _pc().get("/health").json()["app_version"] == "9.9.9-test"
+    lan, _device = _paired_lan()
+    assert lan.get("/companion/me").json()["app_version"] == "9.9.9-test"
+    page = lan.get("/companion")
+    assert "Ridian Companion v9.9.9-test" in page.text
+    assert "__RIDIAN_VERSION__" not in page.text     # every placeholder filled
+    assert page.headers["cache-control"] == "no-cache"
+    assert _pc().get("/companion/status").json()["app_version"] == "9.9.9-test"
+    # The page detects ITS OWN staleness: stamped const vs live /me value.
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert 'const PAGE_VERSION = "__RIDIAN_VERSION__"' in html
+    assert "old cached page" in html and 'id="version-line"' in html
+    # Desktop: title + Settings header fed from /health's app_version.
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    assert "_applyVersion" in app_js and "document.title" in app_js
+    assert 'id="settings-version"' in (_RENDERER / "index.html").read_text(
+        encoding="utf-8")
+
+
+def test_tls_failures_name_the_fix_not_just_the_condition():
+    """"Tailscale is NoState, not Running" was honest but inert. Every
+    operator-facing failure string in companion_tls now carries an action
+    — what to start, install, or enable, and then restart Ridian."""
+    src = (_REPO / "apps" / "api" / "app" / "services"
+           / "companion_tls.py").read_text(encoding="utf-8")
+    assert src.count("restart Ridian") >= 6
+    assert "start Tailscale from" in src
+    assert "install it from tailscale.com" in src
+    assert "enable DNS → MagicDNS" in src
+    assert "HTTPS Certificates in the Tailscale admin" in src
+    assert "set RIDIAN_TLS_PORT" in src
+    # And the live no-tailscale path carries its action end to end.
+    from app.services import companion_tls
+    import unittest.mock as _mock
+    with _mock.patch.object(companion_tls, "_tailscale_exe", lambda: None):
+        with pytest.raises(RuntimeError, match="then restart Ridian"):
+            companion_tls.ensure_cert()
+
+
+def test_last_seen_persists_daily_so_pairings_read_apart():
+    lan, device_id = _paired_lan()
+    assert lan.get("/obligations").status_code == 200   # verify_token ran
+    stored = next(d for d in state_store.load_list("companion_devices")
+                  if d["id"] == device_id)
+    first_stamp = stored["last_seen_iso"]
+    assert first_stamp                                  # persisted...
+    snaps = [s["id"] for s in state_store.list_snapshots()]
+    assert lan.get("/obligations").status_code == 200
+    # ...but throttled: a second request the same day writes NOTHING.
+    assert [s["id"] for s in state_store.list_snapshots()] == snaps
+    stored = next(d for d in state_store.load_list("companion_devices")
+                  if d["id"] == device_id)
+    assert stored["last_seen_iso"] == first_stamp
+    # A restart (memory gone) still shows the persisted stamp.
+    cs._last_seen.clear()
+    row = next(d for d in cs.list_devices() if d["id"] == device_id)
+    assert row["last_seen_iso"] == first_stamp and row["created_iso"]
+
+
+def test_stale_pairings_prune_at_operator_moments():
+    """Three "Pixel 7"s from re-pair testing: the two long-dead ones (whose
+    30-day cookies expired weeks ago) vanish the next time a pairing code
+    is generated; anything recent, in-session, or unparseable is kept."""
+    _enable()
+    state_store.save("companion_devices", [
+        {"id": "cd_dead0000001", "name": "Pixel 7", "token_sha256": "x",
+         "created_iso": "2026-05-01T09:00:00",
+         "last_seen_iso": "2026-06-01T09:00:00"},      # unseen ~90d: prune
+        {"id": "cd_dead0000002", "name": "Pixel 7", "token_sha256": "x",
+         "created_iso": "2026-05-01T09:00:00"},        # never seen: prune
+        {"id": "cd_live0000001", "name": "Pixel 7", "token_sha256": "x",
+         "created_iso": "2026-08-30T09:00:00",
+         "last_seen_iso": "2026-08-31T09:00:00"},      # recent: keep
+        {"id": "cd_weird000001", "name": "Old shape", "token_sha256": "x",
+         "created_iso": "not-a-date"},                 # unparseable: keep
+        {"id": "cd_mem0000001", "name": "In session", "token_sha256": "x",
+         "created_iso": "2026-01-01T09:00:00"},        # seen THIS session
+    ])
+    cs._last_seen["cd_mem0000001"] = cs._now()
+    _pc().post("/companion/pairing-code")
+    kept = {d["id"] for d in state_store.load_list("companion_devices")}
+    assert kept == {"cd_live0000001", "cd_weird000001", "cd_mem0000001"}
+    # The Settings row copy distinguishes what remains.
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    assert "paired ${paired}" in app_js and "never seen" in app_js
+
+
 def test_arms_length_type_and_touch_targets():
     """READABILITY PIN: the phone is read at arm's length — >=17px body
     text, >=48px touch height on the tabs and every button, and the
