@@ -84,9 +84,16 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "companion_enabled",
     # v6.9.7: Web Push notifications to paired phones. OFF by default —
     # "true" lets push_service evaluate and send; enabling generates the
-    # DPAPI-wrapped VAPID keypair. Notifiable moments are pinned to three:
-    # obligation due, approval staged, run parked.
+    # DPAPI-wrapped VAPID keypair. Core notifiable moments: obligation due,
+    # approval staged, run parked (v6.9.8 adds the gated watch tier below).
     "companion_push_enabled",
+    # v6.9.8 ambient watch (watch_service): thresholds + a push kill-switch
+    # SEPARATE from companion_push_enabled, so a noisy watch rule can be
+    # silenced without losing the time-critical approval/park pushes.
+    # Blank = default (14 quiet days; 3 grace days; watch pushes on).
+    "watch_deal_quiet_days",
+    "watch_invoice_grace_days",
+    "watch_push_enabled",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when
@@ -333,6 +340,20 @@ def get_bool_setting(key: str, default: bool = False) -> bool:
     if raw in ("false", "0", "no", "off"):
         return False
     return default
+
+
+def get_int_setting(key: str, default: int, *, minimum: int = 0,
+                    maximum: int = 3650) -> int:
+    """Read an integer setting stored as a string. Blank/garbage returns
+    ``default``; out-of-range values clamp — a typo in Settings must
+    degrade to sane behavior, never crash or surprise (v6.9.8 watch
+    thresholds)."""
+    raw = str(load_settings().get(key) or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
 
 
 def get_effective_value(env_key: str) -> str | None:

@@ -250,7 +250,7 @@ def test_disconnected_gmail_surfaces_honestly(tmp_path, monkeypatch):
 
 def test_needs_reply_joins_the_morning_brief(gmail, tmp_path, monkeypatch):
     _seed_contacts(tmp_path)
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices",
                         lambda limit=20: [])
     monkeypatch.setattr(brief_service.calendar_service, "todays_events",
                         lambda today=None: [])
@@ -261,7 +261,7 @@ def test_needs_reply_joins_the_morning_brief(gmail, tmp_path, monkeypatch):
 
 def test_unreachable_gmail_reads_unknown_in_the_brief(tmp_path, monkeypatch):
     _op(tmp_path)
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices",
                         lambda limit=20: [])
     monkeypatch.setattr(brief_service.calendar_service, "todays_events",
                         lambda today=None: [])

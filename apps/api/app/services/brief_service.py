@@ -23,7 +23,8 @@ import logging
 from typing import Optional
 
 from . import (calendar_service, inbox_service, obligations_service,
-               pipeline_service, quickbooks_service, state_store)
+               pipeline_service, quickbooks_service, state_store,
+               watch_service)
 
 log = logging.getLogger("ridian.brief")
 
@@ -60,9 +61,10 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
     today = today or _dt.date.today()
     week_end = today + _dt.timedelta(days=7)
 
+    all_deals = pipeline_service.list_deals()
     due_today: list[dict] = []
     due_week: list[dict] = []
-    for d in pipeline_service.list_deals():
+    for d in all_deals:
         if d.get("stage") not in pipeline_service.ACTIVE_STAGES:
             continue
         nad = (d.get("next_action_date") or "").strip()
@@ -83,9 +85,15 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
              pipeline_service.deals_needing_followup(
                  days_stale=7, due_within_days=7, today=today)["stale"]]
 
+    # v6.9.8: list_unpaid_invoices (server-side Balance filter, oldest due
+    # first, carries DueDate) — one fetch feeds this section AND the watch.
+    watch_invoices: list | None = None
+    invoice_env = ""
     try:
-        unpaid = [i for i in quickbooks_service.list_invoices(limit=50)
+        unpaid = [i for i in quickbooks_service.list_unpaid_invoices()
                   if float(i.get("balance") or 0) > 0]
+        invoice_env = quickbooks_service.get_environment()
+        watch_invoices = unpaid
         invoices = _section(unpaid, "No unpaid invoices.")
     except Exception as exc:  # noqa: BLE001 — the note carries the reason
         log.info("brief.quickbooks_unavailable %s", type(exc).__name__)
@@ -115,10 +123,12 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
             [], "", unavailable=(f"Calendar unreachable ({detail}) — today's "
                                  "events unknown, NOT none."))
 
+    watch_needs: list | None = None
     try:
         triaged = inbox_service.triage(
             now=_dt.datetime.combine(today, _dt.time(9, 0)))
         needs = triaged["needs_reply"]
+        watch_needs = needs
         inbox = _section(needs, "No inbox threads are waiting on your reply.")
     except Exception as exc:  # noqa: BLE001 — the note carries the reason
         log.info("brief.inbox_unavailable %s", type(exc).__name__)
@@ -129,9 +139,21 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
 
     # v6.8: obligations due — computed NOW from the store + calendar (no
     # timer exists to have missed). Surfacing only; nothing is created.
-    obligations = _section(
-        obligations_service.due_obligations(today=today),
-        "No obligations are due.")
+    due_obligations = obligations_service.due_obligations(today=today)
+    obligations = _section(due_obligations, "No obligations are due.")
+
+    # v6.9.8: the ambient watch, evaluated over the SAME snapshot this
+    # brief just fetched — never a second Gmail/QBO pass, and the section
+    # can never disagree with the rows above it. Honest about gaps.
+    watch_unavailable: dict = {}
+    if watch_invoices is None:
+        watch_unavailable["invoices"] = "QuickBooks unreachable"
+    if watch_needs is None:
+        watch_unavailable["mail"] = "Gmail unreachable"
+    noticed = watch_service.brief_section(watch_service.evaluate_with(
+        today=today, deals=all_deals, invoices=watch_invoices,
+        invoice_env=invoice_env, needs_reply=watch_needs,
+        obligations_due=due_obligations, unavailable=watch_unavailable))
 
     return {
         "generated_for": today.isoformat(),
@@ -150,5 +172,6 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
             "unpaid_invoices": invoices,
             "awaiting_approval": _section(
                 pending, "Nothing is awaiting your approval."),
+            "ridian_noticed": noticed,
         },
     }

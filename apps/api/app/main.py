@@ -477,6 +477,9 @@ class SettingsView(BaseModel):
     # next backend start). Blank/default = loopback only.
     companion_enabled: str = ""
     companion_push_enabled: str = ""
+    watch_deal_quiet_days: str = ""
+    watch_invoice_grace_days: str = ""
+    watch_push_enabled: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
     # so the renderer can show a clear, actionable warning if the configured
@@ -519,6 +522,9 @@ class SettingsUpdate(BaseModel):
     appearance: str | None = None
     companion_enabled: str | None = None
     companion_push_enabled: str | None = None
+    watch_deal_quiet_days: str | None = None
+    watch_invoice_grace_days: str | None = None
+    watch_push_enabled: str | None = None
 
 
 class KeyTestResponse(BaseModel):
@@ -1363,11 +1369,17 @@ async def obligations_list() -> dict:
     """v6.8: obligations + what's due, computed ON DEMAND — never a timer."""
     from .services import obligations_service
     push_service.maybe_evaluate()          # v6.9.7: throttled, thread, no timer
+    from .services import watch_service
     obs = obligations_service.list_obligations()
     return {"obligations": [
         {**ob, "next_due": obligations_service.next_due(ob),
          "due": obligations_service.due_status(ob)} for ob in obs],
-        "due": obligations_service.due_obligations()}
+        "due": obligations_service.due_obligations(),
+        # v6.9.8: watch findings from the LAST completed evaluation only —
+        # this endpoint stays a local read; the phone must never block on
+        # QuickBooks + Gmail to render the Due tab. computed_at says how
+        # fresh, "" says honestly that nothing has evaluated yet.
+        "findings": watch_service.cached()}
 
 
 @app.post("/obligations")

@@ -253,6 +253,10 @@ h2 {
 .badge.due { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-border); }
 .badge.over { background: var(--color-error-bg); color: var(--color-error-text); border-color: var(--color-error-border); }
 .badge.stale { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-border); }
+/* v6.9.8: a FINDING is something Ridian noticed, not something the
+   operator committed to — accent family, never the warn/error family. */
+.badge.notice { background: var(--color-accent-soft); color: var(--color-accent-deep); border-color: var(--color-border); }
+.card.finding { border-left: 3px solid var(--color-accent); }
 
 /* ---------- text states ---------- */
 .note { color: var(--color-muted); font-size: var(--fs-sm); }
@@ -359,6 +363,8 @@ textarea::placeholder, input::placeholder { color: var(--color-muted-soft); }
       <div id="due-list" class="note">Loading...</div>
       <h2>All obligations</h2>
       <div id="ob-list" class="note">Loading...</div>
+      <h2>Ridian noticed</h2>
+      <div id="noticed-list" class="note">Loading...</div>
     </section>
     <section id="tab-brief" class="hidden">
       <div id="brief-body" class="note">Loading...</div>
@@ -534,6 +540,20 @@ async function loadDue() {
           <div class="meta">${o.due ? dueBadge(o.due) : "next: " + esc(o.next_due || "—")}</div>
           <div class="meta">Task: ${esc(o.task)}</div></div>`).join("")
       : '<p class="note">No obligations yet &mdash; add them on the PC.</p>';
+    // v6.9.8: findings — what Ridian NOTICED (accent-marked), as of the
+    // last evaluation; an obligation is a commitment, a finding is not.
+    const fx = data.findings || {};
+    const rows = fx.findings || [];
+    const gaps = Object.values(fx.unavailable || {});
+    const asOf = fx.computed_at
+      ? `as of ${fx.computed_at.slice(11, 16)}`
+      : "not evaluated yet — opens with the PC's next check";
+    $("noticed-list").innerHTML = (rows.length
+      ? rows.map((f) => `<div class="card finding">
+          <div><span class="badge notice">NOTICED</span> <span class="card-title">${esc(f.title)}</span></div>
+          <div class="meta">${esc(f.detail)}</div></div>`).join("")
+      : `<p class="note">Nothing noticed.</p>`)
+      + `<p class="note">${esc(asOf)}${gaps.length ? " &middot; " + esc(gaps.join("; ")) : ""}</p>`;
   } catch (e) {
     failState("due-list", e, loadDue);
   }
@@ -555,6 +575,8 @@ const BRIEF_ORDER = [
   ["stale_deals", "Gone quiet", (i) => i.title],
   ["unpaid_invoices", "Unpaid invoices", (i) => `#${i.doc_number} ${i.customer} — $${i.balance}`],
   ["awaiting_approval", "Awaiting approval", (i) => i.question || i.command],
+  // v6.9.8: findings Ridian noticed — distinguished from commitments.
+  ["ridian_noticed", "Ridian noticed", (i) => `${i.title} — ${i.detail || ""}`],
 ];
 async function loadBrief() {
   $("brief-body").innerHTML = '<p class="note">Loading...</p>';

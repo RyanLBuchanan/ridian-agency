@@ -213,14 +213,16 @@ const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_pas
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
 const SETTINGS_BOOL_FIELDS = ['operator_auto_upload_drive', 'companion_enabled',
-  'companion_push_enabled'];
+  'companion_push_enabled', 'watch_push_enabled'];
 // Per-field default when the key is missing entirely — must mirror the
 // backend: auto-upload defaults ON, companion (a network surface) OFF,
-// push notifications OFF.
+// push notifications OFF, watch pushes ON (they only matter once push
+// itself is on, and Ryan asked for them by name).
 const SETTINGS_BOOL_DEFAULTS = {
   operator_auto_upload_drive: 'true',
   companion_enabled: 'false',
   companion_push_enabled: 'false',
+  watch_push_enabled: 'true',
 };
 
 /* ============================================================ */
@@ -8031,6 +8033,13 @@ async function loadMorningBrief() {
         <div class="brief-item">
           <span class="brief-item-main">${_briefEsc(p.question || p.command)}</span>
           <span class="brief-item-meta">From: ${_briefEsc(p.command)} · staged ${_briefEsc(p.started_at)}</span>
+        </div>`).join('')),
+      // v6.9.8: findings are what Ridian NOTICED, not what the operator
+      // committed to — every row carries the NOTICED chip to say so.
+      _briefSection('Ridian noticed', s.ridian_noticed || { items: [], empty: true, unavailable: false, note: 'Not evaluated by this backend version.' }, (items) => items.map((f) => `
+        <div class="brief-item">
+          <span class="brief-item-main"><span class="brief-pipeline">NOTICED</span> ${_briefEsc(f.title)}</span>
+          <span class="brief-item-meta">${_briefEsc(f.detail || '')}</span>
         </div>`).join('')),
     ].join('');
   } catch (err) {

@@ -930,6 +930,55 @@ def test_companion_page_wires_push_honestly():
     assert 'addEventListener("fetch"' not in sw
 
 
+def test_due_tab_findings_come_from_the_cache_only(monkeypatch):
+    """v6.9.8: the Due tab is a LOCAL read. Findings are the last completed
+    evaluation (stamped), never a live QBO/Gmail pull — the arm's-length
+    'Loading forever' class must not come back through this door."""
+    import datetime as dt
+
+    from app.services import watch_service
+    with watch_service._cache_lock:
+        watch_service._cache.update(
+            {"findings": [], "computed_at": "", "unavailable": {}})
+
+    def _explode(*_a, **_k):
+        raise AssertionError("/obligations must never reach a watch source")
+    monkeypatch.setattr(watch_service, "gather_and_evaluate", _explode)
+    lan, _device = _paired_lan()
+    out = lan.get("/obligations").json()["findings"]
+    assert out["computed_at"] == "" and out["findings"] == []
+    watch_service.evaluate_with(
+        today=dt.date(2026, 9, 1),
+        deals=[{"id": "d3", "title": "Quiet", "stage": "contacted",
+                "last_touch_iso": "2026-08-01T09:00:00"}])
+    out = lan.get("/obligations").json()["findings"]
+    assert out["computed_at"] and len(out["findings"]) == 1
+    assert out["findings"][0]["kind"] == "deal_quiet"
+
+
+def test_findings_render_distinguished_on_both_surfaces():
+    """Item 5: an obligation is a commitment, a finding is something
+    Ridian noticed — the NOTICED chip and accent (never warn/error)
+    treatment mark the difference on the phone AND the desktop brief."""
+    html = (_STATIC / "companion.html").read_text(encoding="utf-8")
+    assert 'id="noticed-list"' in html
+    assert '<span class="badge notice">NOTICED</span>' in html
+    notice_css = html.split(".badge.notice {", 1)[1].split("}", 1)[0]
+    assert "var(--color-accent-soft)" in notice_css
+    assert "warn" not in notice_css and "error" not in notice_css
+    assert ".card.finding" in html
+    assert '"ridian_noticed", "Ridian noticed"' in html   # brief section
+    # Honest freshness: the Due tab names the evaluation time or its absence.
+    assert "not evaluated yet" in html
+    app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
+    assert "'Ridian noticed'" in app_js
+    assert ">NOTICED</span>" in app_js
+    index = (_RENDERER / "index.html").read_text(encoding="utf-8")
+    assert 'name="watch_push_enabled"' in index
+    assert 'name="watch_deal_quiet_days"' in index
+    assert 'name="watch_invoice_grace_days"' in index
+
+
 def test_desktop_settings_carry_the_push_toggle_and_status():
     app_js = (_RENDERER / "app.js").read_text(encoding="utf-8")
     assert "'companion_push_enabled'" in app_js

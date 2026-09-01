@@ -111,9 +111,25 @@ def ensure_cert() -> tuple[str, Path, Path]:
     return host, cert, key
 
 
+def _make_server(app, port: int, cert: Path, key: Path):
+    """Factory split out so tests can substitute a fake server."""
+    import uvicorn
+    return uvicorn.Server(uvicorn.Config(
+        app, host="0.0.0.0", port=port, log_level="info",
+        ssl_certfile=str(cert), ssl_keyfile=str(key)))
+
+
+_BIND_WAIT_SECONDS = 15
+
+
 def start_if_possible(app, port: int = DEFAULT_TLS_PORT) -> bool:
     """Called by the frozen entrypoint AFTER the companion opted onto the
-    network. Never raises; every failure lands in state['error']."""
+    network. Never raises; every failure lands in state['error'].
+
+    v6.9.8: the URL is claimed only AFTER the listener actually bound
+    (server.started), never merely after the thread spawned — a bind or
+    ssl failure inside the thread must surface as an error in Settings,
+    not as an https URL with nothing behind it."""
     if os.environ.get("RIDIAN_SANDBOX"):
         state["error"] = "sandboxed process — HTTPS listener not started."
         return False
@@ -124,12 +140,29 @@ def start_if_possible(app, port: int = DEFAULT_TLS_PORT) -> bool:
         log.warning("tls.unavailable %s", exc)
         return False
 
-    def _serve() -> None:
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info",
-                    ssl_certfile=str(cert), ssl_keyfile=str(key))
-
-    threading.Thread(target=_serve, daemon=True, name="ridian-tls").start()
+    try:
+        server = _make_server(app, port, cert, key)
+    except Exception as exc:  # noqa: BLE001
+        state["error"] = f"HTTPS listener could not be configured: {exc}"
+        log.warning("tls.config_failed %s", exc)
+        return False
+    thread = threading.Thread(target=server.run, daemon=True, name="ridian-tls")
+    thread.start()
+    import time as _time
+    deadline = _time.monotonic() + _BIND_WAIT_SECONDS
+    while not getattr(server, "started", False):
+        if not thread.is_alive():
+            state["error"] = (f"HTTPS listener died before binding port {port} "
+                              "— the port may be in use, or the certificate "
+                              "unreadable. See backend.log.")
+            log.warning("tls.bind_failed port=%s", port)
+            return False
+        if _time.monotonic() > deadline:
+            state["error"] = (f"HTTPS listener did not confirm its bind on "
+                              f"port {port} within {_BIND_WAIT_SECONDS}s.")
+            log.warning("tls.bind_timeout port=%s", port)
+            return False
+        _time.sleep(0.2)
     state["host"] = host
     state["url"] = f"https://{host}:{port}/companion"
     state["error"] = ""

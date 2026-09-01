@@ -1097,6 +1097,14 @@
                     <div class="settings-row-note">
                       <span id="settings-push-status" role="status" aria-live="polite"></span>
                     </div>
+                    <div class="settings-row">
+                      <span class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Watch</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" name="watch_push_enabled" />
+                        <span>Also push what Ridian notices (past-due invoices, deals gone quiet) — findings always show in the brief and Due tab regardless</span>
+                      </label>
+                    </div>
                   </div>
 
                   <div class="settings-block">
@@ -1159,6 +1167,10 @@
                         <input name="operator_run_cost_ceiling_usd" type="text" autocomplete="off" placeholder="1.00" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Monthly budget (USD)</span>
                         <input name="operator_monthly_budget_usd" type="text" autocomplete="off" placeholder="50.00" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>Watch: deal quiet after (days)</span>
+                        <input name="watch_deal_quiet_days" type="text" inputmode="numeric" autocomplete="off" placeholder="14" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>Watch: invoice grace (days)</span>
+                        <input name="watch_invoice_grace_days" type="text" inputmode="numeric" autocomplete="off" placeholder="3" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Global hotkey</span>
                         <input name="operator_global_hotkey" type="text" autocomplete="off" placeholder="Ctrl+Alt+R (default)" class="settings-input" />
                         <span id="settings-hotkey-status" role="status" aria-live="polite"></span></label>

@@ -93,13 +93,13 @@ def test_no_text_collides_at_any_width(harness_output):
 
 
 def test_morning_brief_claims_the_chat_pane_cell(harness_output):
-    """v6.1: the brief renders ALL seven sections and takes the chat pane's
+    """v6.1: the brief renders ALL its sections and takes the chat pane's
     grid cell at every width — the chat pane yields (display:none) instead
-    of fighting it for the cell."""
+    of fighting it for the cell. Count: 9 since v6.9.8 (Ridian noticed)."""
     brief = harness_output.split("Morning brief view", 1)[1].split("View switching", 1)[0]
     for width in (1280, 1100, 1000, 940, 880):
         line = next(l for l in brief.splitlines() if l.startswith(f"{width}px:"))
-        assert "8 sections" in line, line
+        assert "9 sections" in line, line
         assert "main display=none" in line, line
 
 

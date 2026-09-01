@@ -586,6 +586,24 @@ def list_invoices(limit: int = 20) -> list[dict]:
              "email_status": v.get("EmailStatus", "NotSet")} for v in rows]
 
 
+def list_unpaid_invoices(limit: int = 100) -> list[dict]:
+    """READ-ONLY (v6.9.8 watch): every open invoice with DueDate, oldest
+    due first. Deliberately NOT list_invoices: that one pages the NEWEST
+    by TxnDate, so the oldest unpaid invoices — the ones a past-due watch
+    exists for — would silently fall off the page; and it never selects
+    DueDate at all. Server-side Balance filter keeps the window honest."""
+    rows = _query("select Id, DocNumber, TotalAmt, Balance, DueDate, "
+                  "EmailStatus, CustomerRef, TxnDate from Invoice "
+                  "where Balance > '0' "
+                  f"orderby DueDate maxresults {max(1, min(int(limit), 1000))}"
+                  ).get("Invoice", [])
+    return [{"id": v.get("Id", ""), "doc_number": v.get("DocNumber", ""),
+             "customer": (v.get("CustomerRef") or {}).get("name", ""),
+             "date": v.get("TxnDate", ""), "due_date": v.get("DueDate", ""),
+             "total": v.get("TotalAmt", 0), "balance": v.get("Balance", 0),
+             "email_status": v.get("EmailStatus", "NotSet")} for v in rows]
+
+
 def create_invoice(customer_id: str, lines: list[dict], txn_date: str = "",
                    due_date: str = "") -> dict:
     """THE single write: create a real, UNSENT invoice. Lines are

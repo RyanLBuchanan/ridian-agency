@@ -81,6 +81,12 @@ _LEDGER_KEEP_DAYS = 60
 _ledger_lock = threading.Lock()  # ledger read-modify-write is atomic
 _eval_lock = threading.Lock()
 _last_eval_ts = 0.0
+# Keys claimed by an in-flight send. Candidates are gathered and sent
+# OUTSIDE the ledger lock (v6.9.8 — the watch tier reaches QuickBooks and
+# Gmail, and an approval/park event push must never queue behind a sick
+# network connection holding the lock); the claim set is what keeps a
+# concurrent evaluation from double-sending the same key meanwhile.
+_inflight: set = set()
 
 # In-memory, deliberately: repopulated within seconds of every launch by the
 # startup evaluation, so it is honest without churning state snapshots.
@@ -315,38 +321,93 @@ def _prune(ledger: dict) -> dict:
     return {k: v for k, v in ledger.items() if str(v) >= cutoff}
 
 
-def evaluate_and_push(today: Optional[_dt.date] = None) -> dict:
-    """One pass: candidates minus ledger, send, mark what was ACCEPTED.
-    Safe to call any time; a no-op when disabled or nothing is new."""
-    if not enabled():
-        return {"sent": 0, "reason": "disabled"}
-    sent = 0
-    attempted = 0
+def watch_candidates(today: Optional[_dt.date] = None) -> list:
+    """v6.9.8 ambient-watch tier. Network-touching, so ALWAYS called
+    outside the ledger lock — and isolated: a sick source must never
+    suppress the core obligation/approval/park notifications."""
+    try:
+        from . import watch_service
+        return watch_service.push_candidates(today)
+    except Exception:  # noqa: BLE001 — watch is never load-bearing
+        log.warning("push.watch_candidates_failed", exc_info=True)
+        return []
+
+
+# More than this many fresh watch findings in one pass collapse into a
+# single digest push — a cold start over aged books must not fire a burst
+# of pings (the fastest way to teach the operator to ignore the channel).
+_WATCH_DIGEST_THRESHOLD = 3
+
+
+def _mark_accepted(keys: list) -> None:
     with _ledger_lock:
         ledger = state_store.load_dict(_LEDGER_STORE)
-        fresh = [(k, p) for k, p in _candidates(today) if k not in ledger]
-        for key, payload in fresh:
-            attempted += 1
+        now = _now_iso()
+        for k in keys:
+            ledger[k] = now
+        state_store.save(_LEDGER_STORE, _prune(ledger))
+
+
+def evaluate_and_push(today: Optional[_dt.date] = None) -> dict:
+    """One pass: candidates minus ledger, send, mark what was ACCEPTED.
+    Safe to call any time; a no-op when disabled or nothing is new.
+    ``sent`` counts LEDGER KEYS marked (a digest marks several at once).
+
+    Candidates are computed and sent OUTSIDE the ledger lock; the lock
+    guards only the claim (diff vs ledger + inflight) and the mark. The
+    ledger is pruned AT DIFF TIME, so a >60-day-old key re-notifies even
+    if no save has happened since it aged out."""
+    if not enabled():
+        return {"sent": 0, "reason": "disabled"}
+    core = _candidates(today)
+    watch = watch_candidates(today)
+    with _ledger_lock:
+        ledger = _prune(state_store.load_dict(_LEDGER_STORE))
+        claimed = [(k, p) for k, p in core + watch
+                   if k not in ledger and k not in _inflight]
+        _inflight.update(k for k, _p in claimed)
+    accepted: list = []
+    try:
+        core_keys = {k for k, _p in core}
+        fresh_core = [(k, p) for k, p in claimed if k in core_keys]
+        fresh_watch = [(k, p) for k, p in claimed if k not in core_keys]
+        for key, payload in fresh_core:
             if _send_to_subscriptions(payload, tag=key):
-                ledger[key] = _now_iso()
-                sent += 1
-        if sent:
-            state_store.save(_LEDGER_STORE, _prune(ledger))
+                accepted.append(key)
+        if len(fresh_watch) > _WATCH_DIGEST_THRESHOLD:
+            digest = {"title": f"Ridian noticed {len(fresh_watch)} things",
+                      "body": " · ".join(p["title"] for _k, p in fresh_watch[:5]),
+                      "tab": "due"}
+            if _send_to_subscriptions(digest, tag="watch:digest"):
+                accepted.extend(k for k, _p in fresh_watch)
+        else:
+            for key, payload in fresh_watch:
+                if _send_to_subscriptions(payload, tag=key):
+                    accepted.append(key)
+    finally:
+        if accepted:
+            _mark_accepted(accepted)
+        with _ledger_lock:
+            _inflight.difference_update(k for k, _p in claimed)
     _state["last_eval_iso"] = _now_iso()
-    log.info("push.evaluated attempted=%s sent=%s", attempted, sent)
-    return {"sent": sent, "attempted": attempted}
+    log.info("push.evaluated attempted=%s sent=%s", len(claimed), len(accepted))
+    return {"sent": len(accepted), "attempted": len(claimed)}
 
 
 def _notify_one(key: str, payload: dict) -> None:
     if not enabled():
         return
     with _ledger_lock:
-        ledger = state_store.load_dict(_LEDGER_STORE)
-        if key in ledger:
+        ledger = _prune(state_store.load_dict(_LEDGER_STORE))
+        if key in ledger or key in _inflight:
             return
+        _inflight.add(key)
+    try:
         if _send_to_subscriptions(payload, tag=key):
-            ledger[key] = _now_iso()
-            state_store.save(_LEDGER_STORE, _prune(ledger))
+            _mark_accepted([key])
+    finally:
+        with _ledger_lock:
+            _inflight.discard(key)
 
 
 def _spawn(fn, *args) -> None:

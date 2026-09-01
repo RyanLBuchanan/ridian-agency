@@ -98,7 +98,7 @@ def test_stale_section_flags_only_the_quiet_deal(tmp_path):
 
 def test_unpaid_invoices_from_the_qbo_shape(tmp_path, monkeypatch):
     _seed_pipeline(tmp_path)
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices",
                         lambda limit=20: [
                             {"id": "9", "doc_number": "1042", "customer": "Sandy",
                              "date": "2026-08-01", "total": 4500.0,
@@ -133,7 +133,7 @@ def test_awaiting_approval_lists_only_awaiting_input_runs(tmp_path):
 
 def test_empty_sections_are_present_and_say_so(tmp_path, monkeypatch):
     _op(tmp_path)
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices",
                         lambda limit=20: [])
     # Phases 4-5 added today_events + needs_reply; with no Google connection
     # both report UNAVAILABLE (unknown) — the honest state. Here they are
@@ -147,7 +147,8 @@ def test_empty_sections_are_present_and_say_so(tmp_path, monkeypatch):
     sections = brief_service.build_brief(today=TODAY)["sections"]
     assert set(sections) == {"obligations_due", "today_events", "needs_reply",
                              "due_today", "due_this_week", "stale_deals",
-                             "unpaid_invoices", "awaiting_approval"}
+                             "unpaid_invoices", "awaiting_approval",
+                             "ridian_noticed"}
     for name, sec in sections.items():
         assert sec["empty"] is True, name
         assert sec["items"] == [], name
@@ -160,7 +161,7 @@ def test_unreachable_quickbooks_reads_unknown_not_zero(tmp_path, monkeypatch):
     def boom(limit=20):
         raise RuntimeError("not connected")
 
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices", boom)
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices", boom)
     inv = brief_service.build_brief(today=TODAY)["sections"]["unpaid_invoices"]
     assert inv["unavailable"] is True
     assert "NOT zero" in inv["note"] and "not connected" in inv["note"]
@@ -172,7 +173,7 @@ def test_unreachable_quickbooks_reads_unknown_not_zero(tmp_path, monkeypatch):
 
 def test_brief_never_writes_state(tmp_path, monkeypatch):
     _seed_pipeline(tmp_path)
-    monkeypatch.setattr(brief_service.quickbooks_service, "list_invoices",
+    monkeypatch.setattr(brief_service.quickbooks_service, "list_unpaid_invoices",
                         lambda limit=20: [])
     before = _state_bytes()
     snaps_before = [s["id"] for s in state_store.list_snapshots()]

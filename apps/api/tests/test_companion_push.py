@@ -22,6 +22,10 @@ from app.services import (obligations_service, push_service, settings_service,
 MON1 = dt.date(2026, 9, 7)       # a Monday — cadence weekday derives from it
 MON2 = dt.date(2026, 9, 14)
 
+# Captured BEFORE the autouse fixture stubs it, so the isolation test can
+# exercise the real wrapper's try/except.
+_REAL_WATCH_CANDIDATES = push_service.watch_candidates
+
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
@@ -30,9 +34,15 @@ def _isolated(monkeypatch, tmp_path):
                         tmp_path / "local_settings.json")
     monkeypatch.setattr(push_service, "VAPID_PATH",
                         tmp_path / "companion_push_vapid.bin")
+    # The v6.9.8 watch tier reaches QuickBooks/Gmail; the CORE contract
+    # tests here stub it empty. Watch integration has its own tests below,
+    # which re-monkeypatch this.
+    monkeypatch.setattr(push_service, "watch_candidates",
+                        lambda today=None: [])
     push_service._state.update(
         {"last_error": "", "last_success_iso": "", "last_eval_iso": ""})
     push_service._last_eval_ts = 0.0
+    push_service._inflight.clear()
     yield
 
 
@@ -326,6 +336,142 @@ def test_tls_absence_is_named_not_silent(monkeypatch):
     monkeypatch.setitem(companion_tls.state, "error", "")
     assert companion_tls.start_if_possible(object()) is False
     assert "tailscale.exe not found" in companion_tls.state["error"]
+
+
+# --------------------------------------------------------------------------
+# 6b. v6.9.8 watch tier — routed through the SAME ledger, never in the way
+# --------------------------------------------------------------------------
+
+def _watch_pair(key="watch:deal:d3:2026-08-10T09:00:00", title="Deal gone quiet"):
+    return (key, {"title": title, "body": "b", "tab": "due"})
+
+
+def test_watch_findings_route_through_the_ledger_once(sent, monkeypatch):
+    _enable_push()
+    _subscribed_device()
+    monkeypatch.setattr(push_service, "watch_candidates",
+                        lambda today=None: [_watch_pair()])
+    assert push_service.evaluate_and_push(today=MON1)["sent"] == 1
+    # Same finding, next evaluation / restart: silent (item 3 of the ask).
+    assert push_service.evaluate_and_push(today=MON1)["sent"] == 0
+    # The stamp moved (a touch, then quiet again): a new key notifies.
+    monkeypatch.setattr(push_service, "watch_candidates", lambda today=None: [
+        _watch_pair("watch:deal:d3:2026-09-05T09:00:00")])
+    assert push_service.evaluate_and_push(today=MON2)["sent"] == 1
+
+
+def test_watch_burst_collapses_into_one_digest(sent, monkeypatch):
+    """A cold start over aged books must not fire N pings — one digest,
+    every underlying key marked, so nothing re-fires individually later."""
+    _enable_push()
+    _subscribed_device()
+    pairs = [_watch_pair(f"watch:inv:production:{i}:2026-08-01",
+                         f"Invoice #{i} is past due") for i in range(5)]
+    monkeypatch.setattr(push_service, "watch_candidates",
+                        lambda today=None: list(pairs))
+    out = push_service.evaluate_and_push(today=MON1)
+    assert out["sent"] == 5                   # five KEYS marked...
+    assert len(sent) == 1                     # ...by ONE push
+    assert "Ridian noticed 5 things" in sent[0]["data"]
+    assert push_service.evaluate_and_push(today=MON1)["sent"] == 0
+
+
+def test_watch_failure_never_suppresses_core_pushes(sent, monkeypatch):
+    _enable_push()
+    _subscribed_device()
+    _seed_weekly_obligation()
+
+    def _boom(today=None):
+        raise RuntimeError("gmail fell over")
+    monkeypatch.setattr(push_service, "watch_candidates",
+                        _REAL_WATCH_CANDIDATES)   # the real isolating wrapper
+    import app.services.watch_service as ws
+    monkeypatch.setattr(ws, "push_candidates", _boom)
+    out = push_service.evaluate_and_push(today=MON1)
+    assert out["sent"] >= 1                   # the obligation still pushed
+
+
+def test_candidates_and_sends_run_outside_the_ledger_lock(monkeypatch):
+    """The structural fix from the design review: a stalled watch gather
+    (QBO/Gmail) must never hold the ledger lock that the approval/park
+    event pushes contend on."""
+    _enable_push()
+    _subscribed_device()
+    seen = {}
+
+    def _core(today=None):
+        seen["core_locked"] = push_service._ledger_lock.locked()
+        return []
+
+    def _watch(today=None):
+        seen["watch_locked"] = push_service._ledger_lock.locked()
+        return [_watch_pair()]
+    monkeypatch.setattr(push_service, "_candidates", _core)
+    monkeypatch.setattr(push_service, "watch_candidates", _watch)
+
+    def _send(payload, tag):
+        seen["send_locked"] = push_service._ledger_lock.locked()
+        return True
+    monkeypatch.setattr(push_service, "_send_to_subscriptions", _send)
+    assert push_service.evaluate_and_push(today=MON1)["sent"] == 1
+    assert seen == {"core_locked": False, "watch_locked": False,
+                    "send_locked": False}
+
+
+def test_old_ledger_entries_reopen_at_diff_time_without_a_save(sent):
+    """The 60-day re-notify must not depend on unrelated push traffic:
+    pruning applies when DIFFING, not only when saving."""
+    _enable_push()
+    _subscribed_device()
+    _seed_weekly_obligation()
+    state_store.save("companion_push_ledger",
+                     {f"ob:stale:key": "2026-01-01T00:00:00"})
+    assert push_service.evaluate_and_push(today=MON1)["sent"] >= 1
+
+
+# --------------------------------------------------------------------------
+# 6c. TLS listener claims its URL only AFTER the bind (v6.9.8 fix)
+# --------------------------------------------------------------------------
+
+def _tls_ready(monkeypatch, server_factory):
+    from app.services import companion_tls
+    monkeypatch.delenv("RIDIAN_SANDBOX", raising=False)
+    monkeypatch.setattr(companion_tls, "ensure_cert",
+                        lambda: ("node.tail.ts.net", "c.crt", "c.key"))
+    monkeypatch.setattr(companion_tls, "_make_server",
+                        lambda app, port, cert, key: server_factory())
+    monkeypatch.setitem(companion_tls.state, "url", "")
+    monkeypatch.setitem(companion_tls.state, "error", "")
+    monkeypatch.setitem(companion_tls.state, "host", "")
+    return companion_tls
+
+
+def test_tls_url_claimed_only_after_the_listener_binds(monkeypatch):
+    class _Binds:
+        started = False
+        def run(self):
+            import time as _t
+            _t.sleep(0.1)
+            self.started = True
+            _t.sleep(3)
+    tls = _tls_ready(monkeypatch, _Binds)
+    assert tls.start_if_possible(object(), port=9443) is True
+    assert tls.state["url"] == "https://node.tail.ts.net:9443/companion"
+    assert tls.state["error"] == ""
+
+
+def test_tls_bind_failure_is_named_never_an_unbacked_url(monkeypatch):
+    """The 0.9.6 flaw, fixed: a thread that dies before binding (port in
+    use, unreadable cert) must surface as an ERROR in Settings — never an
+    https URL with nothing behind it."""
+    class _Dies:
+        started = False
+        def run(self):
+            return                # thread ends without ever binding
+    tls = _tls_ready(monkeypatch, _Dies)
+    assert tls.start_if_possible(object(), port=9443) is False
+    assert tls.state["url"] == ""
+    assert "died before binding" in tls.state["error"]
 
 
 # --------------------------------------------------------------------------
