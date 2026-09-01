@@ -1094,6 +1094,15 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
             push_service._state["last_error"] = f"VAPID key generation failed: {exc}"
             log.warning("push.vapid_generation_failed %s", exc)
 
+    # v6.9.9 (0.9.7 probe finding): startup claims the 10-minute
+    # evaluation throttle even when push boots disabled, so ENABLING the
+    # push or watch toggles on a running backend used to leave the watch
+    # cache unevaluated until the window expired. A flipped-on toggle now
+    # evaluates immediately, in the background.
+    if any(str(updates.get(k) or "").lower() == "true"
+           for k in ("companion_push_enabled", "watch_push_enabled")):
+        push_service.startup_catch_up()
+
     view = _settings_view_with_outputs()
 
     # Post-save validation — only when the operator actually touched the field.

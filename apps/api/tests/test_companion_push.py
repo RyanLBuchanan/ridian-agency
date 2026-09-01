@@ -301,6 +301,27 @@ def test_real_pywebpush_pipeline_encrypts_and_fails_honestly():
     assert "unreachable" in push_service.status()["last_error"]
 
 
+def test_enabling_push_in_settings_evaluates_immediately(monkeypatch):
+    """0.9.7 probe finding, fixed: startup claims the 10-minute throttle
+    even when push boots disabled, so flipping the toggle ON must kick an
+    evaluation itself — never wait out a window the boot consumed."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    kicked = []
+    monkeypatch.setattr(push_service, "startup_catch_up",
+                        lambda: kicked.append(1))
+    pc = TestClient(app, client=("127.0.0.1", 50000))
+    pc.post("/settings", json={"operator_name": "Ryan"})
+    assert kicked == []                       # unrelated saves never kick
+    pc.post("/settings", json={"companion_push_enabled": "true"})
+    assert kicked == [1]
+    pc.post("/settings", json={"watch_push_enabled": "true"})
+    assert kicked == [1, 1]
+    pc.post("/settings", json={"companion_push_enabled": "false"})
+    assert kicked == [1, 1]                   # switching OFF kicks nothing
+
+
 def test_startup_catch_up_runs_on_app_lifespan(monkeypatch):
     """Item 3's launch half is wired into the app's lifespan — the frozen
     backend runs it on every boot, off-thread."""
