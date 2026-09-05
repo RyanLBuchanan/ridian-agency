@@ -1,69 +1,63 @@
-# Ridian Agency
+# Ridian Operator
 
-A local desktop app that turns a business task into a polished package:
-market research summary, business document, slide outline, and a draft
-email — all in one ~90-second run, all saved to a folder on your machine.
+Ridian Operator is a local-first desktop business operator. The primary
+experience is one natural-language command surface: describe the outcome you
+need, then follow the planner's tool use, questions, approvals, artifacts, and
+final receipt in one operation timeline.
 
-Built on Python (FastAPI + the official Anthropic SDK, with Claude powering
-every agent) for the backend
-and Electron for the desktop GUI. Local-first, no cloud, no auth, no
-database.
+The backend uses Python, FastAPI, the official Anthropic SDK, and Claude's tool
+runner. Electron provides the Windows desktop experience. Business data and
+operation history remain local; connected Google and QuickBooks capabilities
+use their respective cloud APIs.
 
 ## New here? Read [QUICKSTART.md](QUICKSTART.md)
 
-A non-developer-friendly, step-by-step Windows setup guide. ~15 minutes
-to clone, install, configure your Anthropic key in the desktop Settings
-panel, and run your first workflow.
+The Windows setup guide covers installation, configuration, and launching the
+Operator. Normal work starts in the Operator composer, not a workflow picker.
 
 ## What you get
 
-- **Five Claude agents** wired in a sequential pipeline: research → writer
-  → reviewer → presentation → email — plus the Ridian Operator, a
-  tool-calling planner built on the Anthropic SDK's tool runner.
-- **Desktop GUI** (Electron) with a Settings panel, a prompt library, live
-  backend status, copy buttons on every result, and an approval-only
-  "send draft email" action.
-- **Local artifacts** written to `outputs/<timestamp>_<slug>/` — five
-  Markdown files per run plus the original task.
-- **One-click launcher**: `Start-Ridian-Agency.bat` starts the backend and
-  the desktop app.
+- **One Ridian Operator** backed by a general-purpose Claude planner that
+  dynamically selects registered business tools.
+- **Observable operations** with an execution timeline, resumable questions,
+  approval gates, receipts, generic artifacts, and one Operations history.
+- **Business capabilities** for research, files, Google Workspace, Gmail
+  drafts, read-only calendar and inbox access, QuickBooks, contacts, deals,
+  follow-ups, decisions, obligations, memory, audit, and backups.
+- **Legacy Tools** containing the earlier fixed Business, Social, Agentic
+  Advances, and NotebookLM workflows while Operator parity is established.
+- **One-click launcher**: `Start-Ridian-Agency.bat` starts the backend and the
+  desktop app.
 
-## Local-only by design
+## Local-first by design
 
-- The API server binds to `127.0.0.1:8000` (loopback only). Nothing
-  outside your machine can reach it.
-- The Anthropic key and SMTP password live on disk in
-  `apps/api/local_settings.json` (saved via the Settings panel) or
-  `apps/api/.env`. Both files are git-ignored.
-- The desktop renderer talks to the backend over plain HTTP. CSP locks
-  network access to `http://127.0.0.1:8000` only.
-- Secrets are never logged, never returned by any API endpoint, and
-  never shown to the renderer after they're saved. The Settings panel
-  shows `*_configured: true` flags instead.
+- The API binds to loopback by default. Enabling the optional paired phone
+  companion intentionally enables a guarded LAN surface.
+- Secrets are stored outside Git and protected with Windows DPAPI where
+  applicable; API responses expose configured-state flags rather than values.
+- State, operation history, audit data, backups, and generated files are stored
+  locally. Google and QuickBooks actions occur only when those integrations are
+  explicitly connected.
+- The companion surface uses pairing, endpoint allowlists, host checks, and
+  request headers; administrative and credential operations stay PC-only.
 
 ## Desktop layout
 
-The window is a real desktop console with a persistent left sidebar and
-a main workspace:
+Ridian launches directly into the Operator:
 
-- **Sidebar (left)** — brand block, **+ New workflow**, the two workflow
-  modes (Business / Social Media Production), an **Outputs** list that
-  appears once a run is selected, a **Recent runs** list (loaded from
-  the local `outputs/` folder so old runs survive restarts), and
-  **Settings** at the bottom.
-- **Workspace (right)** — header with the current run's title plus
-  Backend / Drive status pills. The body switches between **Welcome**
-  (first launch), the active workflow's **input form**, the **running**
-  spinner, and the **run results**.
+- **Operator rail** — new operation, Projects, Operations history, and demoted
+  trust/admin surfaces for obligations, audit, approvals, morning brief, and
+  settings.
+- **Operator workspace** — natural-language composer, live execution timeline,
+  questions and approvals, receipt, and generic artifact panel.
+- **Legacy Tools** — one subordinate compatibility disclosure for the four
+  fixed workflow forms. Their backend routes and artifact formats remain
+  available during parity migration.
 
-After a workflow completes, the input form collapses into a compact
-**Current run summary** at the top of the workspace, with **Edit task /
-Run again / New workflow** controls. Output panels become tabs in the
-sidebar — clicking a tab swaps the one visible panel; nothing scrolls.
-
-Recent runs persist across app restarts via the backend's
-`/projects/recent` and `/projects/load` endpoints (allowlisted files
-only, path-validated against `outputs/`).
+The former dashboard, Quick Launch cards, workflow picker, prompt library,
+fixed output navigation, and Recent Runs history are not primary product
+surfaces. See [`docs/legacy-dependency-parity.md`](docs/legacy-dependency-parity.md)
+for the dependencies and proof required before legacy code can be archived.
 
 ## Desktop shortcut + taskbar pinning
 
@@ -110,9 +104,9 @@ packaging tools default to, and keeping the wrong identity under that name
 was a silent landmine. Windows caches shortcut icons — after changing the
 icon, re-run the shortcut script and re-pin the taskbar tile.
 
-## Two workflow modes
+## Legacy fixed workflows
 
-The desktop app has a **Workflow mode** selector at the top:
+The earlier fixed workflows remain available only from **Legacy Tools** while their outcomes are migrated and tested through Operator commands:
 
 - **Business Workflow** — the original five-agent pipeline (research →
   writer → reviewer → presentation → email) that produces a research

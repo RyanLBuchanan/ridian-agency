@@ -350,6 +350,10 @@ def test_status_reports_devices_and_restart_state(monkeypatch):
     that no socket backs (the probe pin lives in
     test_status_probes_the_listener_instead_of_trusting_the_setting)."""
     lan, device_id = _paired_lan()
+    # Network discovery is host-dependent; pin the address whose URL contract
+    # this test asserts instead of depending on the CI machine's interfaces.
+    monkeypatch.setattr(cs, "lan_ip", lambda: "192.168.1.7")
+    monkeypatch.setattr(cs, "lan_listener_reachable", lambda _ip, _port: False)
     out = _pc().get("/companion/status").json()
     assert out["enabled"] is True
     assert out["devices"][0]["id"] == device_id

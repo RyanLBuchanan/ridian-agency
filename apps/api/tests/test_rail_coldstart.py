@@ -16,6 +16,7 @@ the rows on cold start. It was verified to FAIL on the pre-fix renderer
 with exactly the reported symptoms.
 """
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 
@@ -27,7 +28,8 @@ _NPX = shutil.which("npx")
 
 
 def _electron_available() -> bool:
-    return _NPX is not None and (_DESKTOP / "node_modules" / "electron").exists()
+    return (sys.platform == "win32" and _NPX is not None
+            and (_DESKTOP / "node_modules" / "electron").exists())
 
 
 def _sandbox_env() -> dict:
