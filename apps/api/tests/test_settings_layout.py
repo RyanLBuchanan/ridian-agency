@@ -18,6 +18,7 @@ vertical overlap at 1100/1000/940px) and to pass after.
 """
 import json
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 
@@ -30,7 +31,7 @@ _ELECTRON = _DESKTOP / "node_modules" / "electron"
 
 
 def _electron_available() -> bool:
-    return _NPX is not None and _ELECTRON.exists()
+    return sys.platform == "win32" and _NPX is not None and _ELECTRON.exists()
 
 
 # --------------------------------------------------------------------------

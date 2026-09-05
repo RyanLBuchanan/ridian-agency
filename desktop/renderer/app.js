@@ -588,7 +588,7 @@ function setWorkspaceView(view) {
   if (view === 'welcome') {
     show(els.viewWelcome);
     updateWorkspaceHeader('Ridian Operator', '');
-    loadDashboard();
+    // The Operator is the home; legacy dashboard data is not loaded here.
     // Defensive: never let a missing element / typo in the v1.5 context
     // strip code throw out of setWorkspaceView. If this raised, the
     // single-pane class toggle (further down) would not run, leaving the
@@ -3641,7 +3641,19 @@ function startHealthPolling() {
 /*                          WIRE UP                              */
 /* ============================================================ */
 
-// Welcome cards
+// Legacy tools are intentionally available through one subordinate disclosure.
+// Their forms and backend contracts remain unchanged during parity migration.
+document.querySelectorAll('[data-legacy-mode]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const mode = button.getAttribute('data-legacy-mode');
+    if (mode === 'business' || mode === 'social' || mode === 'agentic' || mode === 'notebooklm') {
+      setMode(mode);
+      setWorkspaceView('input');
+    }
+  });
+});
+
+// Legacy welcome cards (retained defensively for older packaged markup).
 document.querySelectorAll('.welcome-card').forEach((card) => {
   card.addEventListener('click', () => {
     const mode = card.getAttribute('data-mode');
@@ -7351,16 +7363,16 @@ function _railRenderThreads() {
     const loading = _railThreadsState === RAIL_STATE.LOADING;
     li.className = loading ? 'rail-threads-loading' : 'rail-threads-unavailable';
     li.textContent = loading ? 'Loading…'
-      : "Can't reach the backend — chats unknown, not none.";
+      : "Can't reach the backend — operations are unavailable.";
     list.appendChild(li);
     return;
   }
   if (!ops.length) {
     const li = document.createElement('li');
     li.className = 'rail-threads-empty';
-    li.textContent = q ? 'No chats match.'
-      : _activeProjectId ? 'No chats in this project yet.'
-      : 'No chats yet.';
+    li.textContent = q ? 'No operations match.'
+      : _activeProjectId ? 'No operations in this project yet.'
+      : 'No operations yet.';
     list.appendChild(li);
     return;
   }
@@ -7534,7 +7546,7 @@ function _folderArtifactsRender(card, data) {
   const c = data.chats || 0;
   title.textContent = `Artifacts in ${path} — `
     + (n === 1 ? '1 artifact' : `${n} artifacts`)
-    + ` from ${c === 1 ? '1 chat' : `${c} chats`}`;
+    + ` from ${c === 1 ? '1 operation' : `${c} operations`}`;
   body.innerHTML = '';
   if (!data.runs || !data.runs.length) {
     const empty = document.createElement('div');
@@ -7783,7 +7795,7 @@ function _railRenderProjects() {
   const allBtn = document.createElement('button');
   allBtn.type = 'button';
   allBtn.className = 'rail-thread-btn';
-  allBtn.innerHTML = '<span class="rail-thread-cmd">All chats</span>';
+  allBtn.innerHTML = '<span class="rail-thread-cmd">All operations</span>';
   allBtn.addEventListener('click', () => _railSelectProject(''));
   all.appendChild(allBtn);
   list.appendChild(all);
@@ -7812,7 +7824,7 @@ function _railRenderProjects() {
     const metaEl = document.createElement('span');
     metaEl.className = 'rail-thread-when';
     metaEl.textContent = meta !== undefined ? meta
-      : (count === 1 ? '1 chat' : `${count} chats`);
+      : (count === 1 ? '1 operation' : `${count} operations`);
     btn.appendChild(label);
     btn.appendChild(metaEl);
     btn.addEventListener('click', () => _railSelectProject(proj.id));
