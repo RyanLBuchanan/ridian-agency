@@ -26,3 +26,7 @@ python-multipart>=0.0.9  # FastAPI UploadFile (PDF upload endpoints)
 # v6.9.7 companion Web Push (VAPID + aes128gcm). Pulls py-vapid + http-ece;
 # cryptography is already a transitive dependency of the Google stack.
 pywebpush>=2.0.0
+
+# Test-only: validates the Owner Snapshot v1 export against
+# docs/owner-snapshot-v1.schema.json (tests/test_owner_snapshot.py).
+jsonschema>=4.23.0

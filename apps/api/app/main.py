@@ -2117,6 +2117,22 @@ async def artifacts_open_file(payload: ArtifactFileRequest) -> ArtifactOpenRespo
     return ArtifactOpenResponse(status="success", detail="File opened.", path=str(path))
 
 
+@app.post("/owner-snapshot/export")
+async def owner_snapshot_export(request: Request) -> dict:
+    """Owner Snapshot v1 (PC only): write the allowlisted, read-only export
+    under <data_dir>/exports/ for the operator to inspect and move by hand.
+    Absent from the companion allowlist AND loopback-checked here; nothing
+    is uploaded and no state is written."""
+    _require_loopback(request)
+    from .services import owner_snapshot_service
+    try:
+        result = await asyncio.to_thread(
+            owner_snapshot_service.export_snapshot, app_version())
+    except owner_snapshot_service.SnapshotPolicyError as exc:
+        raise HTTPException(status_code=500, detail=f"Snapshot refused: {exc}")
+    return {"ok": True, **result}
+
+
 @app.post("/artifacts/export-zip", response_model=ArtifactZipResponse)
 async def artifacts_export_zip(payload: ArtifactFolderRequest) -> ArtifactZipResponse:
     try:

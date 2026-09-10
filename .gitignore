@@ -26,6 +26,9 @@ spike_overview.mp3
 # Throwaway investigation scripts (e.g. the deleted NotebookLM audio spike)
 spike_*.py
 
+# Owner Snapshot v1 exports (dev data dir) — local files, never committed
+apps/api/exports/
+
 # Outputs (generated artifacts)
 outputs/*/
 !outputs/.gitkeep

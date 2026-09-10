@@ -1180,3 +1180,21 @@ def test_second_type_step_briefs_and_tabs_read_at_arms_length():
     active = html.split("nav button.active {", 1)[1].split("}", 1)[0]
     assert "var(--color-accent)" in active
     assert "var(--color-accent-soft)" in active
+
+
+# --------------------------------------------------------------------------
+# 13. Owner Snapshot v1 export is PC-only
+# --------------------------------------------------------------------------
+
+def test_paired_phone_cannot_export_the_owner_snapshot(monkeypatch, tmp_path):
+    """The snapshot is a local file for the operator to inspect and move by
+    hand. It is absent from the companion allowlist, so a paired phone with
+    a valid cookie AND the CSRF header gets the generic 403 — and no
+    exports/ directory is created."""
+    from app.services import owner_snapshot_service
+    monkeypatch.setattr(owner_snapshot_service, "data_dir", lambda: tmp_path)
+    lan, _device = _paired_lan()
+    r = lan.post("/owner-snapshot/export", headers=HDR)
+    assert r.status_code == 403
+    assert "not available from a companion device" in r.json()["detail"]
+    assert not (tmp_path / "exports").exists()

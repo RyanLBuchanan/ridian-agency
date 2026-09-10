@@ -939,6 +939,21 @@
                     </div>
                   </div>
 
+                  <!-- Owner Snapshot v1: a local, allowlisted, read-only export  -->
+                  <!-- for the Owner Workspace. Nothing is uploaded; the exact   -->
+                  <!-- file path is shown so it can be inspected before it moves. -->
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span class="settings-dot is-blank" aria-hidden="true"></span>
+                      <span class="settings-row-label">Owner snapshot</span>
+                      <span class="settings-row-inline">Export a read-only summary for the Owner Workspace. Stays on this PC.</span>
+                      <button id="settings-export-snapshot" type="button" class="btn btn-ghost btn-compact">Export</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-export-snapshot-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
                   <details id="settings-advanced" class="settings-advanced">
                     <summary>Advanced</summary>
                     <div class="settings-adv-grid">

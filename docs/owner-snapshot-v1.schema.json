@@ -1,0 +1,767 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ridiantechnologies.com/schemas/owner-snapshot-v1.schema.json",
+  "$defs": {
+    "Approval": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "operationId": {
+          "title": "Operationid",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "stagedAt": {
+          "title": "Stagedat",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "stale": {
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "optionCount": {
+          "title": "Optioncount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "operationId",
+        "command",
+        "tool",
+        "reason",
+        "question",
+        "stagedAt",
+        "status",
+        "stale",
+        "optionCount"
+      ],
+      "title": "Approval",
+      "type": "object"
+    },
+    "BriefSections": {
+      "additionalProperties": false,
+      "properties": {
+        "obligations_due": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "today_events": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "needs_reply": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "due_today": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "due_this_week": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "stale_deals": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "unpaid_invoices": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "awaiting_approval": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "ridian_noticed": {
+          "$ref": "#/$defs/SectionCount"
+        }
+      },
+      "required": [
+        "obligations_due",
+        "today_events",
+        "needs_reply",
+        "due_today",
+        "due_this_week",
+        "stale_deals",
+        "unpaid_invoices",
+        "awaiting_approval",
+        "ridian_noticed"
+      ],
+      "title": "BriefSections",
+      "type": "object"
+    },
+    "Cadence": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "day": {
+          "title": "Day",
+          "type": "string"
+        },
+        "weekday": {
+          "title": "Weekday",
+          "type": "string"
+        },
+        "date": {
+          "title": "Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "day",
+        "weekday",
+        "date"
+      ],
+      "title": "Cadence",
+      "type": "object"
+    },
+    "Contact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "company": {
+          "title": "Company",
+          "type": "string"
+        },
+        "lastContactAt": {
+          "title": "Lastcontactat",
+          "type": "string"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "updatedAt": {
+          "title": "Updatedat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "company",
+        "lastContactAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Contact",
+      "type": "object"
+    },
+    "Deal": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "contactId": {
+          "title": "Contactid",
+          "type": "string"
+        },
+        "contactName": {
+          "title": "Contactname",
+          "type": "string"
+        },
+        "nextAction": {
+          "title": "Nextaction",
+          "type": "string"
+        },
+        "nextActionDate": {
+          "title": "Nextactiondate",
+          "type": "string"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "updatedAt": {
+          "title": "Updatedat",
+          "type": "string"
+        },
+        "lastTouchAt": {
+          "title": "Lasttouchat",
+          "type": "string"
+        },
+        "touchCount": {
+          "title": "Touchcount",
+          "type": "integer"
+        },
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "stage",
+        "contactId",
+        "contactName",
+        "nextAction",
+        "nextActionDate",
+        "createdAt",
+        "updatedAt",
+        "lastTouchAt",
+        "touchCount",
+        "active"
+      ],
+      "title": "Deal",
+      "type": "object"
+    },
+    "Due": {
+      "additionalProperties": false,
+      "properties": {
+        "dueDate": {
+          "title": "Duedate",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "daysOverdue": {
+          "title": "Daysoverdue",
+          "type": "integer"
+        },
+        "missedPeriods": {
+          "title": "Missedperiods",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dueDate",
+        "status",
+        "daysOverdue",
+        "missedPeriods"
+      ],
+      "title": "Due",
+      "type": "object"
+    },
+    "FollowUp": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "what": {
+          "title": "What",
+          "type": "string"
+        },
+        "who": {
+          "title": "Who",
+          "type": "string"
+        },
+        "dueAt": {
+          "title": "Dueat",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "updatedAt": {
+          "title": "Updatedat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "what",
+        "who",
+        "dueAt",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "FollowUp",
+      "type": "object"
+    },
+    "LegacyProject": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "workflow": {
+          "title": "Workflow",
+          "type": "string"
+        },
+        "channel": {
+          "title": "Channel",
+          "type": "string"
+        },
+        "modifiedAt": {
+          "title": "Modifiedat",
+          "type": "string"
+        },
+        "pinned": {
+          "title": "Pinned",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "workflow",
+        "channel",
+        "modifiedAt",
+        "pinned"
+      ],
+      "title": "LegacyProject",
+      "type": "object"
+    },
+    "MorningBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "generatedFor": {
+          "title": "Generatedfor",
+          "type": "string"
+        },
+        "sections": {
+          "$ref": "#/$defs/BriefSections"
+        }
+      },
+      "required": [
+        "available",
+        "generatedFor",
+        "sections"
+      ],
+      "title": "MorningBrief",
+      "type": "object"
+    },
+    "Obligation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "lastCompletedPeriod": {
+          "title": "Lastcompletedperiod",
+          "type": "string"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "updatedAt": {
+          "title": "Updatedat",
+          "type": "string"
+        },
+        "cadence": {
+          "$ref": "#/$defs/Cadence"
+        },
+        "nextDue": {
+          "title": "Nextdue",
+          "type": "string"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Due"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "lastCompletedPeriod",
+        "createdAt",
+        "updatedAt",
+        "cadence",
+        "nextDue",
+        "due"
+      ],
+      "title": "Obligation",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "createdAt": {
+          "title": "Createdat",
+          "type": "string"
+        },
+        "parentId": {
+          "title": "Parentid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "createdAt",
+        "parentId"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "RecentWork": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "startedAt": {
+          "title": "Startedat",
+          "type": "string"
+        },
+        "completedAt": {
+          "title": "Completedat",
+          "type": "string"
+        },
+        "spendUsd": {
+          "title": "Spendusd",
+          "type": "number"
+        },
+        "toolsUsed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Toolsused",
+          "type": "array"
+        },
+        "projectId": {
+          "title": "Projectid",
+          "type": "string"
+        },
+        "background": {
+          "title": "Background",
+          "type": "boolean"
+        },
+        "awaitingInput": {
+          "title": "Awaitinginput",
+          "type": "boolean"
+        },
+        "sourcesCount": {
+          "title": "Sourcescount",
+          "type": "integer"
+        },
+        "artifactNames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifactnames",
+          "type": "array"
+        },
+        "openQuestions": {
+          "title": "Openquestions",
+          "type": "integer"
+        },
+        "errorCount": {
+          "title": "Errorcount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "command",
+        "intent",
+        "status",
+        "startedAt",
+        "completedAt",
+        "spendUsd",
+        "toolsUsed",
+        "projectId",
+        "background",
+        "awaitingInput",
+        "sourcesCount",
+        "artifactNames",
+        "openQuestions",
+        "errorCount"
+      ],
+      "title": "RecentWork",
+      "type": "object"
+    },
+    "SectionCount": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "empty": {
+          "title": "Empty",
+          "type": "boolean"
+        },
+        "unavailable": {
+          "title": "Unavailable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "empty",
+        "unavailable"
+      ],
+      "title": "SectionCount",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "title": "Application",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "localUtcOffset": {
+          "title": "Localutcoffset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "application",
+        "version",
+        "localUtcOffset"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Summary": {
+      "additionalProperties": false,
+      "properties": {
+        "recentWork": {
+          "title": "Recentwork",
+          "type": "integer"
+        },
+        "projects": {
+          "title": "Projects",
+          "type": "integer"
+        },
+        "legacyProjects": {
+          "title": "Legacyprojects",
+          "type": "integer"
+        },
+        "obligations": {
+          "title": "Obligations",
+          "type": "integer"
+        },
+        "obligationsDue": {
+          "title": "Obligationsdue",
+          "type": "integer"
+        },
+        "approvalsPending": {
+          "title": "Approvalspending",
+          "type": "integer"
+        },
+        "approvalsStale": {
+          "title": "Approvalsstale",
+          "type": "integer"
+        },
+        "contacts": {
+          "title": "Contacts",
+          "type": "integer"
+        },
+        "deals": {
+          "title": "Deals",
+          "type": "integer"
+        },
+        "dealsActive": {
+          "title": "Dealsactive",
+          "type": "integer"
+        },
+        "followUpsOpen": {
+          "title": "Followupsopen",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "recentWork",
+        "projects",
+        "legacyProjects",
+        "obligations",
+        "obligationsDue",
+        "approvalsPending",
+        "approvalsStale",
+        "contacts",
+        "deals",
+        "dealsActive",
+        "followUpsOpen"
+      ],
+      "title": "Summary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "ridian-operator-snapshot",
+      "title": "Schema",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "generatedAt": {
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "recentWork": {
+      "items": {
+        "$ref": "#/$defs/RecentWork"
+      },
+      "title": "Recentwork",
+      "type": "array"
+    },
+    "projects": {
+      "items": {
+        "$ref": "#/$defs/Project"
+      },
+      "title": "Projects",
+      "type": "array"
+    },
+    "legacyProjects": {
+      "items": {
+        "$ref": "#/$defs/LegacyProject"
+      },
+      "title": "Legacyprojects",
+      "type": "array"
+    },
+    "obligations": {
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      },
+      "title": "Obligations",
+      "type": "array"
+    },
+    "approvals": {
+      "items": {
+        "$ref": "#/$defs/Approval"
+      },
+      "title": "Approvals",
+      "type": "array"
+    },
+    "contacts": {
+      "items": {
+        "$ref": "#/$defs/Contact"
+      },
+      "title": "Contacts",
+      "type": "array"
+    },
+    "deals": {
+      "items": {
+        "$ref": "#/$defs/Deal"
+      },
+      "title": "Deals",
+      "type": "array"
+    },
+    "followUps": {
+      "items": {
+        "$ref": "#/$defs/FollowUp"
+      },
+      "title": "Followups",
+      "type": "array"
+    },
+    "morningBrief": {
+      "$ref": "#/$defs/MorningBrief"
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "generatedAt",
+    "source",
+    "summary",
+    "recentWork",
+    "projects",
+    "legacyProjects",
+    "obligations",
+    "approvals",
+    "contacts",
+    "deals",
+    "followUps",
+    "morningBrief"
+  ],
+  "title": "OwnerSnapshotV1",
+  "type": "object"
+}
