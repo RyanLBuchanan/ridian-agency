@@ -28,6 +28,7 @@ spike_*.py
 
 # Outputs (generated artifacts)
 outputs/*/
+outputs/*.zip
 !outputs/.gitkeep
 
 # Electron desktop GUI
