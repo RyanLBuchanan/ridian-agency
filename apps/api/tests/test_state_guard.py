@@ -58,8 +58,15 @@ def test_pytest_context_is_detected_deterministically():
 # THE pin: writers aimed at the real store refuse, and leave no artifact
 # --------------------------------------------------------------------------
 
-def test_settings_write_to_real_store_refuses_and_leaves_no_artifact():
-    real = settings_service.SETTINGS_PATH          # unpatched = the real store
+def _real_dev_store() -> Path:
+    """The real dev store, resolved independently of the suite sandbox —
+    these pins aim at it ON PURPOSE (that is the whole point of the gate)."""
+    return runtime_paths._real_store_dirs()[0]
+
+
+def test_settings_write_to_real_store_refuses_and_leaves_no_artifact(monkeypatch):
+    real = _real_dev_store() / "local_settings.json"
+    monkeypatch.setattr(settings_service, "SETTINGS_PATH", real)
     before = real.read_bytes() if real.exists() else None
     with _preserve(real):
         with pytest.raises(SandboxViolation):
@@ -69,8 +76,9 @@ def test_settings_write_to_real_store_refuses_and_leaves_no_artifact():
         assert after == before
 
 
-def test_quickbooks_token_write_to_real_store_refuses():
-    real = qbs.TOKEN_PATH                          # unpatched = the real store
+def test_quickbooks_token_write_to_real_store_refuses(monkeypatch):
+    real = _real_dev_store() / "quickbooks_token.json"
+    monkeypatch.setattr(qbs, "TOKEN_PATH", real)
     with _preserve(real):
         with pytest.raises(SandboxViolation):
             qbs._save_token({"refresh_token": "GUARD-MUST-REFUSE"})
@@ -79,7 +87,7 @@ def test_quickbooks_token_write_to_real_store_refuses():
 
 def test_google_token_real_path_is_covered_by_the_guard():
     with pytest.raises(SandboxViolation):
-        guard_real_state_write(gds.TOKEN_PATH)     # unpatched = the real store
+        guard_real_state_write(_real_dev_store() / gds.TOKEN_PATH.name)
 
 
 def test_real_roaming_store_is_refused_even_with_appdata_redirected(monkeypatch, tmp_path):
@@ -149,6 +157,9 @@ def test_health_reports_backend_identity(monkeypatch, tmp_path):
     orphaned sandbox backend on port 8000 and rendering its empty state —
     no real file was ever written, which is why the write-gate never fired.)"""
     c = TestClient(app)
+    # The suite runs sandboxed (conftest); lift it to see the real-app answer.
+    monkeypatch.delenv("RIDIAN_SANDBOX", raising=False)
+    monkeypatch.delenv("RIDIAN_DATA_DIR", raising=False)
     j = c.get("/health").json()
     assert j["service"] == "ridian-agency"
     assert "data_dir" in j

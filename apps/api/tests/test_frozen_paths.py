@@ -12,8 +12,12 @@ from pathlib import Path
 from app.services import runtime_paths
 
 
-def test_dev_paths_are_exactly_the_historical_ones():
-    """Not frozen (the test process) -> apps/api, byte-for-byte the old base."""
+def test_dev_paths_are_exactly_the_historical_ones(monkeypatch):
+    """Not frozen (the test process) -> apps/api, byte-for-byte the old base.
+    conftest sandboxes the whole suite; this pin checks the REAL dev
+    contract, so it lifts the sandbox for its own read-only call."""
+    monkeypatch.delenv("RIDIAN_SANDBOX", raising=False)
+    monkeypatch.delenv("RIDIAN_DATA_DIR", raising=False)
     assert not runtime_paths.is_frozen()
     api_dir = Path(runtime_paths.__file__).resolve().parent.parent.parent
     assert runtime_paths.data_dir() == api_dir
@@ -21,6 +25,10 @@ def test_dev_paths_are_exactly_the_historical_ones():
 
 
 def test_frozen_data_dir_is_appdata(monkeypatch, tmp_path):
+    # The suite sandbox (conftest) wins over sys.frozen; lift it to pin the
+    # frozen contract itself.
+    monkeypatch.delenv("RIDIAN_SANDBOX", raising=False)
+    monkeypatch.delenv("RIDIAN_DATA_DIR", raising=False)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path))
     d = runtime_paths.data_dir()

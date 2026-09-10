@@ -245,6 +245,10 @@ def test_frozen_mode_writes_and_reads_the_same_appdata_file(monkeypatch, tmp_pat
     %APPDATA%/Ridian Operator/local_settings.json for BOTH save and load
     (one module-level constant — this pins that it stays that way)."""
     with monkeypatch.context() as m:
+        # The suite sandbox (conftest) wins over sys.frozen; lift it so the
+        # reload resolves the real frozen path.
+        m.delenv("RIDIAN_SANDBOX", raising=False)
+        m.delenv("RIDIAN_DATA_DIR", raising=False)
         m.setattr(sys, "frozen", True, raising=False)
         m.setenv("APPDATA", str(tmp_path))
         importlib.reload(settings_service)
