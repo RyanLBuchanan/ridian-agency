@@ -19,7 +19,14 @@ from app.services import companion_service as cs
 from app.services import (obligations_service, push_service, settings_service,
                           state_store)
 
-MON1 = dt.date(2026, 9, 7)       # a Monday — cadence weekday derives from it
+# FROZEN CLOCK (2026-09-10 fix): these dates rotted when the calendar
+# caught up with them — a weekly obligation seeded with the REAL clock has
+# no occurrence at a Monday that is now in the past. The fix is not to
+# chase the calendar but to freeze it: add_obligation already takes an
+# injectable ``today`` (the same seam every due computation reads), so the
+# whole scenario runs on a fixed fake clock, deterministic forever.
+SEED = dt.date(2026, 9, 1)       # the frozen "now" the obligation is born on
+MON1 = dt.date(2026, 9, 7)       # first Monday after SEED — first occurrence
 MON2 = dt.date(2026, 9, 14)
 
 # Captured BEFORE the autouse fixture stubs it, so the isolation test can
@@ -74,7 +81,7 @@ def _seed_weekly_obligation() -> str:
     ob = obligations_service.add_obligation(
         {"name": "Sales tax", "task": "File the monthly sales tax",
          "cadence": {"kind": "weekly", "weekday": MON1.weekday()}},
-        written_by="manual")
+        written_by="manual", today=SEED)     # frozen clock, production's seam
     return ob["id"]
 
 

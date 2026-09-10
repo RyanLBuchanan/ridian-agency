@@ -19,6 +19,7 @@ Plus source pins for the lock's placement guarantees.
 """
 import os
 import shutil
+import sys
 import subprocess
 import tempfile
 import time
@@ -32,7 +33,8 @@ _TEST_HOTKEY = "Control+Alt+Shift+F20"   # obscure: never collides with real use
 
 
 def _electron_available() -> bool:
-    return _NPX is not None and (_DESKTOP / "node_modules" / "electron").exists()
+    return (sys.platform == "win32" and _NPX is not None
+            and (_DESKTOP / "node_modules" / "electron").exists())
 
 
 def _env(scratch: Path) -> dict:

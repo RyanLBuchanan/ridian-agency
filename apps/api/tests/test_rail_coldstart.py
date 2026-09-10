@@ -16,6 +16,7 @@ the rows on cold start. It was verified to FAIL on the pre-fix renderer
 with exactly the reported symptoms.
 """
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 
@@ -27,7 +28,8 @@ _NPX = shutil.which("npx")
 
 
 def _electron_available() -> bool:
-    return _NPX is not None and (_DESKTOP / "node_modules" / "electron").exists()
+    return (sys.platform == "win32" and _NPX is not None
+            and (_DESKTOP / "node_modules" / "electron").exists())
 
 
 def _sandbox_env() -> dict:
@@ -48,7 +50,7 @@ def _sandbox_env() -> dict:
 def test_initial_markup_never_asserts_emptiness():
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     rail = html.split('id="rail-projects"', 1)[1].split("rail-footer", 1)[0]
-    assert "No chats yet" not in rail
+    assert "No operations yet" not in rail
     assert "No projects yet" not in rail
     assert "rail-threads-loading" in rail
 
@@ -89,5 +91,5 @@ def test_pending_renders_loading_and_confirmed_empty_renders_empty():
     # The four scenario lines really ran, with the states the spec names.
     assert 'pending : threads="Loading' in output, output[-3000:]
     assert "arrival : rows=2" in output, output[-3000:]
-    assert 'empty   : threads="No chats yet."' in output, output[-3000:]
+    assert 'empty   : threads="No operations yet."' in output, output[-3000:]
     assert "data    : rows=2" in output, output[-3000:]

@@ -23,7 +23,7 @@
           <img class="brand-mark" src="../assets/favicon-32x32.png" alt="" aria-hidden="true" />
           <span class="brand-text">
             <span class="brand-name">Ridian Operator</span>
-            <span class="brand-sub">Legacy workflows</span>
+            <span class="brand-sub">Legacy Tools</span>
           </span>
         </header>
 
@@ -32,13 +32,8 @@
             id="sidebar-dashboard-btn"
             type="button"
             class="sidebar-btn sidebar-dashboard-btn is-active"
-          >Dashboard</button>
+          >Back to Operator</button>
 
-          <button
-            id="sidebar-new-workflow-btn"
-            type="button"
-            class="sidebar-btn sidebar-btn-primary"
-          >+ New workflow</button>
 
           <div class="sidebar-mode-group" role="group" aria-label="Workflow mode">
             <button
@@ -80,7 +75,7 @@
           </div>
         </div>
 
-        <!-- Scrollable middle section: Outputs nav + Recent Runs -->
+        <!-- Legacy-only navigation: output tabs and historical legacy runs. -->
         <div class="sidebar-scroll">
           <nav
             id="sidebar-outputs"
@@ -91,9 +86,9 @@
             <ul id="sidebar-outputs-list" class="sidebar-list" role="tablist"></ul>
           </nav>
 
-          <nav class="sidebar-section sidebar-runs" aria-label="Recent runs">
+          <nav class="sidebar-section sidebar-runs" aria-label="Legacy runs">
             <div class="sidebar-runs-head">
-              <h3 class="sidebar-section-title">Recent runs</h3>
+              <h3 class="sidebar-section-title">Legacy runs</h3>
               <div id="sidebar-runs-filters" class="sidebar-runs-filters" role="group" aria-label="Filter runs">
                 <button type="button" class="sidebar-filter-chip is-active" data-runs-filter="all">All</button>
                 <button type="button" class="sidebar-filter-chip" data-runs-filter="pinned">Pinned</button>
@@ -106,7 +101,7 @@
               id="sidebar-runs-search"
               type="search"
               class="sidebar-runs-search"
-              placeholder="Search runs…"
+              placeholder="Search legacy runs…"
               autocomplete="off"
               spellcheck="false"
             />
@@ -150,13 +145,13 @@
             id="workspace-back-btn"
             type="button"
             class="workspace-back-btn hidden"
-            aria-label="Back to workflow picker"
-            title="Back to workflow picker"
+            aria-label="Back to Ridian Operator"
+            title="Back to Ridian Operator"
           >&larr;</button>
           <div class="workspace-title-area">
-            <h1 id="workspace-title" class="workspace-title">Welcome</h1>
+            <h1 id="workspace-title" class="workspace-title">Ridian Operator</h1>
             <p id="workspace-subtitle" class="workspace-subtitle">
-              Pick a workflow on the left to begin.
+              Tell Ridian what outcome you need.
             </p>
           </div>
           <div class="workspace-status-pills">
@@ -210,7 +205,7 @@
             <div class="banner-title">Anthropic API key is not configured.</div>
             <div class="banner-body">
               Open <strong>Settings</strong> (bottom left) to add your key before
-              running workflows. Get a key at
+              running an operation. Get a key at
               <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
             </div>
           </section>
@@ -231,18 +226,18 @@
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>
-                  <span>New chat</span>
+                  <span>New operation</span>
                 </button>
-                <label class="sr-only" for="rail-search">Search chats</label>
+                <label class="sr-only" for="rail-search">Search operations</label>
                 <input
                   id="rail-search"
                   class="rail-search"
                   type="search"
-                  placeholder="Search chats…"
+                  placeholder="Search operations…"
                   autocomplete="off"
                   spellcheck="false"
                 />
-                <label class="rail-terminal-toggle" title="Hide chats whose run ended failed or cancelled. Parked and completed chats always stay.">
+                <label class="rail-terminal-toggle" title="Hide operations that ended failed or cancelled. Awaiting and completed operations always stay.">
                   <input type="checkbox" id="rail-hide-terminal" />
                   <span id="rail-hide-terminal-label">Hide failed &amp; cancelled</span>
                 </label>
@@ -276,7 +271,7 @@
                        has actually answered. -->
                   <li class="rail-threads-loading">Loading…</li>
                 </ul>
-                <div class="operator-rail-title">Chats</div>
+                <div class="operator-rail-title">Operations</div>
                 <ul id="rail-threads" class="rail-threads">
                   <li class="rail-threads-loading">Loading…</li>
                 </ul>
@@ -302,7 +297,7 @@
                     class="operator-context-chip hidden"
                     title="Open the last operation"
                   >
-                    <span class="operator-context-chip-label">Last run</span>
+                    <span class="operator-context-chip-label">Last operation</span>
                     <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
                   </button>
                 </div>
@@ -646,219 +641,35 @@
               </div>
                 </div><!-- /operator-live -->
 
-                <!-- Legacy workflows — kept available but no longer the main
-                     focus. Lives INSIDE the chat pane's scroll container so
-                     summoning it scrolls the pane, never the app shell.
-                     Expanding this surfaces the old Business/Social/Agentic/
-                     NotebookLM forms via mode buttons + the demoted dashboard. -->
+                <!-- Legacy capabilities remain reachable for parity testing,
+                     but they are deliberately subordinate to the Operator. -->
                 <details id="operator-templates" class="operator-templates">
-              <summary>Legacy workflows</summary>
-
-            <div class="dashboard">
-
-              <!-- Hero / briefing -->
-              <header class="dashboard-hero">
-                <div class="dashboard-hero-meta">
-                  <span class="dashboard-eyebrow">Ridian Command Center</span>
-                  <h2 class="dashboard-title">Your private digital staff.</h2>
-                  <p class="dashboard-today" id="dashboard-today">—</p>
-                </div>
-                <div class="dashboard-hero-status" role="status" aria-live="polite">
-                  <span class="dashboard-hero-status-eyebrow">Today</span>
-                  <span class="dashboard-hero-status-line" id="dashboard-status-line">
-                    Loading your command center…
-                  </span>
-                </div>
-              </header>
-
-              <div id="welcome-tip" class="welcome-tip hidden" role="note">
-                <div class="welcome-tip-icon" aria-hidden="true">💡</div>
-                <div class="welcome-tip-body">
-                  <strong>First time?</strong> Use <strong>Quick launch</strong> below to start a workflow, add a
-                  contact, or log a follow-up. Nothing is sent, posted, or uploaded without your approval.
-                </div>
-                <button
-                  id="welcome-tip-dismiss"
-                  type="button"
-                  class="welcome-tip-dismiss"
-                  aria-label="Dismiss welcome tip"
-                >Got it</button>
-              </div>
-
-              <!-- Today's Focus: primary CTA + supporting actions -->
-              <section class="dashboard-focus" aria-labelledby="dashboard-focus-heading">
-                <div class="dashboard-focus-head">
-                  <h3 id="dashboard-focus-heading" class="dashboard-focus-title">Today's focus</h3>
-                  <span id="dashboard-focus-meta" class="dashboard-focus-meta"></span>
-                </div>
-                <div id="dashboard-focus-body" class="dashboard-focus-body">
-                  <p class="dashboard-empty">Loading…</p>
-                </div>
-              </section>
-
-              <!-- Quick Launch: one-click common moves -->
-              <section class="dashboard-quicklaunch" aria-labelledby="dashboard-quicklaunch-heading">
-                <h3 id="dashboard-quicklaunch-heading" class="dashboard-section-title">Quick launch</h3>
-                <div class="dashboard-quicklaunch-row">
-                  <button type="button" class="dashboard-ql-btn" data-ql="new-business">
-                    <span class="dashboard-ql-icon" aria-hidden="true">B</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">New business workflow</span>
-                      <span class="dashboard-ql-sub">Research, doc, slides, email.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="new-social">
-                    <span class="dashboard-ql-icon" aria-hidden="true">S</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">New social workflow</span>
-                      <span class="dashboard-ql-sub">Script, caption, visuals.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="agentic-brief">
-                    <span class="dashboard-ql-icon" aria-hidden="true">A</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">Agentic advances brief</span>
-                      <span class="dashboard-ql-sub">Today's significant AI advances.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="notebooklm">
-                    <span class="dashboard-ql-icon" aria-hidden="true">N</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">NotebookLM package</span>
-                      <span class="dashboard-ql-sub">Audio Overview + prompts.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="open-wizard">
-                    <span class="dashboard-ql-icon" aria-hidden="true">✦</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">Guided wizard</span>
-                      <span class="dashboard-ql-sub">Pick a workflow template.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="add-contact">
-                    <span class="dashboard-ql-icon" aria-hidden="true">+</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">Add contact</span>
-                      <span class="dashboard-ql-sub">Save someone to memory.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="add-follow-up">
-                    <span class="dashboard-ql-icon" aria-hidden="true">✓</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">Add follow-up</span>
-                      <span class="dashboard-ql-sub">Remember a next step.</span>
-                    </span>
-                  </button>
-                  <button type="button" class="dashboard-ql-btn" data-ql="edit-memory">
-                    <span class="dashboard-ql-icon" aria-hidden="true">M</span>
-                    <span class="dashboard-ql-text">
-                      <span class="dashboard-ql-label">Edit memory</span>
-                      <span class="dashboard-ql-sub">Brand, facts, decisions.</span>
-                    </span>
-                  </button>
-                </div>
-              </section>
-
-              <!-- Main grid: left = work, right = context -->
-              <div class="dashboard-main">
-                <div class="dashboard-main-left">
-                  <section class="dashboard-panel" aria-labelledby="dashboard-followups-heading">
-                    <div class="dashboard-panel-head">
-                      <div class="dashboard-panel-head-text">
-                        <h3 id="dashboard-followups-heading" class="dashboard-panel-title">Follow-ups</h3>
-                        <span id="dashboard-followups-meta" class="dashboard-panel-meta"></span>
-                      </div>
-                      <button
-                        type="button"
-                        class="dashboard-panel-action"
-                        id="dashboard-add-follow-up-btn"
-                      >+ Add follow-up</button>
+                  <summary>Legacy Tools</summary>
+                  <div class="legacy-tools-panel" aria-label="Legacy tools">
+                    <div class="legacy-tools-copy">
+                      <strong>Temporary compatibility tools</strong>
+                      <span>These fixed workflows remain available while their outcomes are migrated to Operator commands.</span>
                     </div>
-                    <ul id="dashboard-follow-ups" class="dashboard-follow-ups">
-                      <li class="dashboard-empty">Loading…</li>
-                    </ul>
-                  </section>
-
-                  <section class="dashboard-panel" aria-labelledby="dashboard-recent-heading">
-                    <div class="dashboard-panel-head">
-                      <div class="dashboard-panel-head-text">
-                        <h3 id="dashboard-recent-heading" class="dashboard-panel-title">Recent work</h3>
-                        <span id="dashboard-recent-meta" class="dashboard-panel-meta"></span>
-                      </div>
-                      <button
-                        type="button"
-                        class="dashboard-panel-action"
-                        id="dashboard-new-workflow-btn"
-                      >+ New workflow</button>
+                    <div class="legacy-tools-grid">
+                      <button type="button" class="legacy-tool-btn" data-legacy-mode="business">
+                        <span>Business package</span>
+                        <small>Research, document, slides, and email draft</small>
+                      </button>
+                      <button type="button" class="legacy-tool-btn" data-legacy-mode="social">
+                        <span>Social package</span>
+                        <small>Channel-specific content production</small>
+                      </button>
+                      <button type="button" class="legacy-tool-btn" data-legacy-mode="agentic">
+                        <span>Agentic advances brief</span>
+                        <small>Fixed AI research briefing</small>
+                      </button>
+                      <button type="button" class="legacy-tool-btn" data-legacy-mode="notebooklm">
+                        <span>NotebookLM package</span>
+                        <small>Fixed source-package workflow</small>
+                      </button>
                     </div>
-                    <ul id="dashboard-recent" class="dashboard-recent">
-                      <li class="dashboard-empty">Loading…</li>
-                    </ul>
-                  </section>
-                </div>
-
-                <aside class="dashboard-main-right">
-                  <section class="dashboard-panel dashboard-context" aria-labelledby="dashboard-context-heading">
-                    <div class="dashboard-panel-head">
-                      <div class="dashboard-panel-head-text">
-                        <h3 id="dashboard-context-heading" class="dashboard-panel-title">Ridian Context</h3>
-                        <span class="dashboard-panel-meta">What your digital staff remembers.</span>
-                      </div>
-                      <button
-                        type="button"
-                        class="dashboard-panel-action"
-                        id="dashboard-edit-memory-btn"
-                      >Edit memory</button>
-                    </div>
-
-                    <ul class="dashboard-context-list" id="dashboard-context-list">
-                      <li class="dashboard-context-row" data-ctx-target="contacts">
-                        <span class="dashboard-context-num" data-count="contacts">0</span>
-                        <span class="dashboard-context-text">
-                          <span class="dashboard-context-label">Contacts saved</span>
-                          <span class="dashboard-context-hint">People your agents can reference.</span>
-                        </span>
-                      </li>
-                      <li class="dashboard-context-row" data-ctx-target="brand">
-                        <span class="dashboard-context-num"><span data-count="brand_voices">0</span><span class="dashboard-context-denom">/3</span></span>
-                        <span class="dashboard-context-text">
-                          <span class="dashboard-context-label">Brand voices defined</span>
-                          <span class="dashboard-context-hint">Ridian, Open Gulf, Buns.</span>
-                        </span>
-                      </li>
-                      <li class="dashboard-context-row" data-ctx-target="facts">
-                        <span class="dashboard-context-num" data-count="facts">0</span>
-                        <span class="dashboard-context-text">
-                          <span class="dashboard-context-label">Facts logged</span>
-                          <span class="dashboard-context-hint">Reusable context for every run.</span>
-                        </span>
-                      </li>
-                      <li class="dashboard-context-row" data-ctx-target="decisions">
-                        <span class="dashboard-context-num" data-count="decisions">0</span>
-                        <span class="dashboard-context-text">
-                          <span class="dashboard-context-label">Decisions recorded</span>
-                          <span class="dashboard-context-hint">Why you chose this path.</span>
-                        </span>
-                      </li>
-                      <li class="dashboard-context-row" data-ctx-target="follow-ups">
-                        <span class="dashboard-context-num" data-count="open_follow_ups">0</span>
-                        <span class="dashboard-context-text">
-                          <span class="dashboard-context-label">Open follow-ups</span>
-                          <span class="dashboard-context-hint">Things to come back to.</span>
-                        </span>
-                      </li>
-                    </ul>
-
-                    <p class="dashboard-context-empty" id="dashboard-context-empty" hidden>
-                      Memory is empty. It helps your digital staff remember people, brand voice,
-                      decisions, and follow-ups so every workflow feels personal — not generic.
-                    </p>
-                  </section>
-                </aside>
-              </div>
-
-            </div>
-            </details>
+                  </div>
+                </details>
               </div><!-- /operator-scroll -->
               </div><!-- /operator-main -->
 
@@ -868,7 +679,7 @@
               <!-- runs it through every gate; nothing fires autonomously.    -->
               <section id="obligations-view" class="settings-view hidden" aria-label="Obligations">
                 <header class="settings-head">
-                  <button id="obligations-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <button id="obligations-close-btn" type="button" class="workspace-back-btn" aria-label="Back to Operator" title="Back to Operator">&larr;</button>
                   <h2 class="settings-title">Obligations</h2>
                 </header>
                 <div id="obligations-scroll" class="settings-scroll">
@@ -904,7 +715,7 @@
               <!-- approvals ledger + operation logs. Filter + export CSV.     -->
               <section id="audit-view" class="settings-view hidden" aria-label="Audit log">
                 <header class="settings-head">
-                  <button id="audit-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <button id="audit-close-btn" type="button" class="workspace-back-btn" aria-label="Back to Operator" title="Back to Operator">&larr;</button>
                   <h2 class="settings-title">Audit log</h2>
                   <span id="audit-summary" class="brief-date"></span>
                 </header>
@@ -945,7 +756,7 @@
               <!-- gate path as answering in the thread.                       -->
               <section id="approvals-view" class="settings-view hidden" aria-label="Approvals">
                 <header class="settings-head">
-                  <button id="approvals-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <button id="approvals-close-btn" type="button" class="workspace-back-btn" aria-label="Back to Operator" title="Back to Operator">&larr;</button>
                   <h2 class="settings-title">Approvals</h2>
                 </header>
                 <div id="approvals-scroll" class="settings-scroll">
@@ -959,7 +770,7 @@
               <!-- same grid cell + open/close pattern as Settings.            -->
               <section id="brief-view" class="settings-view hidden" aria-label="Morning brief">
                 <header class="settings-head">
-                  <button id="brief-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <button id="brief-close-btn" type="button" class="workspace-back-btn" aria-label="Back to Operator" title="Back to Operator">&larr;</button>
                   <h2 class="settings-title">Morning brief</h2>
                   <span id="brief-date" class="brief-date"></span>
                 </header>
@@ -977,7 +788,7 @@
               <!-- ============================================================ -->
               <section id="settings-view" class="settings-view hidden" aria-label="Settings">
                 <header class="settings-head">
-                  <button id="settings-close-btn" type="button" class="workspace-back-btn" aria-label="Back to chat" title="Back to chat">&larr;</button>
+                  <button id="settings-close-btn" type="button" class="workspace-back-btn" aria-label="Back to Operator" title="Back to Operator">&larr;</button>
                   <h2 class="settings-title">Settings</h2>
                   <span id="settings-version" class="settings-version" title="Installed Ridian Operator version"></span>
                 </header>
@@ -1905,12 +1716,12 @@
       <div class="history-panel-body">
         <nav class="history-panel-nav" aria-label="App menu">
           <button id="menu-legacy-btn" type="button" class="history-panel-nav-btn">
-            <span>Legacy workflows</span>
+            <span>Legacy Tools</span>
             <span class="history-panel-nav-hint">Business · Social · Agentic · NotebookLM</span>
           </button>
           <!-- Settings has ONE entry point: the rail, bottom-left. -->
         </nav>
-        <h3 class="history-panel-section-title">Recent operations</h3>
+        <h3 class="history-panel-section-title">Operations</h3>
         <ul id="history-panel-list" class="history-panel-list">
           <li class="history-panel-empty">Loading…</li>
         </ul>
@@ -1940,35 +1751,13 @@
         </header>
         <div class="modal-body tips-body">
           <ol class="tips-list">
-            <li>
-              <strong>Pick a workflow.</strong>
-              Business Workflow or Social Media Production from the sidebar.
-            </li>
-            <li>
-              <strong>Run it.</strong>
-              Type a task or click one of the suggested prompts, then press
-              <em>Run workflow</em> (or <em>Ctrl + Enter</em> in the textarea).
-            </li>
-            <li>
-              <strong>Review outputs.</strong>
-              Once the run completes, the sidebar lists each output —
-              click any tab to view that section.
-            </li>
-            <li>
-              <strong>Approve before sending.</strong>
-              Exports, Google Drive upload, and email send never auto-fire.
-              You click the button each time.
-            </li>
-            <li>
-              <strong>Outputs stay local.</strong>
-              Every run is saved to <code>outputs/</code> on your machine.
-              Click <em>Open output folder</em> on the Actions tab to find it.
-            </li>
+            <li><strong>State the outcome.</strong> Tell Ridian what you need in the Operator composer; do not choose an agent or workflow.</li>
+            <li><strong>Follow the operation.</strong> The timeline shows tools, progress, questions, approvals, and results.</li>
+            <li><strong>Open the artifacts.</strong> Files and cloud deliverables appear in the operation's Artifacts panel.</li>
+            <li><strong>Approve consequential work.</strong> Ridian pauses when a protected action requires your decision.</li>
+            <li><strong>Return to prior work.</strong> Operations in the left rail preserve completed and awaiting work.</li>
           </ol>
-          <p class="tips-foot">
-            Hover a Recent run to <strong>★ pin</strong> or <strong>× hide</strong> it.
-            Click the <strong>←</strong> arrow at the top to return to the workflow picker.
-          </p>
+          <p class="tips-foot">Fixed workflows remain temporarily available under <strong>Legacy Tools</strong> for compatibility.</p>
         </div>
         <footer class="modal-foot">
           <span class="modal-foot-spacer"></span>

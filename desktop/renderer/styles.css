@@ -5533,3 +5533,51 @@ body {
 .operator-obligations-strip { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; margin-bottom: 6px; border: 1px solid var(--color-border-strong, #3a3f48); border-left: 3px solid #d9a03f; border-radius: 8px; font-size: 12.5px; }
 .obligation-banner-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .operator-status-dot.is-cancelled { background: var(--color-muted, #8a8f98); }
+
+/* Operator-centered IA: legacy workflows have one quiet compatibility entry. */
+.legacy-tools-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 0 0.25rem;
+}
+
+.legacy-tools-copy {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--color-muted);
+  font-size: var(--fs-sm);
+}
+
+.legacy-tools-copy strong { color: var(--color-text); }
+
+.legacy-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.legacy-tool-btn {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.legacy-tool-btn:hover,
+.legacy-tool-btn:focus-visible {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-soft);
+  outline: none;
+}
+
+.legacy-tool-btn span { font-weight: 650; }
+.legacy-tool-btn small { color: var(--color-muted); line-height: 1.35; }
+
+@media (max-width: 720px) {
+  .legacy-tools-grid { grid-template-columns: 1fr; }
+}

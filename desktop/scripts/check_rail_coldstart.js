@@ -5,7 +5,7 @@
 //
 //   1. PENDING   — the server accepts connections but never answers (a
 //                  backend still booting). The rail must show its loading
-//                  state and NEVER "No chats yet." / "empty — click to add".
+//                  state and NEVER "No operations yet." / "empty — click to add".
 //   2. ARRIVAL   — the held responses are then released with real data; the
 //                  rail must refresh to the rows WITHOUT any command running
 //                  (the reported bug: it never refreshed on arrival).
@@ -106,7 +106,7 @@ app.whenReady().then(async () => {
   let s = await win.webContents.executeJavaScript(SNAP, true);
   console.log(`pending : threads="${s.threads}" projects="${s.projects}" memory="${s.memory}"`);
   expect(s.threads.includes('Loading'), `pending: threads shows "${s.threads}" not a loading state`);
-  expect(!s.threads.includes('No chats yet'), 'pending: threads claims "No chats yet" with NO backend answer');
+  expect(!s.threads.includes('No operations yet'), 'pending: threads claims "No operations yet" with NO backend answer');
   expect(!s.projects.includes('No projects yet'), 'pending: projects claims empty with NO backend answer');
   expect(s.memory.includes('Loading'), `pending: memory chip shows "${s.memory}" not a loading state`);
   expect(!s.memory.includes('empty'), 'pending: memory chip claims empty with NO backend answer');
@@ -127,7 +127,7 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 1500));
   s = await win.webContents.executeJavaScript(SNAP, true);
   console.log(`empty   : threads="${s.threads}" memory="${s.memory}"`);
-  expect(s.threads.includes('No chats yet'), `empty: confirmed-zero backend must show the empty state, got "${s.threads}"`);
+  expect(s.threads.includes('No operations yet'), `empty: confirmed-zero backend must show the empty state, got "${s.threads}"`);
   expect(s.memory.includes('empty'), `empty: memory chip should say empty, got "${s.memory}"`);
   // window is reused; reload happens in freshWindow()
 
