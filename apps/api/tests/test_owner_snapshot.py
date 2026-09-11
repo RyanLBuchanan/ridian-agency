@@ -402,6 +402,64 @@ def test_free_text_fields_have_emails_and_phones_replaced():
     assert "@" not in text
 
 
+def _machine_zone_is_chicago() -> bool:
+    """True when this PC's local zone agrees with America/Chicago on both a
+    January and a July instant — the DST pair the test below depends on."""
+    from zoneinfo import ZoneInfo
+    chicago = ZoneInfo("America/Chicago")
+    for naive in (dt.datetime(2026, 1, 15, 9), dt.datetime(2026, 7, 15, 9)):
+        if naive.astimezone().utcoffset() != naive.replace(tzinfo=chicago).utcoffset():
+            return False
+    return True
+
+
+@pytest.mark.skipif(not _machine_zone_is_chicago(),
+                    reason="pins the America/Chicago DST pair; this PC is elsewhere")
+def test_naive_stamps_follow_the_machine_zone_with_dst_not_a_fixed_offset():
+    """A January naive stamp converts at -06:00 and a July one at -05:00,
+    checked against zoneinfo — NOT against astimezone(), which is what the
+    service itself uses. localUtcOffset must be the offset AT generatedAt,
+    so a January export says -06:00 and a July export says -05:00."""
+    from zoneinfo import ZoneInfo
+    chicago = ZoneInfo("America/Chicago")
+    # Independent oracle: the same naive wall time pinned to Chicago.
+    jan_expected = dt.datetime(2026, 1, 15, 9, 0, 0, tzinfo=chicago).astimezone(UTC)
+    jul_expected = dt.datetime(2026, 7, 15, 9, 0, 0, tzinfo=chicago).astimezone(UTC)
+    assert svc.to_utc_z("2026-01-15T09:00:00") == "2026-01-15T15:00:00Z"   # -06:00
+    assert svc.to_utc_z("2026-07-15T09:00:00") == "2026-07-15T14:00:00Z"   # -05:00
+    assert svc.to_utc_z("2026-01-15T09:00:00") == jan_expected.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert svc.to_utc_z("2026-07-15T09:00:00") == jul_expected.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # The envelope offset tracks generatedAt, not "now" and not a constant.
+    _seed()
+    jan_doc = svc.build_snapshot(now=dt.datetime(2026, 1, 15, 15, 0, 0, tzinfo=UTC))
+    jul_doc = svc.build_snapshot(now=dt.datetime(2026, 7, 15, 14, 0, 0, tzinfo=UTC))
+    assert jan_doc["generatedAt"] == "2026-01-15T15:00:00Z"
+    assert jan_doc["source"]["localUtcOffset"] == "-06:00"
+    assert jul_doc["source"]["localUtcOffset"] == "-05:00"
+
+
+def test_service_never_hard_codes_an_offset():
+    """Mutation guard for the test above, on the MECHANISM: the only zone
+    the service may use is the machine's own (astimezone() with no
+    argument) — never a constructed fixed offset and never a named zone.
+    Field descriptions may mention an offset as an example; code may not."""
+    import inspect
+    src = SERVICE_PATH.read_text(encoding="utf-8")
+    assert "timezone(_dt.timedelta" not in src and "timezone(timedelta" not in src
+    assert "ZoneInfo(" not in src and "FixedOffset" not in src
+    conv = inspect.getsource(svc.to_utc_z)
+    assert ".astimezone()" in conv                       # naive -> machine zone
+    assert "astimezone(_dt.timezone.utc)" in conv        # then -> UTC
+    assert "timedelta" not in conv
+    off = inspect.getsource(svc._local_utc_offset)
+    assert "%z" in off and "timedelta" not in off        # offset read, not set
+    # Only 'timezone.utc' may be referenced as a timezone object anywhere.
+    for line in src.splitlines():
+        code = line.split("#", 1)[0]
+        if re.search(r"(?<![A-Za-z_.])timezone\(", code):   # not astimezone(
+            raise AssertionError(f"fixed timezone constructed: {line.strip()}")
+
+
 def test_scrub_never_touches_dates_ids_money_or_timestamps():
     _seed()
     doc = svc.build_snapshot()
