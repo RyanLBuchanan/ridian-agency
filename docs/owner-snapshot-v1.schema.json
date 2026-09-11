@@ -30,8 +30,18 @@
           "type": "string"
         },
         "stagedAt": {
-          "title": "Stagedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stagedat"
         },
         "status": {
           "title": "Status",
@@ -86,7 +96,8 @@
           "$ref": "#/$defs/SectionCount"
         },
         "awaiting_approval": {
-          "$ref": "#/$defs/SectionCount"
+          "$ref": "#/$defs/SectionCount",
+          "description": "Operations parked in awaiting_input (same number as summary.operationsAwaitingInput). Not staged gate approvals."
         },
         "ridian_noticed": {
           "$ref": "#/$defs/SectionCount"
@@ -122,6 +133,8 @@
           "type": "string"
         },
         "date": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Date",
           "type": "string"
         }
@@ -155,16 +168,46 @@
           "type": "string"
         },
         "lastContactAt": {
-          "title": "Lastcontactat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lastcontactat"
         },
         "createdAt": {
-          "title": "Createdat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
         },
         "updatedAt": {
-          "title": "Updatedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
         }
       },
       "required": [
@@ -207,20 +250,52 @@
           "type": "string"
         },
         "nextActionDate": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Nextactiondate",
           "type": "string"
         },
         "createdAt": {
-          "title": "Createdat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
         },
         "updatedAt": {
-          "title": "Updatedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
         },
         "lastTouchAt": {
-          "title": "Lasttouchat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lasttouchat"
         },
         "touchCount": {
           "title": "Touchcount",
@@ -252,6 +327,8 @@
       "additionalProperties": false,
       "properties": {
         "dueDate": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Duedate",
           "type": "string"
         },
@@ -293,6 +370,7 @@
           "type": "string"
         },
         "dueAt": {
+          "description": "Free text exactly as entered (for example 'This week', 'Next available business day', or a date typed by hand). Never parsed as a date; render it verbatim.",
           "title": "Dueat",
           "type": "string"
         },
@@ -301,12 +379,32 @@
           "type": "string"
         },
         "createdAt": {
-          "title": "Createdat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
         },
         "updatedAt": {
-          "title": "Updatedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
         }
       },
       "required": [
@@ -321,40 +419,6 @@
       "title": "FollowUp",
       "type": "object"
     },
-    "LegacyProject": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "workflow": {
-          "title": "Workflow",
-          "type": "string"
-        },
-        "channel": {
-          "title": "Channel",
-          "type": "string"
-        },
-        "modifiedAt": {
-          "title": "Modifiedat",
-          "type": "string"
-        },
-        "pinned": {
-          "title": "Pinned",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "name",
-        "workflow",
-        "channel",
-        "modifiedAt",
-        "pinned"
-      ],
-      "title": "LegacyProject",
-      "type": "object"
-    },
     "MorningBrief": {
       "additionalProperties": false,
       "properties": {
@@ -363,6 +427,8 @@
           "type": "boolean"
         },
         "generatedFor": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Generatedfor",
           "type": "string"
         },
@@ -390,21 +456,45 @@
           "type": "string"
         },
         "lastCompletedPeriod": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Lastcompletedperiod",
           "type": "string"
         },
         "createdAt": {
-          "title": "Createdat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
         },
         "updatedAt": {
-          "title": "Updatedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
         },
         "cadence": {
           "$ref": "#/$defs/Cadence"
         },
         "nextDue": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
           "title": "Nextdue",
           "type": "string"
         },
@@ -444,8 +534,18 @@
           "type": "string"
         },
         "createdAt": {
-          "title": "Createdat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
         },
         "parentId": {
           "title": "Parentid",
@@ -481,12 +581,33 @@
           "type": "string"
         },
         "startedAt": {
-          "title": "Startedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Startedat"
         },
         "completedAt": {
-          "title": "Completedat",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless status is terminal (completed, failed, cancelled).",
+          "title": "Completedat"
         },
         "spendUsd": {
           "title": "Spendusd",
@@ -516,10 +637,19 @@
           "type": "integer"
         },
         "artifactNames": {
+          "description": "Deliverable filenames only: no paths, no operation_log.json, no browser targets.",
           "items": {
             "type": "string"
           },
           "title": "Artifactnames",
+          "type": "array"
+        },
+        "urlsOpened": {
+          "description": "Hostnames the run opened in the browser (open_browser artifacts), host only — never a path or query string.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Urlsopened",
           "type": "array"
         },
         "openQuestions": {
@@ -545,6 +675,7 @@
         "awaitingInput",
         "sourcesCount",
         "artifactNames",
+        "urlsOpened",
         "openQuestions",
         "errorCount"
       ],
@@ -587,6 +718,7 @@
           "type": "string"
         },
         "localUtcOffset": {
+          "description": "The exporting PC's local offset at export time, e.g. -05:00. Every timestamp in this document is already UTC; this is context only.",
           "title": "Localutcoffset",
           "type": "string"
         }
@@ -603,15 +735,17 @@
       "additionalProperties": false,
       "properties": {
         "recentWork": {
+          "description": "Rows in recentWork (capped at 25).",
           "title": "Recentwork",
+          "type": "integer"
+        },
+        "operationsAwaitingInput": {
+          "description": "Operations parked in awaiting_input across the whole store, not only the recentWork rows. This is the number the morning brief's awaiting_approval section reports; it is NOT approvalsPending.",
+          "title": "Operationsawaitinginput",
           "type": "integer"
         },
         "projects": {
           "title": "Projects",
-          "type": "integer"
-        },
-        "legacyProjects": {
-          "title": "Legacyprojects",
           "type": "integer"
         },
         "obligations": {
@@ -623,6 +757,7 @@
           "type": "integer"
         },
         "approvalsPending": {
+          "description": "Staged gate approvals (invoice, proposal, research plan, ...) still waiting for an answer. Distinct from operationsAwaitingInput.",
           "title": "Approvalspending",
           "type": "integer"
         },
@@ -649,8 +784,8 @@
       },
       "required": [
         "recentWork",
+        "operationsAwaitingInput",
         "projects",
-        "legacyProjects",
         "obligations",
         "obligationsDue",
         "approvalsPending",
@@ -677,6 +812,9 @@
       "type": "integer"
     },
     "generatedAt": {
+      "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
       "title": "Generatedat",
       "type": "string"
     },
@@ -698,13 +836,6 @@
         "$ref": "#/$defs/Project"
       },
       "title": "Projects",
-      "type": "array"
-    },
-    "legacyProjects": {
-      "items": {
-        "$ref": "#/$defs/LegacyProject"
-      },
-      "title": "Legacyprojects",
       "type": "array"
     },
     "obligations": {
@@ -754,7 +885,6 @@
     "summary",
     "recentWork",
     "projects",
-    "legacyProjects",
     "obligations",
     "approvals",
     "contacts",

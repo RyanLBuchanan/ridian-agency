@@ -4,9 +4,10 @@ WHY THIS EXISTS. The Owner Workspace on ridiantechnologies.com needs
 authentic Operator context (recent work, projects, obligations, approvals,
 the shape of the morning brief) to populate its read-only home — without the
 website ever gaining execution authority over this PC, and without a single
-credential, transcript, memory record, audit row, companion record, or local
-path leaving the machine. This module writes that file. Nothing here
-uploads; the operator inspects the file and moves it by hand.
+credential, transcript, memory record, audit row, companion record, local
+path, email address or phone number leaving the machine. This module writes
+that file. Nothing here uploads; the operator inspects the file and moves it
+by hand.
 
 THREE PINS (each has a test in tests/test_owner_snapshot.py):
 
@@ -19,14 +20,20 @@ THREE PINS (each has a test in tests/test_owner_snapshot.py):
      lists what must never be mapped (emails, phones, notes, dollar values,
      steps, receipts, paths, planner kwargs, provenance stamps, ...);
      build_snapshot() refuses to run if a table ever names one of them, and
-     refuses to emit any key matching FORBIDDEN_KEY_RE or any string carrying
-     a drive-letter / UNC / home path or the data directory.
+     refuses to emit any key matching FORBIDDEN_KEY_RE, any string carrying
+     a drive-letter / UNC / home path or the data directory, or any string
+     carrying an email address. Free-text fields (kind "text") additionally
+     have email addresses and phone numbers replaced with [email] / [phone]
+     and refuse themselves if anything survives the scrub.
   3. NO WRITES except the export file itself, under <data_dir>/exports/.
      The state store is byte-identical before and after an export.
 
-Record timestamps are passed through as the Operator stores them: naive
-local-time ISO 8601 strings. ``generatedAt`` is UTC; ``source.localUtcOffset``
-lets the importer interpret the local ones.
+TIMESTAMPS. Every exported timestamp (kind "timestamp") is UTC RFC 3339
+with a trailing Z, or null when the source is blank or unparseable. Sources
+that write naive local time (approvals, deals, a parked run's completed_at)
+are interpreted in this PC's local zone. Date-only fields (kind "date") stay
+YYYY-MM-DD or "". ``followUps[].dueAt`` is free text as entered and is never
+parsed as a date.
 """
 
 from __future__ import annotations
@@ -36,13 +43,14 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import (approval_inbox_service, brief_service, dashboard_service,
                memory_service, obligations_service, operation_log_service,
-               pipeline_service, project_service)
+               pipeline_service)
 from .runtime_paths import data_dir
 
 log = logging.getLogger("ridian.owner_snapshot")
@@ -55,10 +63,11 @@ EXPORTS_DIRNAME = "exports"
 FILE_PREFIX = "owner-snapshot-"
 
 RECENT_WORK_LIMIT = 25
-LEGACY_PROJECT_LIMIT = 30
-LIST_LIMIT = 200            # contacts, deals, obligations, follow-ups, approvals
+OPERATIONS_SCAN_LIMIT = 500   # the store itself caps at 500 entries
+LIST_LIMIT = 200              # contacts, deals, obligations, follow-ups, approvals
 TEXT_MAX = 2000
 LIST_ITEM_MAX = 50
+TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
 
 # Output keys may never match this — the website importer enforces the same
 # pattern, so a key that slipped past here would be rejected there too.
@@ -66,9 +75,29 @@ FORBIDDEN_KEY_RE = re.compile(
     r"token|secret|key|password|credential|cookie|auth", re.IGNORECASE)
 
 PATH_PLACEHOLDER = "[local path removed]"
+EMAIL_PLACEHOLDER = "[email]"
+PHONE_PLACEHOLDER = "[phone]"
 _DRIVE_PATH_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]*")
 _UNC_PATH_RE = re.compile(r"\\\\[^\s\"'<>|]+")
 _HOME_PATH_RE = re.compile(r"/(?:Users|home)/[^\s\"'<>|]*")
+
+# Contact-detail scrub (free text only). Phone shape is deliberately strict —
+# three/three/four digit groups with optional country code — so ISO dates,
+# times, ids and money never match.
+_EMAIL_PATTERN = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+_PHONE_PATTERN = (r"(?<![\w.-])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})"
+                  r"[\s.-]?\d{3}[\s.-]?\d{4}(?![\w-])")
+_EMAIL_RE = re.compile(_EMAIL_PATTERN)
+_PHONE_RE = re.compile(_PHONE_PATTERN)
+# Independent leak detectors: compiled separately so a broken scrub regex is
+# a refused export, never a leak.
+_LEAK_EMAIL_RE = re.compile(_EMAIL_PATTERN)
+_LEAK_PHONE_RE = re.compile(_PHONE_PATTERN)
+
+_TS_OUT = "%Y-%m-%dT%H:%M:%SZ"
+TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+DATE_PATTERN = r"^(\d{4}-\d{2}-\d{2})?$"
+_DATE_RE = re.compile(DATE_PATTERN)
 
 # Source fields that no table may ever name. The intersection check in
 # check_policy() is what makes a mutated table fail loudly instead of
@@ -90,63 +119,61 @@ DENY_SOURCE_FIELDS: frozenset[str] = frozenset({
     "written_by", "source_op", "source_run",
 })
 
-_STR, _BOOL, _INT, _FLOAT, _STRLIST = "str", "bool", "int", "float", "strlist"
-_KINDS = frozenset({_STR, _BOOL, _INT, _FLOAT, _STRLIST})
+# Kinds: str = label/id (path-scrubbed); text = human prose (path + contact
+# scrub, self-checked); timestamp = UTC Z or null; date = YYYY-MM-DD or "".
+_STR, _TEXT, _TS, _DATE = "str", "text", "timestamp", "date"
+_BOOL, _INT, _FLOAT, _STRLIST = "bool", "int", "float", "strlist"
+_KINDS = frozenset({_STR, _TEXT, _TS, _DATE, _BOOL, _INT, _FLOAT, _STRLIST})
 
 # (source field, output key, kind) — the complete export for each record.
 RECENT_WORK_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("command", "command", _STR), ("intent", "intent", _STR),
-    ("status", "status", _STR), ("started_at", "startedAt", _STR),
-    ("completed_at", "completedAt", _STR), ("spend_usd", "spendUsd", _FLOAT),
+    ("id", "id", _STR), ("command", "command", _TEXT), ("intent", "intent", _STR),
+    ("status", "status", _STR), ("started_at", "startedAt", _TS),
+    ("completed_at", "completedAt", _TS), ("spend_usd", "spendUsd", _FLOAT),
     ("tools_used", "toolsUsed", _STRLIST), ("project_id", "projectId", _STR),
     ("background", "background", _BOOL), ("awaiting_input", "awaitingInput", _BOOL),
     ("sources_count", "sourcesCount", _INT),
 )
 PROJECT_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("name", "name", _STR), ("created_at", "createdAt", _STR),
+    ("id", "id", _STR), ("name", "name", _TEXT), ("created_at", "createdAt", _TS),
     ("parent_id", "parentId", _STR),
 )
-LEGACY_PROJECT_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("name", "name", _STR), ("workflow", "workflow", _STR),
-    ("channel", "channel", _STR), ("mtime_iso", "modifiedAt", _STR),
-    ("pinned", "pinned", _BOOL),
-)
 OBLIGATION_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("name", "name", _STR),
-    ("last_completed_period", "lastCompletedPeriod", _STR),
-    ("created_iso", "createdAt", _STR), ("updated_iso", "updatedAt", _STR),
+    ("id", "id", _STR), ("name", "name", _TEXT),
+    ("last_completed_period", "lastCompletedPeriod", _DATE),
+    ("created_iso", "createdAt", _TS), ("updated_iso", "updatedAt", _TS),
 )
 CADENCE_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("kind", "kind", _STR), ("day", "day", _STR), ("weekday", "weekday", _STR),
-    ("date", "date", _STR),
+    ("date", "date", _DATE),
 )
 DUE_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("due_date", "dueDate", _STR), ("status", "status", _STR),
+    ("due_date", "dueDate", _DATE), ("status", "status", _STR),
     ("days_overdue", "daysOverdue", _INT), ("missed_periods", "missedPeriods", _INT),
 )
 APPROVAL_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("id", "id", _STR), ("operation_id", "operationId", _STR),
-    ("command", "command", _STR), ("tool", "tool", _STR),
-    ("reason", "reason", _STR), ("question", "question", _STR),
-    ("staged_at", "stagedAt", _STR), ("status", "status", _STR),
+    ("command", "command", _TEXT), ("tool", "tool", _STR),
+    ("reason", "reason", _STR), ("question", "question", _TEXT),
+    ("staged_at", "stagedAt", _TS), ("status", "status", _STR),
     ("stale", "stale", _BOOL),
 )
 CONTACT_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("name", "name", _STR), ("role", "role", _STR),
-    ("company", "company", _STR), ("last_contact_iso", "lastContactAt", _STR),
-    ("created_iso", "createdAt", _STR), ("updated_iso", "updatedAt", _STR),
+    ("id", "id", _STR), ("name", "name", _TEXT), ("role", "role", _TEXT),
+    ("company", "company", _TEXT), ("last_contact_iso", "lastContactAt", _TS),
+    ("created_iso", "createdAt", _TS), ("updated_iso", "updatedAt", _TS),
 )
 DEAL_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("title", "title", _STR), ("stage", "stage", _STR),
-    ("contact_id", "contactId", _STR), ("contact_name", "contactName", _STR),
-    ("next_action", "nextAction", _STR), ("next_action_date", "nextActionDate", _STR),
-    ("created_iso", "createdAt", _STR), ("updated_iso", "updatedAt", _STR),
-    ("last_touch_iso", "lastTouchAt", _STR),
+    ("id", "id", _STR), ("title", "title", _TEXT), ("stage", "stage", _STR),
+    ("contact_id", "contactId", _STR), ("contact_name", "contactName", _TEXT),
+    ("next_action", "nextAction", _TEXT), ("next_action_date", "nextActionDate", _DATE),
+    ("created_iso", "createdAt", _TS), ("updated_iso", "updatedAt", _TS),
+    ("last_touch_iso", "lastTouchAt", _TS),
 )
 FOLLOW_UP_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("id", "id", _STR), ("what", "what", _STR), ("who", "who", _STR),
+    ("id", "id", _STR), ("what", "what", _TEXT), ("who", "who", _TEXT),
     ("due_iso", "dueAt", _STR), ("status", "status", _STR),
-    ("created_iso", "createdAt", _STR), ("updated_iso", "updatedAt", _STR),
+    ("created_iso", "createdAt", _TS), ("updated_iso", "updatedAt", _TS),
 )
 # Morning-brief sections are exported as counts and availability only —
 # never their rows (those carry invoice balances, thread subjects, senders).
@@ -161,22 +188,24 @@ def _tables() -> dict[str, tuple[tuple[str, str, str], ...]]:
     """Read at call time so a mutated table is seen by check_policy()."""
     return {
         "recentWork": RECENT_WORK_FIELDS, "projects": PROJECT_FIELDS,
-        "legacyProjects": LEGACY_PROJECT_FIELDS, "obligations": OBLIGATION_FIELDS,
-        "cadence": CADENCE_FIELDS, "due": DUE_FIELDS, "approvals": APPROVAL_FIELDS,
-        "contacts": CONTACT_FIELDS, "deals": DEAL_FIELDS, "followUps": FOLLOW_UP_FIELDS,
+        "obligations": OBLIGATION_FIELDS, "cadence": CADENCE_FIELDS,
+        "due": DUE_FIELDS, "approvals": APPROVAL_FIELDS,
+        "contacts": CONTACT_FIELDS, "deals": DEAL_FIELDS,
+        "followUps": FOLLOW_UP_FIELDS,
     }
 
 
 class SnapshotPolicyError(RuntimeError):
     """The export refused itself: a table names a denied field, an output
-    key matches the forbidden pattern, or a value carries a local path."""
+    key matches the forbidden pattern, a value carries a local path or a
+    contact detail, or a scrub failed to remove what it was asked to."""
 
 
 # ---------------------------------------------------------------------------
 # Scrubbing + coercion
 # ---------------------------------------------------------------------------
 
-def _scrub(text: str, place_needles: tuple[str, ...]) -> str:
+def _scrub_paths(text: str, place_needles: tuple[str, ...]) -> str:
     for needle in place_needles:
         if needle:
             text = re.sub(re.escape(needle), PATH_PLACEHOLDER, text,
@@ -187,10 +216,36 @@ def _scrub(text: str, place_needles: tuple[str, ...]) -> str:
     return text
 
 
+def _scrub_contact_details(text: str) -> str:
+    """Free text only: email addresses and phone numbers become placeholders."""
+    text = _EMAIL_RE.sub(EMAIL_PLACEHOLDER, text)
+    text = _PHONE_RE.sub(PHONE_PLACEHOLDER, text)
+    return text
+
+
 def _place_needles() -> tuple[str, ...]:
     """Every spelling of the data directory that could appear in free text."""
     d = str(data_dir())
     return tuple({d, d.replace("\\", "/"), d.replace("/", "\\")})
+
+
+def to_utc_z(value: Any) -> Optional[str]:
+    """ISO 8601 in → RFC 3339 UTC with Z out, or None. Aware values are
+    converted; naive values are read as this PC's local time (that is what
+    the Operator's naive writers mean); date-only values are local midnight."""
+    if value is None:
+        return None
+    raw = value if isinstance(value, str) else str(value)
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        parsed = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()          # naive == local on this PC
+    return parsed.astimezone(_dt.timezone.utc).strftime(_TS_OUT)
 
 
 class _Coercer:
@@ -198,14 +253,31 @@ class _Coercer:
         self._needles = _place_needles()
 
     def text(self, value: Any) -> str:
+        """Labels and ids: path-scrubbed, bounded."""
         if value is None:
             return ""
         s = value if isinstance(value, str) else str(value)
-        return _scrub(s[:TEXT_MAX], self._needles)
+        return _scrub_paths(s[:TEXT_MAX], self._needles)
+
+    def freetext(self, value: Any) -> str:
+        """Human prose: path-scrubbed, contact details replaced, and
+        self-checked with the independent leak detectors — a scrub that
+        left an email or phone behind is a refused export."""
+        out = _scrub_contact_details(self.text(value))
+        if _LEAK_EMAIL_RE.search(out) or _LEAK_PHONE_RE.search(out):
+            raise SnapshotPolicyError("contact detail survived the free-text scrub")
+        return out
 
     def coerce(self, value: Any, kind: str) -> Any:
         if kind == _STR:
             return self.text(value)
+        if kind == _TEXT:
+            return self.freetext(value)
+        if kind == _TS:
+            return to_utc_z(value)
+        if kind == _DATE:
+            s = self.text(value)
+            return s if _DATE_RE.fullmatch(s) else ""
         if kind == _BOOL:
             return bool(value)
         if kind == _INT:
@@ -230,22 +302,53 @@ class _Coercer:
         return {dst: self.coerce(src.get(field), kind) for field, dst, kind in table}
 
 
+def _hostname(value: str) -> str:
+    """A browser artifact's name is a URL or bare host; keep the host only.
+    Paths and query strings can carry document ids and tokens."""
+    raw = value.strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        return (urlsplit(raw).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Record builders — one per section, reading ONLY the named services
 # ---------------------------------------------------------------------------
 
-def _recent_work(c: _Coercer) -> list[dict]:
+def _operations() -> list[dict]:
+    return [op for op in operation_log_service.list_recent(limit=OPERATIONS_SCAN_LIMIT)
+            if isinstance(op, dict)]
+
+
+def _recent_work(c: _Coercer, operations: list[dict]) -> list[dict]:
     out = []
-    for op in operation_log_service.list_recent(limit=RECENT_WORK_LIMIT):
-        if not isinstance(op, dict):
-            continue
+    for op in operations[:RECENT_WORK_LIMIT]:
         row = c.pick(op, RECENT_WORK_FIELDS)
+        if row["status"] not in TERMINAL_STATUSES:
+            row["completedAt"] = None            # parked or running: not finished
         artifacts = op.get("artifacts") if isinstance(op.get("artifacts"), list) else []
-        # Filenames only — the artifact's local path is never read.
-        row["artifactNames"] = [
-            c.text(os.path.basename(str(a.get("name"))))
-            for a in artifacts if isinstance(a, dict) and a.get("name")
-        ][:LIST_ITEM_MAX]
+        names: list[str] = []
+        hosts: list[str] = []
+        for a in artifacts:
+            if not isinstance(a, dict) or not a.get("name"):
+                continue
+            if a.get("kind") == "browser":
+                host = _hostname(str(a.get("name")))
+                if host and host not in hosts:
+                    hosts.append(host)
+                continue
+            # Filenames only — the artifact's local path is never read — and
+            # the run's own ledger file is bookkeeping, not a deliverable.
+            name = os.path.basename(str(a.get("name")))
+            if name and name != "operation_log.json":
+                names.append(c.text(name))
+        row["artifactNames"] = names[:LIST_ITEM_MAX]
+        row["urlsOpened"] = hosts[:LIST_ITEM_MAX]
         needs = op.get("needs_input")
         row["openQuestions"] = len(needs) if isinstance(needs, list) else 0
         errors = op.get("errors")
@@ -260,15 +363,6 @@ def _projects(c: _Coercer) -> list[dict]:
             if isinstance(p, dict)]
 
 
-def _legacy_projects(c: _Coercer) -> list[dict]:
-    try:
-        runs = project_service.list_recent_projects(limit=LEGACY_PROJECT_LIMIT)
-    except Exception as exc:  # noqa: BLE001 — a missing outputs tree is not a failure
-        log.info("owner_snapshot.legacy_projects_unavailable %s", type(exc).__name__)
-        runs = []
-    return [c.pick(r, LEGACY_PROJECT_FIELDS) for r in runs if isinstance(r, dict)]
-
-
 def _obligations(c: _Coercer) -> list[dict]:
     out = []
     for ob in obligations_service.list_obligations()[:LIST_LIMIT]:
@@ -277,7 +371,7 @@ def _obligations(c: _Coercer) -> list[dict]:
         row = c.pick(ob, OBLIGATION_FIELDS)
         row["cadence"] = c.pick(ob.get("cadence"), CADENCE_FIELDS)
         try:
-            row["nextDue"] = c.text(obligations_service.next_due(ob))
+            row["nextDue"] = c.coerce(obligations_service.next_due(ob), _DATE)
         except Exception:  # noqa: BLE001 — malformed cadence: honest blank
             row["nextDue"] = ""
         try:
@@ -334,7 +428,10 @@ def _empty_sections() -> dict:
 
 def _morning_brief(c: _Coercer) -> dict:
     """Headings and counts only. The brief's rows carry invoice balances,
-    thread subjects and senders, and deal values — none of that travels."""
+    thread subjects and senders, and deal values — none of that travels.
+    NOTE: the brief's awaiting_approval section counts operations parked in
+    awaiting_input; summary.approvalsPending counts staged gate approvals.
+    They are different things and are exported as different numbers."""
     try:
         brief = brief_service.build_brief()
     except Exception as exc:  # noqa: BLE001 — honest unavailability
@@ -353,13 +450,22 @@ def _morning_brief(c: _Coercer) -> dict:
             "unavailable": bool(sec.get("unavailable", False)),
         }
     return {"available": True,
-            "generatedFor": c.text((brief or {}).get("generated_for")),
+            "generatedFor": c.coerce((brief or {}).get("generated_for"), _DATE),
             "sections": sections}
 
 
 # ---------------------------------------------------------------------------
 # The contract (pydantic is the single source of truth for the JSON Schema)
 # ---------------------------------------------------------------------------
+
+Timestamp = Annotated[str, Field(
+    pattern=TIMESTAMP_PATTERN, json_schema_extra={"format": "date-time"},
+    description="UTC, RFC 3339, second precision, trailing Z. Null when the "
+                "source value was blank or unparseable.")]
+DateOrEmpty = Annotated[str, Field(
+    pattern=DATE_PATTERN,
+    description="YYYY-MM-DD as recorded (no timezone), or empty.")]
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -368,16 +474,26 @@ class _Strict(BaseModel):
 class Source(_Strict):
     application: str
     version: str
-    localUtcOffset: str
+    localUtcOffset: str = Field(
+        description="The exporting PC's local offset at export time, e.g. -05:00. "
+                    "Every timestamp in this document is already UTC; this is "
+                    "context only.")
 
 
 class Summary(_Strict):
-    recentWork: int
+    recentWork: int = Field(description="Rows in recentWork (capped at 25).")
+    operationsAwaitingInput: int = Field(
+        description="Operations parked in awaiting_input across the whole "
+                    "store, not only the recentWork rows. This is the number "
+                    "the morning brief's awaiting_approval section reports; "
+                    "it is NOT approvalsPending.")
     projects: int
-    legacyProjects: int
     obligations: int
     obligationsDue: int
-    approvalsPending: int
+    approvalsPending: int = Field(
+        description="Staged gate approvals (invoice, proposal, research plan, "
+                    "...) still waiting for an answer. Distinct from "
+                    "operationsAwaitingInput.")
     approvalsStale: int
     contacts: int
     deals: int
@@ -390,15 +506,21 @@ class RecentWork(_Strict):
     command: str
     intent: str
     status: str
-    startedAt: str
-    completedAt: str
+    startedAt: Optional[Timestamp]
+    completedAt: Optional[Timestamp] = Field(
+        description="Null unless status is terminal (completed, failed, cancelled).")
     spendUsd: float
     toolsUsed: list[str]
     projectId: str
     background: bool
     awaitingInput: bool
     sourcesCount: int
-    artifactNames: list[str]
+    artifactNames: list[str] = Field(
+        description="Deliverable filenames only: no paths, no operation_log.json, "
+                    "no browser targets.")
+    urlsOpened: list[str] = Field(
+        description="Hostnames the run opened in the browser (open_browser "
+                    "artifacts), host only — never a path or query string.")
     openQuestions: int
     errorCount: int
 
@@ -406,27 +528,19 @@ class RecentWork(_Strict):
 class Project(_Strict):
     id: str
     name: str
-    createdAt: str
+    createdAt: Optional[Timestamp]
     parentId: str
-
-
-class LegacyProject(_Strict):
-    name: str
-    workflow: str
-    channel: str
-    modifiedAt: str
-    pinned: bool
 
 
 class Cadence(_Strict):
     kind: str
     day: str
     weekday: str
-    date: str
+    date: DateOrEmpty
 
 
 class Due(_Strict):
-    dueDate: str
+    dueDate: DateOrEmpty
     status: str
     daysOverdue: int
     missedPeriods: int
@@ -435,11 +549,11 @@ class Due(_Strict):
 class Obligation(_Strict):
     id: str
     name: str
-    lastCompletedPeriod: str
-    createdAt: str
-    updatedAt: str
+    lastCompletedPeriod: DateOrEmpty
+    createdAt: Optional[Timestamp]
+    updatedAt: Optional[Timestamp]
     cadence: Cadence
-    nextDue: str
+    nextDue: DateOrEmpty
     due: Optional[Due]
 
 
@@ -450,7 +564,7 @@ class Approval(_Strict):
     tool: str
     reason: str
     question: str
-    stagedAt: str
+    stagedAt: Optional[Timestamp]
     status: str
     stale: bool
     optionCount: int
@@ -461,9 +575,9 @@ class Contact(_Strict):
     name: str
     role: str
     company: str
-    lastContactAt: str
-    createdAt: str
-    updatedAt: str
+    lastContactAt: Optional[Timestamp]
+    createdAt: Optional[Timestamp]
+    updatedAt: Optional[Timestamp]
 
 
 class Deal(_Strict):
@@ -473,10 +587,10 @@ class Deal(_Strict):
     contactId: str
     contactName: str
     nextAction: str
-    nextActionDate: str
-    createdAt: str
-    updatedAt: str
-    lastTouchAt: str
+    nextActionDate: DateOrEmpty
+    createdAt: Optional[Timestamp]
+    updatedAt: Optional[Timestamp]
+    lastTouchAt: Optional[Timestamp]
     touchCount: int
     active: bool
 
@@ -485,10 +599,13 @@ class FollowUp(_Strict):
     id: str
     what: str
     who: str
-    dueAt: str
+    dueAt: str = Field(
+        description="Free text exactly as entered (for example 'This week', "
+                    "'Next available business day', or a date typed by hand). "
+                    "Never parsed as a date; render it verbatim.")
     status: str
-    createdAt: str
-    updatedAt: str
+    createdAt: Optional[Timestamp]
+    updatedAt: Optional[Timestamp]
 
 
 class SectionCount(_Strict):
@@ -505,25 +622,26 @@ class BriefSections(_Strict):
     due_this_week: SectionCount
     stale_deals: SectionCount
     unpaid_invoices: SectionCount
-    awaiting_approval: SectionCount
+    awaiting_approval: SectionCount = Field(
+        description="Operations parked in awaiting_input (same number as "
+                    "summary.operationsAwaitingInput). Not staged gate approvals.")
     ridian_noticed: SectionCount
 
 
 class MorningBrief(_Strict):
     available: bool
-    generatedFor: str
+    generatedFor: DateOrEmpty
     sections: BriefSections
 
 
 class OwnerSnapshotV1(_Strict):
     schema_: Literal["ridian-operator-snapshot"] = Field(alias="schema")
     version: Literal[1]
-    generatedAt: str
+    generatedAt: Timestamp
     source: Source
     summary: Summary
     recentWork: list[RecentWork]
     projects: list[Project]
-    legacyProjects: list[LegacyProject]
     obligations: list[Obligation]
     approvals: list[Approval]
     contacts: list[Contact]
@@ -567,7 +685,7 @@ def check_policy() -> None:
 def verify_document(document: Any, needles: Optional[tuple[str, ...]] = None,
                     _where: str = "$") -> None:
     """Walk the finished document: no key may match FORBIDDEN_KEY_RE and no
-    string may carry a local path or the data directory."""
+    string may carry a local path, the data directory, or an email address."""
     needles = _place_needles() if needles is None else needles
     if isinstance(document, dict):
         for key, value in document.items():
@@ -585,6 +703,8 @@ def verify_document(document: Any, needles: Optional[tuple[str, ...]] = None,
         if (_DRIVE_PATH_RE.search(document) or _UNC_PATH_RE.search(document)
                 or _HOME_PATH_RE.search(document)):
             raise SnapshotPolicyError(f"local path leaked at {_where}")
+        if _LEAK_EMAIL_RE.search(document):
+            raise SnapshotPolicyError(f"email address leaked at {_where}")
 
 
 # ---------------------------------------------------------------------------
@@ -611,9 +731,9 @@ def build_snapshot(version: Optional[str] = None,
     now_utc = (now or _dt.datetime.now(_dt.timezone.utc)).astimezone(_dt.timezone.utc)
     now_local = now_utc.astimezone()
 
-    recent_work = _recent_work(c)
+    operations = _operations()
+    recent_work = _recent_work(c, operations)
     projects = _projects(c)
-    legacy_projects = _legacy_projects(c)
     obligations = _obligations(c)
     approvals = _approvals(c)
     contacts = _contacts(c)
@@ -624,7 +744,7 @@ def build_snapshot(version: Optional[str] = None,
     document = {
         "schema": SCHEMA,
         "version": VERSION,
-        "generatedAt": now_utc.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generatedAt": now_utc.strftime(_TS_OUT),
         "source": {
             "application": APPLICATION,
             "version": c.text(version if version is not None else _app_version()),
@@ -632,8 +752,9 @@ def build_snapshot(version: Optional[str] = None,
         },
         "summary": {
             "recentWork": len(recent_work),
+            "operationsAwaitingInput": sum(
+                1 for op in operations if op.get("status") == "awaiting_input"),
             "projects": len(projects),
-            "legacyProjects": len(legacy_projects),
             "obligations": len(obligations),
             "obligationsDue": sum(1 for o in obligations if o["due"] is not None),
             "approvalsPending": len(approvals),
@@ -645,7 +766,6 @@ def build_snapshot(version: Optional[str] = None,
         },
         "recentWork": recent_work,
         "projects": projects,
-        "legacyProjects": legacy_projects,
         "obligations": obligations,
         "approvals": approvals,
         "contacts": contacts,
