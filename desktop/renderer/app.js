@@ -6918,6 +6918,32 @@ GOOGLE_ROWS.forEach((kind) => {
   if (connBtn) connBtn.addEventListener('click', () => _googleConnToggle(`settings-${kind}-status`));
 });
 
+// Owner Snapshot v1 (PC only): one click writes the allowlisted export and
+// the status line names the exact file. Nothing leaves this machine.
+const _snapshotBtn = document.getElementById('settings-export-snapshot');
+if (_snapshotBtn) {
+  _snapshotBtn.addEventListener('click', async () => {
+    const status = document.getElementById('settings-export-snapshot-status');
+    _snapshotBtn.disabled = true;
+    if (status) status.textContent = 'Exporting…';
+    try {
+      const res = await fetch(`${BACKEND}/owner-snapshot/export`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      const s = data.summary || {};
+      if (status) {
+        status.textContent = `Saved ${data.path} — ${s.recentWork || 0} operations, `
+          + `${s.approvalsPending || 0} pending approvals, ${s.obligationsDue || 0} obligations due. `
+          + 'Nothing was uploaded.';
+      }
+    } catch (err) {
+      if (status) status.textContent = `Export failed: ${err.message}`;
+    } finally {
+      _snapshotBtn.disabled = false;
+    }
+  });
+}
+
 const _voiceChk = document.getElementById('settings-voice-replies');
 if (_voiceChk) {
   _voiceChk.checked = _opVoiceMasterOn();

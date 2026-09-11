@@ -1,0 +1,897 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ridiantechnologies.com/schemas/owner-snapshot-v1.schema.json",
+  "$defs": {
+    "Approval": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "operationId": {
+          "title": "Operationid",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "stagedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stagedat"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "stale": {
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "optionCount": {
+          "title": "Optioncount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "operationId",
+        "command",
+        "tool",
+        "reason",
+        "question",
+        "stagedAt",
+        "status",
+        "stale",
+        "optionCount"
+      ],
+      "title": "Approval",
+      "type": "object"
+    },
+    "BriefSections": {
+      "additionalProperties": false,
+      "properties": {
+        "obligations_due": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "today_events": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "needs_reply": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "due_today": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "due_this_week": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "stale_deals": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "unpaid_invoices": {
+          "$ref": "#/$defs/SectionCount"
+        },
+        "awaiting_approval": {
+          "$ref": "#/$defs/SectionCount",
+          "description": "Operations parked in awaiting_input (same number as summary.operationsAwaitingInput). Not staged gate approvals."
+        },
+        "ridian_noticed": {
+          "$ref": "#/$defs/SectionCount"
+        }
+      },
+      "required": [
+        "obligations_due",
+        "today_events",
+        "needs_reply",
+        "due_today",
+        "due_this_week",
+        "stale_deals",
+        "unpaid_invoices",
+        "awaiting_approval",
+        "ridian_noticed"
+      ],
+      "title": "BriefSections",
+      "type": "object"
+    },
+    "Cadence": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "day": {
+          "title": "Day",
+          "type": "string"
+        },
+        "weekday": {
+          "title": "Weekday",
+          "type": "string"
+        },
+        "date": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "day",
+        "weekday",
+        "date"
+      ],
+      "title": "Cadence",
+      "type": "object"
+    },
+    "Contact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "company": {
+          "title": "Company",
+          "type": "string"
+        },
+        "lastContactAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lastcontactat"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "company",
+        "lastContactAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Contact",
+      "type": "object"
+    },
+    "Deal": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "contactId": {
+          "title": "Contactid",
+          "type": "string"
+        },
+        "contactName": {
+          "title": "Contactname",
+          "type": "string"
+        },
+        "nextAction": {
+          "title": "Nextaction",
+          "type": "string"
+        },
+        "nextActionDate": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Nextactiondate",
+          "type": "string"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
+        },
+        "lastTouchAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lasttouchat"
+        },
+        "touchCount": {
+          "title": "Touchcount",
+          "type": "integer"
+        },
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "stage",
+        "contactId",
+        "contactName",
+        "nextAction",
+        "nextActionDate",
+        "createdAt",
+        "updatedAt",
+        "lastTouchAt",
+        "touchCount",
+        "active"
+      ],
+      "title": "Deal",
+      "type": "object"
+    },
+    "Due": {
+      "additionalProperties": false,
+      "properties": {
+        "dueDate": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Duedate",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "daysOverdue": {
+          "title": "Daysoverdue",
+          "type": "integer"
+        },
+        "missedPeriods": {
+          "title": "Missedperiods",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dueDate",
+        "status",
+        "daysOverdue",
+        "missedPeriods"
+      ],
+      "title": "Due",
+      "type": "object"
+    },
+    "FollowUp": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "what": {
+          "title": "What",
+          "type": "string"
+        },
+        "who": {
+          "title": "Who",
+          "type": "string"
+        },
+        "dueAt": {
+          "description": "Free text exactly as entered (for example 'This week', 'Next available business day', or a date typed by hand). Never parsed as a date; render it verbatim.",
+          "title": "Dueat",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
+        }
+      },
+      "required": [
+        "id",
+        "what",
+        "who",
+        "dueAt",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "FollowUp",
+      "type": "object"
+    },
+    "MorningBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "generatedFor": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Generatedfor",
+          "type": "string"
+        },
+        "sections": {
+          "$ref": "#/$defs/BriefSections"
+        }
+      },
+      "required": [
+        "available",
+        "generatedFor",
+        "sections"
+      ],
+      "title": "MorningBrief",
+      "type": "object"
+    },
+    "Obligation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "lastCompletedPeriod": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Lastcompletedperiod",
+          "type": "string"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
+        },
+        "cadence": {
+          "$ref": "#/$defs/Cadence"
+        },
+        "nextDue": {
+          "description": "YYYY-MM-DD as recorded (no timezone), or empty.",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "title": "Nextdue",
+          "type": "string"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Due"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "lastCompletedPeriod",
+        "createdAt",
+        "updatedAt",
+        "cadence",
+        "nextDue",
+        "due"
+      ],
+      "title": "Obligation",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Createdat"
+        },
+        "parentId": {
+          "title": "Parentid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "createdAt",
+        "parentId"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "RecentWork": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Startedat"
+        },
+        "completedAt": {
+          "anyOf": [
+            {
+              "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless status is terminal (completed, failed, cancelled).",
+          "title": "Completedat"
+        },
+        "spendUsd": {
+          "title": "Spendusd",
+          "type": "number"
+        },
+        "toolsUsed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Toolsused",
+          "type": "array"
+        },
+        "projectId": {
+          "title": "Projectid",
+          "type": "string"
+        },
+        "background": {
+          "title": "Background",
+          "type": "boolean"
+        },
+        "awaitingInput": {
+          "title": "Awaitinginput",
+          "type": "boolean"
+        },
+        "sourcesCount": {
+          "title": "Sourcescount",
+          "type": "integer"
+        },
+        "artifactNames": {
+          "description": "Deliverable filenames only: no paths, no operation_log.json, no browser targets.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifactnames",
+          "type": "array"
+        },
+        "urlsOpened": {
+          "description": "Hostnames the run opened in the browser (open_browser artifacts), host only — never a path or query string.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Urlsopened",
+          "type": "array"
+        },
+        "openQuestions": {
+          "title": "Openquestions",
+          "type": "integer"
+        },
+        "errorCount": {
+          "title": "Errorcount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "command",
+        "intent",
+        "status",
+        "startedAt",
+        "completedAt",
+        "spendUsd",
+        "toolsUsed",
+        "projectId",
+        "background",
+        "awaitingInput",
+        "sourcesCount",
+        "artifactNames",
+        "urlsOpened",
+        "openQuestions",
+        "errorCount"
+      ],
+      "title": "RecentWork",
+      "type": "object"
+    },
+    "SectionCount": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "empty": {
+          "title": "Empty",
+          "type": "boolean"
+        },
+        "unavailable": {
+          "title": "Unavailable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "empty",
+        "unavailable"
+      ],
+      "title": "SectionCount",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "title": "Application",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "localUtcOffset": {
+          "description": "The exporting PC's local offset at export time, e.g. -05:00. Every timestamp in this document is already UTC; this is context only.",
+          "title": "Localutcoffset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "application",
+        "version",
+        "localUtcOffset"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Summary": {
+      "additionalProperties": false,
+      "properties": {
+        "recentWork": {
+          "description": "Rows in recentWork (capped at 25).",
+          "title": "Recentwork",
+          "type": "integer"
+        },
+        "operationsAwaitingInput": {
+          "description": "Operations parked in awaiting_input across the whole store, not only the recentWork rows. This is the number the morning brief's awaiting_approval section reports; it is NOT approvalsPending.",
+          "title": "Operationsawaitinginput",
+          "type": "integer"
+        },
+        "projects": {
+          "title": "Projects",
+          "type": "integer"
+        },
+        "obligations": {
+          "title": "Obligations",
+          "type": "integer"
+        },
+        "obligationsDue": {
+          "title": "Obligationsdue",
+          "type": "integer"
+        },
+        "approvalsPending": {
+          "description": "Staged gate approvals (invoice, proposal, research plan, ...) still waiting for an answer. Distinct from operationsAwaitingInput.",
+          "title": "Approvalspending",
+          "type": "integer"
+        },
+        "approvalsStale": {
+          "title": "Approvalsstale",
+          "type": "integer"
+        },
+        "contacts": {
+          "title": "Contacts",
+          "type": "integer"
+        },
+        "deals": {
+          "title": "Deals",
+          "type": "integer"
+        },
+        "dealsActive": {
+          "title": "Dealsactive",
+          "type": "integer"
+        },
+        "followUpsOpen": {
+          "title": "Followupsopen",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "recentWork",
+        "operationsAwaitingInput",
+        "projects",
+        "obligations",
+        "obligationsDue",
+        "approvalsPending",
+        "approvalsStale",
+        "contacts",
+        "deals",
+        "dealsActive",
+        "followUpsOpen"
+      ],
+      "title": "Summary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "ridian-operator-snapshot",
+      "title": "Schema",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "generatedAt": {
+      "description": "UTC, RFC 3339, second precision, trailing Z. Null when the source value was blank or unparseable.",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "recentWork": {
+      "items": {
+        "$ref": "#/$defs/RecentWork"
+      },
+      "title": "Recentwork",
+      "type": "array"
+    },
+    "projects": {
+      "items": {
+        "$ref": "#/$defs/Project"
+      },
+      "title": "Projects",
+      "type": "array"
+    },
+    "obligations": {
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      },
+      "title": "Obligations",
+      "type": "array"
+    },
+    "approvals": {
+      "items": {
+        "$ref": "#/$defs/Approval"
+      },
+      "title": "Approvals",
+      "type": "array"
+    },
+    "contacts": {
+      "items": {
+        "$ref": "#/$defs/Contact"
+      },
+      "title": "Contacts",
+      "type": "array"
+    },
+    "deals": {
+      "items": {
+        "$ref": "#/$defs/Deal"
+      },
+      "title": "Deals",
+      "type": "array"
+    },
+    "followUps": {
+      "items": {
+        "$ref": "#/$defs/FollowUp"
+      },
+      "title": "Followups",
+      "type": "array"
+    },
+    "morningBrief": {
+      "$ref": "#/$defs/MorningBrief"
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "generatedAt",
+    "source",
+    "summary",
+    "recentWork",
+    "projects",
+    "obligations",
+    "approvals",
+    "contacts",
+    "deals",
+    "followUps",
+    "morningBrief"
+  ],
+  "title": "OwnerSnapshotV1",
+  "type": "object"
+}
