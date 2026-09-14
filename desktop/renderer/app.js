@@ -206,9 +206,10 @@ const SETTINGS_FIELDS = [
   'quickbooks_client_id',
   'quickbooks_environment',
   'appearance',
+  'twilio_account_sid', 'twilio_from_number', 'sms_recipient_allowlist',
 ];
 const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password',
-  'quickbooks_client_secret'];
+  'quickbooks_client_secret', 'twilio_auth_token'];
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
 // boxes entirely (which would otherwise look like "unset" instead of "false").
@@ -443,6 +444,7 @@ const els = {
   settingsPasswordHint: document.getElementById('settings-password-hint'),
   settingsAnthropicKeyHint: document.getElementById('settings-anthropic-key-hint'),
   settingsQboSecretHint: document.getElementById('settings-qbo-secret-hint'),
+  settingsTwilioTokenHint: document.getElementById('settings-twilio-token-hint'),
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
   googleConnectBtn: document.getElementById('google-connect-btn'),
@@ -3153,6 +3155,15 @@ function applySettingsToForm(settings) {
     } else {
       els.settingsQboSecretHint.className = 'field-hint';
       els.settingsQboSecretHint.textContent = 'No client secret saved yet.';
+    }
+  }
+  if (els.settingsTwilioTokenHint) {
+    if (settings.twilio_auth_token_configured) {
+      els.settingsTwilioTokenHint.className = 'field-hint is-ok';
+      els.settingsTwilioTokenHint.textContent = 'A Twilio Auth Token is currently saved. Leave blank to keep it; type a new one to replace it.';
+    } else {
+      els.settingsTwilioTokenHint.className = 'field-hint';
+      els.settingsTwilioTokenHint.textContent = 'No Twilio Auth Token saved yet. Texts go only to the labels listed under Recipients, and only after you approve each one.';
     }
   }
   if (els.settingsOutputsPath) els.settingsOutputsPath.textContent = settings.outputs_path || '—';
@@ -6838,6 +6849,8 @@ function _wireKeyTest(btnId, statusId, endpoint, dotId) {
 }
 _wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic', 'settings-dot-anthropic');
 _wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
+// v7.0: Twilio — the test reads the Account resource; it never sends a text.
+_wireKeyTest('settings-test-twilio', 'settings-twilio-status', '/settings/test-twilio', 'settings-dot-twilio');
 
 /* v5.0 Phase 2: Drive + Gmail as first-class Settings rows. One Google
    sign-in covers both; each row verifies ITS service with a real API call

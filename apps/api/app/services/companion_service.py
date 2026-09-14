@@ -296,6 +296,7 @@ _DEVICE_APPROVABLE_REASONS = frozenset({
     "invoice_plan_pending",       # the couch-approval use case
     "proposal_plan_pending",      # writes a document, non-destructive
     "research_plan_pending",      # approves spend, non-destructive
+    "sms_send_pending",           # v7.0: one text to an allowlisted label, preview shown
 })
 
 

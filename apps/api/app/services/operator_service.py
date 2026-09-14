@@ -55,6 +55,8 @@ from .operator_tools import (
     detect_source_lock,
     extract_emails,
     extract_stated_numbers,
+    SMS_CANCEL,
+    SMS_PROCEED,
 )
 from .settings_service import (
     apply_to_environment,
@@ -133,6 +135,10 @@ def _finalized_view(record: dict) -> dict:
         # at intake. Persisted so every run's true cost survives in history.
         "spend_usd": round(float(record.get("spend_usd", 0.0) or 0.0), 4),
         "cost_ceiling_usd": record.get("cost_ceiling_usd"),
+        # v7.0: texts this run sent — Twilio message SID, status, price. The
+        # recipient number rides here (it is the operator's own allowlist);
+        # the Owner Snapshot exporter denies this field, so it never travels.
+        "sms_messages": list(record.get("sms_messages") or []),
         # v3.3: review-email fields. "command" above is the ORIGINAL initiating
         # request (set once at intake; a /continue never overwrites it — resume
         # answers only ride the start EVENT payload). These carry the research
@@ -856,6 +862,29 @@ def _apply_proposal_answer(operator: OperatorContext, answer: str) -> str:
     return ""
 
 
+def _apply_sms_answer(operator: OperatorContext, answer: str) -> str:
+    """Resolve a pending text-message preview from the operator's answer —
+    the ONLY writer of record["sms_approved"] / ["sms_declined"]
+    (operator_tools._sms_approval_gate checks the flags plus a
+    label+number+body signature in code; the planner can't set them).
+    Mirrors the invoice gate."""
+    rec = operator.record
+    if (not rec.get("sms_send_asked")
+            or rec.get("sms_approved") or rec.get("sms_declined")):
+        return ""
+    a = (answer or "").strip()
+    if a == SMS_PROCEED or _RESEARCH_APPROVE_RE.match(a):
+        rec["sms_approved"] = True
+        return ("The operator APPROVED the previewed text message. Call "
+                "send_sms again with the SAME arguments.")
+    if a == SMS_CANCEL or _RESEARCH_DECLINE_RE.match(a):
+        rec["sms_declined"] = True
+        return ("The operator DECLINED the text message. Do not send it; "
+                "acknowledge briefly in your receipt.")
+    rec["sms_send_asked"] = False   # unrecognized → re-present on next call
+    return ""
+
+
 def _apply_contact_admin_answer(operator: OperatorContext, answer: str) -> str:
     """Resolve a pending contact merge/delete preview from the operator's
     resume answer — the ONLY writer of record["contact_admin_approved"] /
@@ -1146,6 +1175,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
                 _apply_contact_admin_answer(operator, answer),
                 _apply_restore_answer(operator, answer),
                 _apply_item_selection_answer(operator, answer),
+                _apply_sms_answer(operator, answer),
             ) if n
         ]
         # v6.0 Phase 3: an answer given IN-THREAD resolves the staged inbox

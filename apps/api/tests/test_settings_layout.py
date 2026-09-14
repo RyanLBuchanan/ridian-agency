@@ -43,9 +43,9 @@ def test_every_settings_row_is_a_self_contained_block():
     status line — QuickBooks included, with no special case."""
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     form = html.split('id="settings-form"', 1)[1].split("</form>", 1)[0]
-    assert form.count('class="settings-block"') == 9   # + Owner snapshot (v1)
+    assert form.count('class="settings-block"') == 10  # + Owner snapshot (v1), Text (SMS) (v7.0)
     # Every status note lives INSIDE a block, never as a bare sibling of it.
-    for label in ("Anthropic", "OpenAI", "QuickBooks", "Drive", "Gmail",
+    for label in ("Anthropic", "OpenAI", "QuickBooks", "Text (SMS)", "Drive", "Gmail",
                   "Calendar", "Phone"):
         idx = form.find(f">{label}<")
         assert idx != -1, label
@@ -90,7 +90,7 @@ def test_no_text_collides_at_any_width(harness_output):
     """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
     painted elements from different rows share pixels."""
     for width in (1280, 1100, 1000, 940, 880):
-        assert f"{width}px: 9 blocks" in harness_output, harness_output[-3000:]   # + Owner snapshot (v1)
+        assert f"{width}px: 10 blocks" in harness_output, harness_output[-3000:]  # + Owner snapshot (v1), Text (SMS) (v7.0)
 
 
 def test_morning_brief_claims_the_chat_pane_cell(harness_output):

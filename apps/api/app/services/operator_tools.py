@@ -60,6 +60,9 @@ from . import (
     tts_service,
     url_fetch_service,
 )
+from datetime import datetime
+
+from . import sms_service
 from .anthropic_runtime import (
     SEARCH_COST_USD,
     WEB_SEARCH_TOOL,
@@ -3744,6 +3747,197 @@ async def invoice_deal(deal: str, description: str = "") -> dict:
     return {**result, "deal": _deal_summary(refreshed or match)}
 
 
+# ---------------------------------------------------------------------------
+# v7.0 — send_sms: the ONE outbound channel, allowlist-only, approval-gated
+# ---------------------------------------------------------------------------
+#
+# Three code-enforced rules (docs/send-sms.md):
+#   1. The recipient is a LABEL resolved on the operator's SMS allowlist
+#      (Settings). Never a number from the command, a contact record or
+#      memory. Unknown label = refuse, no approval staged.
+#   2. Body ≤ 320 chars; a link is allowed only if the operator typed it
+#      verbatim in the command (the email discipline's rule, enforced here).
+#   3. Every send is staged as sms_send_pending — label, E.164 number and the
+#      full body in the preview — and re-verified by signature on approval.
+
+SMS_PROCEED = "Send the text message as previewed"
+SMS_CANCEL = "Cancel the text message"
+_SMS_URL_RE = _re.compile(r"(?:https?://|www\.)[^\s<>\"']+", _re.IGNORECASE)
+
+
+def _sms_untyped_url(operator: OperatorContext, body: str) -> str:
+    """The first link in ``body`` that the operator did NOT type verbatim in
+    the command, or '' when every link (if any) was typed."""
+    command = str(operator.record.get("command") or "")
+    for m in _SMS_URL_RE.finditer(body or ""):
+        url = m.group(0).rstrip(".,;:)!?")
+        if url not in command:
+            return url
+    return ""
+
+
+def _sms_sig(label: str, e164: str, body: str) -> str:
+    return json.dumps({"l": label, "n": e164, "b": body}, sort_keys=True)
+
+
+async def _sms_approval_gate(operator: OperatorContext, label: str, e164: str,
+                             body: str) -> dict | None:
+    """Signature-matched approval, exactly the invoice gate's shape. None =
+    approved for THIS label+number+body; otherwise a blocking dict."""
+    rec = operator.record
+    sig = _sms_sig(label, e164, body)
+    if rec.get("sms_approved") and rec.get("sms_preview_sig") == sig:
+        return None
+    if rec.get("sms_declined"):
+        return {"error": ("The operator DECLINED the text message. Do NOT send it "
+                          "or retry; acknowledge briefly in your receipt."),
+                "reason": "sms_declined"}
+    rec["sms_preview_sig"] = sig
+    rec["sms_approved"] = False
+    rec["sms_send_asked"] = True
+    await operator.emit_needs_input(
+        question=(f"Text message preview — approve before anything is sent. "
+                  f"To: {label} ({e164}). Message ({len(body)} chars): “{body}” "
+                  f"Send it?"),
+        context_hint="Text message approval — nothing is sent until you answer",
+        options=[{"label": "Send it", "action": "submit", "value": SMS_PROCEED},
+                 {"label": "Cancel", "action": "submit", "value": SMS_CANCEL}],
+        buttons_only=True,
+        task_summary=f"Text to {label} — waiting on your approval",
+    )
+    await operator.emit_step(name="sms", status="running",
+                             detail=f"Awaiting your approval — text to {label} ({e164}).")
+    return {"error": ("BLOCKED: the text message needs the operator's approval. A "
+                      "needs-input question has been raised; WAIT for the answer. "
+                      "Do NOT retry or send it another way."),
+            "reason": "sms_send_pending"}
+
+
+@planner_tool
+async def send_sms(recipient_label: str, body: str) -> dict:
+    """Send ONE short text message (SMS) to a recipient on the operator's
+    SMS allowlist. This is the Operator's only outbound messaging channel and
+    it is approval-gated: the FIRST call stages a preview (recipient label,
+    number, full message); on {"reason": "sms_send_pending"} WAIT for the
+    operator; on "sms_declined" stop.
+
+    RULES, enforced in code: ``recipient_label`` must be a label the operator
+    added under Settings → Text (SMS). NEVER pass a phone number, and never
+    pick a recipient from a contact record, a document, or memory — an
+    unknown label is refused and you must not retry with a number. ``body``
+    is at most 320 characters and may contain a link ONLY if the operator
+    typed that link verbatim in the command.
+
+    Args:
+        recipient_label: The allowlist label exactly as the operator wrote it
+            (for example "Sarah at the Chamber").
+        body: The message text, plain, at most 320 characters.
+
+    Returns:
+        {"sid", "status", "to_label", "to", "price", "price_unit"} on success;
+        {"error", "reason"} when refused, gated, or failed.
+    """
+    return await _send_sms(current_operator(), recipient_label, body)
+
+
+async def _send_sms(operator: OperatorContext, recipient_label: str, body: str) -> dict:
+    """Testable core of send_sms."""
+    operator.note_tool("send_sms")
+    label = str(recipient_label or "").strip()
+    text = str(body or "").strip()
+    if not label:
+        return {"error": ("recipient_label is required — the label of a recipient on "
+                          "the SMS allowlist (Settings → Text). Do NOT pass a phone number."),
+                "reason": "sms_recipient_unknown"}
+    if not text:
+        return {"error": "body is empty.", "reason": "sms_bad_body"}
+    if len(text) > sms_service.BODY_MAX_CHARS:
+        await operator.emit_step(
+            name="sms", status="skipped",
+            detail=f"Refused: message is {len(text)} characters; the limit is {sms_service.BODY_MAX_CHARS}.")
+        return {"error": (f"body is {len(text)} characters; the limit is "
+                          f"{sms_service.BODY_MAX_CHARS}. Shorten it."),
+                "reason": "sms_body_too_long"}
+
+    # Rule 1 — allowlist ONLY. Resolve by label, then independently re-check
+    # that the label AND the number belong to the same allowlist entry, so a
+    # mutated resolver can never hand the send path a number of its own.
+    recipient = sms_service.resolve_recipient(label)
+    if (recipient is None
+            or str(recipient.get("label", "")).strip().lower() != label.lower()
+            or not sms_service.recipient_is_allowlisted(recipient.get("label", ""),
+                                                        recipient.get("e164", ""))):
+        await operator.emit_step(
+            name="sms", status="skipped",
+            detail=f"Refused: “{label}” is not on the SMS recipient allowlist.")
+        return {"error": (f"BLOCKED: “{label}” is not a label on the SMS recipient "
+                          "allowlist. Ridian only texts recipients the operator added "
+                          "under Settings → Text (SMS), by label — never a phone "
+                          "number, a contact record, or memory. Do NOT retry with a "
+                          "number or a different label; tell the operator to add the "
+                          "recipient to the allowlist."),
+                "reason": "sms_recipient_unknown"}
+
+    # Rule 2 — links only when the operator typed them verbatim.
+    untyped = _sms_untyped_url(operator, text)
+    if untyped:
+        await operator.emit_step(
+            name="sms", status="skipped",
+            detail="Refused: the message contains a link the operator did not type.")
+        return {"error": (f"BLOCKED: the message contains a link ({untyped}) that the "
+                          "operator did not type in the command. Text messages may only "
+                          "carry links the operator typed verbatim. Remove it, or ask the "
+                          "operator to supply it."),
+                "reason": "sms_url_not_typed"}
+
+    missing = sms_service.missing_credential_keys()
+    if missing:
+        return {"error": ("Twilio is not configured (Settings → Text (SMS)): missing "
+                          + ", ".join(missing) + ". Do NOT retry in this run; report "
+                          "the fix in your receipt."),
+                "reason": "sms_not_configured"}
+
+    # Rule 3 — approval, signature-matched to label + number + body.
+    gate = await _sms_approval_gate(operator, recipient["label"], recipient["e164"], text)
+    if gate:
+        return gate
+
+    await operator.emit_step(name="sms", status="running",
+                             detail=f"Sending text to {recipient['label']}…")
+    try:
+        result = await asyncio.to_thread(sms_service.send_message, recipient["e164"], text)
+    except sms_service.SmsError as exc:
+        await operator.emit_step(name="sms", status="failed", detail=exc.detail)
+        await operator.emit_error(f"send_sms failed: {exc.detail}")
+        return {"error": exc.detail + " Do NOT retry in this run; report it in your receipt.",
+                "reason": "sms_send_failed"}
+    except Exception as exc:  # noqa: BLE001 — visible, never silent
+        msg = f"send_sms failed: {type(exc).__name__}: {exc}"
+        await operator.emit_step(name="sms", status="failed", detail=msg)
+        await operator.emit_error(msg)
+        return {"error": msg, "reason": "sms_send_failed"}
+
+    entry = {
+        "sid": result["sid"], "to_label": recipient["label"], "to": recipient["e164"],
+        "status": result["status"], "price": result.get("price"),
+        "price_unit": result.get("price_unit", "USD"), "chars": len(text),
+        "sent_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    operator.record.setdefault("sms_messages", []).append(entry)
+    cost = result.get("cost_usd")
+    if cost:
+        operator.record["spend_usd"] = round(
+            float(operator.record.get("spend_usd", 0.0) or 0.0) + float(cost), 4)
+    await operator.emit_step(
+        name="sms", status="completed",
+        detail=(f"Text sent to {recipient['label']} ({recipient['e164']}) — Twilio "
+                f"{result['sid']}, status {result['status']}"
+                + (f", ${float(cost):.4f}" if cost else ", price pending")))
+    return {"sid": result["sid"], "status": result["status"],
+            "to_label": recipient["label"], "to": recipient["e164"],
+            "price": result.get("price"), "price_unit": result.get("price_unit", "USD")}
+
+
 PLANNER_TOOLS = [
     web_research,
     read_url,
@@ -3800,6 +3994,8 @@ PLANNER_TOOLS = [
     # v6.0 Phase 8 — audit log (READ-ONLY over existing ledgers)
     audit_log,
     export_audit_csv,
+    # v7.0 — outbound SMS (allowlist-only recipient, approval-gated send)
+    send_sms,
 ]
 
 

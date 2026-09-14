@@ -732,6 +732,7 @@
                       <option value="contact_admin">Contact admin</option>
                       <option value="backup_restore">Backup restore</option>
                       <option value="research">Research</option>
+                      <option value="sms">Text message</option>
                       <option value="gated_action">Other gated</option>
                     </select></label>
                   <label class="audit-filter"><span>Outcome</span>
@@ -843,6 +844,33 @@
                     <div class="settings-row-note">
                       <span id="settings-qbo-secret-hint"></span>
                       <span id="settings-qb-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <!-- v7.0 Twilio SMS. Credentials are DPAPI-wrapped at rest;  -->
+                  <!-- Test reads the Account resource and sends nothing. The   -->
+                  <!-- allowlist is the ONLY source of a recipient number.      -->
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-twilio" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Text (SMS)</span>
+                      <input name="twilio_account_sid" type="text" autocomplete="off" placeholder="Twilio Account SID" class="settings-input" />
+                      <input name="twilio_from_number" type="text" autocomplete="off" placeholder="From number (+1…)" class="settings-input settings-input-compact" />
+                      <button id="settings-test-twilio" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    </div>
+                    <div class="settings-row settings-row-sub">
+                      <span class="settings-dot is-blank" aria-hidden="true"></span>
+                      <span class="settings-row-label"></span>
+                      <input name="twilio_auth_token" type="password" autocomplete="new-password" placeholder="Auth Token" class="settings-input" />
+                    </div>
+                    <div class="settings-row settings-row-sub">
+                      <span class="settings-dot is-blank" aria-hidden="true"></span>
+                      <span class="settings-row-label">Recipients</span>
+                      <textarea name="sms_recipient_allowlist" rows="3" class="settings-input settings-textarea" placeholder="One per line: Label = +15550100123&#10;Ridian only ever texts these labels."></textarea>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-twilio-token-hint"></span>
+                      <span id="settings-twilio-status" role="status" aria-live="polite"></span>
                     </div>
                   </div>
 

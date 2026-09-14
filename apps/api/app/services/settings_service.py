@@ -94,13 +94,21 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "watch_deal_quiet_days",
     "watch_invoice_grace_days",
     "watch_push_enabled",
+    # v7.0: outbound SMS via Twilio (sms_service / operator_tools.send_sms).
+    # All three credentials are DPAPI-wrapped at rest; the token is a SECRET
+    # (write-only). The allowlist is "Label = +E164" lines — the ONLY source
+    # of a recipient number the send path will ever use.
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_from_number",
+    "sms_recipient_allowlist",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when
 # the GUI submits an empty field (so the renderer never round-trips them).
 SECRET_KEYS: frozenset[str] = frozenset({
     "smtp_password", "openai_api_key", "anthropic_api_key",
-    "quickbooks_client_secret",
+    "quickbooks_client_secret", "twilio_auth_token",
 })
 
 PUBLIC_KEYS: tuple[str, ...] = tuple(k for k in SETTABLE_KEYS if k not in SECRET_KEYS)
@@ -124,7 +132,13 @@ _SDK_ENV_MAP: dict[str, str] = {
 # from a different Windows account fails CLOSED — the value reads as blank
 # and the operator re-enters it, never a crash, never a silent wrong value.
 _DPAPI_PREFIX = "dpapi1:"
-_DPAPI_ENCRYPTED_KEYS: frozenset[str] = frozenset({"quickbooks_client_secret"})
+_DPAPI_ENCRYPTED_KEYS: frozenset[str] = frozenset({
+    "quickbooks_client_secret",
+    # v7.0: every Twilio credential is encrypted at rest, like the QuickBooks
+    # token — the SID and From number are not secrets in Twilio's model, but
+    # together with the token they are the complete sending identity.
+    "twilio_account_sid", "twilio_auth_token", "twilio_from_number",
+})
 
 
 def _encrypt_value(plain: str) -> str:
@@ -261,6 +275,7 @@ def public_view() -> dict[str, Any]:
         _set("anthropic_api_key") or (os.getenv("ANTHROPIC_API_KEY") or "").strip()
     )
     out["quickbooks_client_secret_configured"] = _set("quickbooks_client_secret")
+    out["twilio_auth_token_configured"] = _set("twilio_auth_token")
     return out
 
 

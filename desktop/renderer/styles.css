@@ -4886,6 +4886,14 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 .settings-input-compact { max-width: 170px; }
+/* v7.0: the SMS recipient allowlist — one "Label = +E164" per line. */
+.settings-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.4;
+}
 .settings-toggle {
   display: inline-flex;
   align-items: center;

@@ -53,6 +53,7 @@ _GATE_FLAGS = {
                         "restore_declined"),
     "research_plan_pending": ("research_plan_asked", "research_approved",
                               "research_declined"),
+    "sms_send_pending": ("sms_send_asked", "sms_approved", "sms_declined"),
 }
 
 
@@ -260,6 +261,7 @@ async def answer_approval(approval_id: str, value: str) -> dict:
         _osvc._apply_proposal_answer(operator, value),
         _osvc._apply_contact_admin_answer(operator, value),
         _osvc._apply_restore_answer(operator, value),
+        _osvc._apply_sms_answer(operator, value),
     ) if n]
     approved = any("APPROVED" in n for n in notes)
     declined = any("DECLINED" in n for n in notes)

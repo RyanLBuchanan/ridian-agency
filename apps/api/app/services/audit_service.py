@@ -35,8 +35,10 @@ _TYPE_BY_REASON = {
     "contact_admin_pending": "contact_admin",
     "restore_pending": "backup_restore",
     "research_plan_pending": "research",
+    "sms_send_pending": "sms",
 }
 _TYPE_BY_TOOL = {
+    "send_sms": "sms",
     "create_quickbooks_invoice": "invoice",
     "invoice_deal": "invoice",
     "draft_proposal": "proposal",
@@ -54,11 +56,12 @@ _TYPE_BY_HINT = (
     ("contact delete", "contact_admin"),
     ("backup restore", "backup_restore"),
     ("research plan", "research"),
+    ("text message", "sms"),
 )
 
 OUTCOMES = ("approved", "declined", "pending", "unknown")
 TYPES = ("invoice", "proposal", "contact_admin", "backup_restore", "research",
-         "gated_action")
+         "sms", "gated_action")
 
 _CSV_FIELDS = ("staged_at", "answered_at", "type", "outcome", "outcome_source",
                "action", "question", "command", "operation_id", "cost_usd",

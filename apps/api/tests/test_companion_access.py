@@ -569,11 +569,23 @@ def test_paired_phone_may_answer_the_couch_approvals():
     lan, _device = _paired_lan()
     for reason, tool in (("invoice_plan_pending", "create_quickbooks_invoice"),
                          ("proposal_plan_pending", "write_proposal"),
-                         ("research_plan_pending", "research_topic")):
+                         ("research_plan_pending", "research_topic"),
+                         ("sms_send_pending", "send_sms")):
         appr_id = _stage(reason, tool=tool)
         r = lan.post("/approvals/answer", headers=HDR,
                      json={"id": appr_id, "value": "cancel"})
         assert r.status_code == 200, f"{reason}: {r.text}"
+
+
+def test_approval_kind_allowlist_is_exactly_the_four_couch_kinds():
+    """v7.0 added sms_send_pending (one text to an allowlisted label, full
+    preview shown). Nothing else changed: the set is pinned EXACTLY so a
+    future kind cannot slip onto the phone by accident."""
+    from app.services import companion_service as c
+    assert set(c._DEVICE_APPROVABLE_REASONS) == {
+        "invoice_plan_pending", "proposal_plan_pending",
+        "research_plan_pending", "sms_send_pending"}
+    assert c.device_may_answer_approval("sms_send_pending")
 
 
 def test_approval_kind_allowlist_is_deny_by_default():

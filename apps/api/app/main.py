@@ -498,6 +498,13 @@ class SettingsView(BaseModel):
     watch_deal_quiet_days: str = ""
     watch_invoice_grace_days: str = ""
     watch_push_enabled: str = ""
+    # v7.0 Twilio SMS. SID and From number are shown; the Auth Token is
+    # exposed ONLY as a configured flag. The allowlist is the canonical
+    # "Label = +E164" text (normalized on save).
+    twilio_account_sid: str = ""
+    twilio_from_number: str = ""
+    twilio_auth_token_configured: bool = False
+    sms_recipient_allowlist: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
     # so the renderer can show a clear, actionable warning if the configured
@@ -543,6 +550,10 @@ class SettingsUpdate(BaseModel):
     watch_deal_quiet_days: str | None = None
     watch_invoice_grace_days: str | None = None
     watch_push_enabled: str | None = None
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from_number: str | None = None
+    sms_recipient_allowlist: str | None = None
 
 
 class KeyTestResponse(BaseModel):
@@ -993,6 +1004,14 @@ async def settings_test_openai() -> KeyTestResponse:
         settings_service.test_api_key, "openai"))
 
 
+@app.post("/settings/test-twilio", response_model=KeyTestResponse)
+async def settings_test_twilio() -> KeyTestResponse:
+    """v7.0: one READ of Twilio's Account resource proving the SID/token
+    pair works. Sends nothing; never returns or logs the credentials."""
+    from .services import sms_service
+    return KeyTestResponse(**await asyncio.to_thread(sms_service.test_connection))
+
+
 @app.post("/google/test-drive", response_model=KeyTestResponse)
 async def google_test_drive() -> KeyTestResponse:
     """One REAL Drive call (about.get) proving the connection works —
@@ -1100,6 +1119,25 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
         raw_present = bool(raw.strip())
     else:
         raw_present = False
+
+    # v7.0: the SMS allowlist and From number are validated BEFORE anything is
+    # saved — a malformed line is a refused save with the line named, never a
+    # half-saved allowlist. The stored form is canonical "Label = +E164".
+    if "sms_recipient_allowlist" in updates or "twilio_from_number" in updates:
+        from .services import sms_service
+        try:
+            if "sms_recipient_allowlist" in updates:
+                entries = sms_service.parse_allowlist(updates["sms_recipient_allowlist"] or "")
+                updates["sms_recipient_allowlist"] = sms_service.format_allowlist(entries)
+            raw_from = (updates.get("twilio_from_number") or "").strip() if "twilio_from_number" in updates else ""
+            if raw_from:
+                normalized_from = sms_service.normalize_e164(raw_from)
+                if not normalized_from:
+                    raise sms_service.SmsError(
+                        "The Twilio From number must be E.164 (+ country code then digits, e.g. +15550100123).")
+                updates["twilio_from_number"] = normalized_from
+        except sms_service.SmsError as exc:
+            raise HTTPException(status_code=400, detail=f"Text (SMS) settings not saved — {exc.detail}")
 
     settings_service.save_settings(updates)
     settings_service.apply_to_environment()

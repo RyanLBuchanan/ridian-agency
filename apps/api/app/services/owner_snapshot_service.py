@@ -109,6 +109,8 @@ DENY_SOURCE_FIELDS: frozenset[str] = frozenset({
     "steps", "receipt", "needs_input", "proposed_memory_updates",
     "source_titles", "errors", "artifacts", "artifact_folder", "path",
     "reconciliation", "research_approved", "research_declined",
+    # v7.0: texts sent by a run — carries the recipient's number.
+    "sms_messages",
     "audio_generated", "audio_duration_seconds", "cost_ceiling_usd",
     # approval internals: planner kwargs, offered options, gate evidence
     "kwargs", "options", "gate_flags", "user_stated_numbers",
