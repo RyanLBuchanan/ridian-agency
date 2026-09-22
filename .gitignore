@@ -31,6 +31,7 @@ apps/api/exports/
 
 # Outputs (generated artifacts)
 outputs/*/
+outputs/*.zip
 !outputs/.gitkeep
 
 # Electron desktop GUI
