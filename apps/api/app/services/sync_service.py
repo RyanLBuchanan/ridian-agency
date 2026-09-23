@@ -55,6 +55,9 @@ THE RULES, each pinned by tests/test_owner_workspace_sync.py:
      push the site accepted (sha256 of the canonical document without
      generatedAt and source.localUtcOffset) is remembered; a trigger or the
      timer that finds the same hash records "unchanged" and sends nothing.
+     Exception (v7.3): the first push after a pairing ALWAYS sends, so the
+     new token is exercised at once — force_next_push is set by _connect and
+     cleared only by a push the site accepted.
 
 The loopback-only routes in main.py are the only callers of pair(),
 start_browser_pairing(), cancel_browser_pairing(),
@@ -352,6 +355,7 @@ def _connect(site: str, label: str, token: str, expires: Optional[_dt.datetime],
             "last_error": "",
             "last_snapshot_id": "",
             "last_pushed_content_hash": "",
+            "force_next_push": True,
             "last_checked_iso": "",
             "refresh_unsupported_until_iso": "",
             "disconnected_reason": "",
@@ -414,7 +418,19 @@ def status_view() -> dict:
         "next_attempt_iso": engine.next_attempt_iso() if (engine is not None and connected) else "",
         "sync_running": engine is not None,
         "pairing": pairing_view(),
+        "jobs": _jobs_view(),
     }
+
+
+def _jobs_view() -> Optional[dict]:
+    """Ridian Jobs state for the same Settings block (v7.3). Never the
+    command text; None when the jobs module cannot answer."""
+    try:
+        from . import jobs_service  # lazy: jobs_service imports this module
+        return jobs_service.status_view()
+    except Exception:  # noqa: BLE001 — status must always render
+        log.warning("owner_sync.jobs_view_failed", exc_info=True)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +501,7 @@ def _record_push(connection_id: str, site: str, resp: httpx.Response,
         snapshot_id = str(data.get("snapshotId") or "")[:64]
         _update(connection_id, last_attempt_iso=now, last_success_iso=now, last_checked_iso=now,
                 last_result=result, last_error="", last_snapshot_id=snapshot_id,
-                last_pushed_content_hash=content_hash)
+                last_pushed_content_hash=content_hash, force_next_push=False)
         log.info("owner_sync.pushed result=%s snapshot=%s sha256=%s bytes=%s reasons=%s",
                  result, snapshot_id, str(data.get("sha256") or "")[:12], data.get("bytes"),
                  ",".join(reasons) or "-")
@@ -593,8 +609,10 @@ def push_now(reasons: Optional[list] = None) -> tuple[str, Optional[float]]:
                     last_error=exc.detail)
             log.warning("owner_sync.snapshot_refused code=%s", exc.code or "refused")
             return exc.code or "refused", 0.0
-        if content_hash and content_hash == data.get("last_pushed_content_hash"):
-            # Rule 6: the site already holds exactly this content.
+        if (content_hash and content_hash == data.get("last_pushed_content_hash")
+                and not data.get("force_next_push")):
+            # Rule 6: the site already holds exactly this content (and this
+            # is not the first push of a new pairing).
             _update(connection_id, last_checked_iso=_iso(now), last_result="unchanged", last_error="")
             log.info("owner_sync.unchanged reasons=%s", ",".join(reasons) or "-")
             return "unchanged", None

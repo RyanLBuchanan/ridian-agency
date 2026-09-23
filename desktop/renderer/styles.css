@@ -1410,6 +1410,16 @@ body {
   font-size: 0.68rem;
   color: var(--color-muted-soft);
 }
+/* v7.3 Ridian Jobs: a run the owner sent from the Owner Workspace. */
+.rail-thread-source {
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  letter-spacing: 0.02em;
+}
+.settings-ows-jobs { display: block; }
+.settings-ows-jobs:empty { display: none; }
+.settings-ows-jobs.is-err { color: var(--color-error-text); font-weight: 600; }
 
 .rail-settings {
   display: flex;

@@ -57,6 +57,7 @@ from .services import project_service  # noqa: E402
 from .services import push_service  # noqa: E402
 from .services import quickbooks_service  # noqa: E402
 from .services import sync_service  # noqa: E402
+from .services import jobs_service  # noqa: E402
 from .services import speech_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
@@ -119,12 +120,17 @@ async def _lifespan(_app):
     when push is disabled (the default).
 
     v7.1: the Owner Workspace sync engine starts here and stops on
-    shutdown. It sends nothing until the owner connects in Settings."""
+    shutdown. It sends nothing until the owner connects in Settings.
+
+    v7.3: so does the Ridian Jobs engine, on this event loop. It claims
+    nothing until the owner connects AND allows this PC to run commands."""
     push_service.startup_catch_up()
     sync_service.start_engine()
+    jobs_service.start_engine()
     try:
         yield
     finally:
+        jobs_service.stop_engine()
         sync_service.stop_engine()
 
 

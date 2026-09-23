@@ -112,7 +112,7 @@ something changed. A change can happen without any write, for example a
 due date arriving or a new calendar event in the brief; the timer is what
 sends those. A push the site did not accept (429, 5xx, a refusal, a network
 failure) does not count, so the same content goes out on the next attempt.
-A new connection always sends its first snapshot.
+A new connection always sends its first snapshot: pairing sets `force_next_push`, and only a push the site accepts clears it (v7.3), so the new token is exercised at once.
 
 ## Failures
 

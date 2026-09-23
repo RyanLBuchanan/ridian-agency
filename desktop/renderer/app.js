@@ -6309,7 +6309,9 @@ async function loadOperatorRun(run) {
   _opSetStatusDot(log.status || 'completed');
 
   // Echo the command above the timeline so the operator knows what's loaded.
-  _opRenderCommandEcho(log.command || run.name || '(no command recorded)');
+  // v7.3: a command sent from the Owner Workspace says so instead of "You".
+  _opRenderCommandEcho(log.command || run.name || '(no command recorded)',
+    log.source === 'owner-workspace' ? 'From Owner Workspace' : 'You');
 
   // Replay the timeline using the same helper the live SSE path uses.
   (log.steps || []).forEach((step) => _opRenderStep(step));
@@ -6373,7 +6375,7 @@ async function loadOperatorRun(run) {
   });
 }
 
-function _opRenderCommandEcho(text) {
+function _opRenderCommandEcho(text, who = 'You') {
   if (!OPERATOR.active) return;
   // Reuse a single command-echo node so re-renders don't stack.
   let echo = OPERATOR.active.querySelector('.operator-command-echo');
@@ -6391,7 +6393,8 @@ function _opRenderCommandEcho(text) {
   echo.innerHTML = '';
   const label = document.createElement('span');
   label.className = 'operator-command-echo-label';
-  label.textContent = 'You';
+  label.textContent = who;
+  echo.classList.toggle('is-owner-workspace', who !== 'You');
   const body = document.createElement('span');
   body.className = 'operator-command-echo-body';
   body.textContent = text;
@@ -7041,6 +7044,13 @@ function _owsRender(s) {
   }
   const status = document.getElementById('settings-ows-status');
   if (status) status.textContent = text;
+  // v7.3 Ridian Jobs: only while connected; never the command text.
+  const jobsLine = document.getElementById('settings-ows-jobs');
+  if (jobsLine) {
+    const jobs = s.connected && s.jobs ? s.jobs : null;
+    jobsLine.textContent = jobs && jobs.text ? jobs.text + (jobs.last_error ? ` · ${jobs.last_error}` : '') : '';
+    jobsLine.classList.toggle('is-err', !!jobs && jobs.state === 'not_allowed');
+  }
   const note = document.getElementById('settings-ows-note');
   if (note) {
     const site = s.connected ? s.site : s.configured_site;
@@ -7821,6 +7831,14 @@ function _railRenderThreads() {
     }
     btn.appendChild(label);
     btn.appendChild(when);
+    // v7.3 Ridian Jobs: a command the owner sent from the Owner Workspace.
+    if (op.source === 'owner-workspace') {
+      const from = document.createElement('span');
+      from.className = 'rail-thread-source';
+      from.textContent = 'From Owner Workspace';
+      btn.appendChild(from);
+      btn.title = `${cmd} — From Owner Workspace`;
+    }
     // v3.6: unseen background outcome → dot badge (green done, amber attn).
     const bgState = _bgRuns[op.id];
     if (bgState === 'done' || bgState === 'attn') {

@@ -330,6 +330,31 @@ def _operations() -> list[dict]:
             if isinstance(op, dict)]
 
 
+def scrub_free_text(value: Any) -> str:
+    """The exporter's free-text scrub, for callers outside the snapshot
+    (v7.3: a Ridian Jobs result's replyText). Local paths and the data
+    directory removed, email addresses and phone numbers replaced, then
+    self-checked; raises SnapshotPolicyError when a contact detail survives."""
+    return _Coercer().freetext(value)
+
+
+def deliverable_names(op: Any, c: Optional[_Coercer] = None) -> list[str]:
+    """recentWork.artifactNames for one operation: deliverable FILENAMES
+    only (the local path is never read), browser targets and the run's own
+    operation_log.json left out, path-scrubbed, capped. Shared with the
+    Ridian Jobs result so both report deliverables the same way."""
+    c = c or _Coercer()
+    artifacts = op.get("artifacts") if isinstance(op, dict) and isinstance(op.get("artifacts"), list) else []
+    names: list[str] = []
+    for a in artifacts:
+        if not isinstance(a, dict) or not a.get("name") or a.get("kind") == "browser":
+            continue
+        name = os.path.basename(str(a.get("name")))
+        if name and name != "operation_log.json":
+            names.append(c.text(name))
+    return names[:LIST_ITEM_MAX]
+
+
 def _recent_work(c: _Coercer, operations: list[dict]) -> list[dict]:
     out = []
     for op in operations[:RECENT_WORK_LIMIT]:
@@ -337,22 +362,15 @@ def _recent_work(c: _Coercer, operations: list[dict]) -> list[dict]:
         if row["status"] not in TERMINAL_STATUSES:
             row["completedAt"] = None            # parked or running: not finished
         artifacts = op.get("artifacts") if isinstance(op.get("artifacts"), list) else []
-        names: list[str] = []
         hosts: list[str] = []
         for a in artifacts:
-            if not isinstance(a, dict) or not a.get("name"):
-                continue
-            if a.get("kind") == "browser":
+            if isinstance(a, dict) and a.get("name") and a.get("kind") == "browser":
                 host = _hostname(str(a.get("name")))
                 if host and host not in hosts:
                     hosts.append(host)
-                continue
-            # Filenames only — the artifact's local path is never read — and
-            # the run's own ledger file is bookkeeping, not a deliverable.
-            name = os.path.basename(str(a.get("name")))
-            if name and name != "operation_log.json":
-                names.append(c.text(name))
-        row["artifactNames"] = names[:LIST_ITEM_MAX]
+        # Filenames only — the artifact's local path is never read — and the
+        # run's own ledger file is bookkeeping, not a deliverable.
+        row["artifactNames"] = deliverable_names(op, c)
         row["urlsOpened"] = hosts[:LIST_ITEM_MAX]
         needs = op.get("needs_input")
         row["openQuestions"] = len(needs) if isinstance(needs, list) else 0

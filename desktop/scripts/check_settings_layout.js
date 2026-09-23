@@ -38,6 +38,8 @@ const STATUS_TEXT = {
   // v7.1 Owner Workspace sync — connected, plus the longest error line.
   'settings-ows-note': 'Keeps ridiantechnologies.com/owner current with a read-only summary.',
   'settings-ows-status': 'Connected as RYAN-DESKTOP · last sync 12 min ago · The Owner Workspace is rate limiting this device. Ridian will try again after the limit resets.',
+  // v7.3 Ridian Jobs — the longest line: the not-allowed text plus an error.
+  'settings-ows-jobs': 'Owner Workspace has not allowed this PC to run commands · Could not reach ridiantechnologies.com (ConnectTimeout).',
   // Owner snapshot export (under Advanced since v7.1).
   'settings-export-snapshot-status': 'Saved owner-snapshot-20260922-101500.json in the Ridian Operator exports folder — 25 operations, 3 pending approvals, 2 obligations due. Nothing was uploaded.',
 };

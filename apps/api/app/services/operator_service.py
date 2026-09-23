@@ -93,6 +93,40 @@ class _OperationSession:
 _SESSIONS: dict[str, _OperationSession] = {}
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 
+# v7.3 Ridian Jobs: in-process run lifecycle listeners. Pauses and endings
+# are persisted (the operations store's save listener sees them); a run
+# STARTING or RESUMING in-thread is not, so it is announced here. Listeners
+# are fn(operation_id, phase, record) with phase "started" | "resumed";
+# they must be quick and never raise (a failing listener is logged and
+# ignored — it can never break a run).
+_RUN_LISTENERS: list = []
+
+
+def add_run_listener(fn) -> None:
+    if fn not in _RUN_LISTENERS:
+        _RUN_LISTENERS.append(fn)
+
+
+def remove_run_listener(fn) -> None:
+    try:
+        _RUN_LISTENERS.remove(fn)
+    except ValueError:
+        pass
+
+
+def _announce_run(record: dict, phase: str) -> None:
+    for fn in list(_RUN_LISTENERS):
+        try:
+            fn(str(record.get("id") or ""), phase, record)
+        except Exception:  # noqa: BLE001 — a listener never breaks a run
+            log.warning("operator.run_listener_failed phase=%s", phase, exc_info=True)
+
+
+# v7.3 Ridian Jobs: the ONLY origin stamp a run may carry. Set solely by
+# jobs_service (never by a route: OperationRunRequest has no such field, so
+# the desktop composer and the phone companion can never forge it).
+JOB_SOURCE = "owner-workspace"
+
 
 def _session_lock(operation_id: str) -> asyncio.Lock:
     lock = _SESSION_LOCKS.get(operation_id)
@@ -164,6 +198,11 @@ def _finalized_view(record: dict) -> dict:
         # v3.6: background run — the renderer's notification registry keys
         # off this + status to badge done / needs-attention runs.
         "background": bool(record.get("background")),
+        # v7.3 Ridian Jobs: where the command came from. "owner-workspace"
+        # (with the site's job id) for a command the owner sent from the
+        # Owner Workspace; "" for one typed on this PC or the phone.
+        "source": str(record.get("source") or ""),
+        "job_id": str(record.get("job_id") or ""),
     }
 
 
@@ -1025,8 +1064,13 @@ def mark_background(operation_id: str) -> bool:
 
 async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
                         research_model: str = "", script_model: str = "",
-                        effort: str = "", background: bool = False) -> dict:
-    """Run an operator command end to end via the planner agent (first turn)."""
+                        effort: str = "", background: bool = False,
+                        origin: "dict | None" = None) -> dict:
+    """Run an operator command end to end via the planner agent (first turn).
+
+    ``origin`` (v7.3) is set only by jobs_service for a command the owner sent
+    from the Owner Workspace: it STAMPS the record (source + job id) and
+    changes nothing else — same planner, tools, gates, ceilings, allowlists."""
     apply_to_environment()
     if not get_effective_value("ANTHROPIC_API_KEY"):
         await emit({"event": "error", "data": {
@@ -1087,7 +1131,11 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     # unattended direct writes (route to the proposal queue instead).
     record["background"] = bool(background)
     record["awaiting_input"] = False
+    if origin and origin.get("source") == JOB_SOURCE and origin.get("job_id"):
+        record["source"] = JOB_SOURCE
+        record["job_id"] = str(origin["job_id"])
     await _emit_start(emit, record, command, folder)
+    _announce_run(record, "started")
 
     operator = OperatorContext(folder=folder, record=record, emit=emit)
     # v2.3: if the operator attached a PDF / pasted text before this command,
@@ -1162,6 +1210,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
             "id": record["id"], "command": answer, "resumed": True,
             "artifact_folder": str(session.folder), "started_at": record["started_at"],
         }})
+        _announce_run(record, "resumed")
 
         # Deterministic resume-answer hooks: source-lock relaxation (a: general
         # research → unlock; b: paste) and research-plan approval. Both flip
