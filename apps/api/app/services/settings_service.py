@@ -102,6 +102,11 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "twilio_auth_token",
     "twilio_from_number",
     "sms_recipient_allowlist",
+    # v7.1 Owner Workspace sync: the site a NEW pairing goes to (Advanced).
+    # Blank = https://ridiantechnologies.com. Canonicalized to an https
+    # origin in main.py settings_post. The device token itself is NOT a
+    # setting: it lives DPAPI-wrapped in sync_service's own store.
+    "owner_workspace_url",
 )
 
 # Secrets — never returned by the public view, and preserved-on-blank when

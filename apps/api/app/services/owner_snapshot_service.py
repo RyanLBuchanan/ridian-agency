@@ -111,6 +111,9 @@ DENY_SOURCE_FIELDS: frozenset[str] = frozenset({
     "reconciliation", "research_approved", "research_declined",
     # v7.0: texts sent by a run — carries the recipient's number.
     "sms_messages",
+    # v7.1: the Owner Workspace sync credential and the code that obtains
+    # it. No table may ever map them, even under an innocuous output key.
+    "device_token", "pairing_code",
     "audio_generated", "audio_duration_seconds", "cost_ceiling_usd",
     # approval internals: planner kwargs, offered options, gate evidence
     "kwargs", "options", "gate_flags", "user_stated_numbers",

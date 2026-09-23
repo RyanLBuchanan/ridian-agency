@@ -29,7 +29,7 @@ from app import main as main_module
 from app.main import app
 from app.services import (brief_service, google_drive_service,
                           quickbooks_service, settings_service, state_store,
-                          watch_service)
+                          sync_service, watch_service)
 from app.services import owner_snapshot_service as svc
 
 _REAL_BUILD_BRIEF = brief_service.build_brief   # captured before any patch
@@ -45,6 +45,8 @@ SECRETS = {
     "quickbooks_client_secret": "qbo-TESTSECRET-delta-0004",
 }
 TOKEN_SECRET = "REFRESH-TESTSECRET-echo-0005"
+# v7.1: the Owner Workspace device token (sync_service's own DPAPI store).
+OWS_TOKEN_SECRET = "OWS-TESTSECRET-foxtrot-0006"
 LOCAL_PATH = r"C:\Users\ryan\Documents\client-plan.pdf"
 SENTINELS = {
     "email": "sarah@example.test",
@@ -530,8 +532,15 @@ def test_no_output_key_matches_the_forbidden_pattern():
         r"token|secret|key|password|credential|cookie|auth"
 
 
-def test_no_configured_secret_value_leaks(tmp_path):
+def test_no_configured_secret_value_leaks(tmp_path, monkeypatch):
     settings_service.save_settings({**SECRETS, "operator_name": "Ryan"})
+    # v7.1: a connected Owner Workspace. Its device token is not a setting —
+    # it lives DPAPI-wrapped in sync_service's own store — and must never
+    # reach the export either.
+    monkeypatch.setattr(sync_service, "SYNC_PATH", tmp_path / "owner_workspace.json")
+    sync_service._connect("https://ridiantechnologies.com", "Test PC", OWS_TOKEN_SECRET,
+                          None, via="pairing")
+    assert sync_service.is_connected()
     (tmp_path / "google_token.json").write_text(
         json.dumps({"refresh_token": TOKEN_SECRET}), encoding="utf-8")
     (tmp_path / "quickbooks_token.json").write_text(
@@ -542,11 +551,13 @@ def test_no_configured_secret_value_leaks(tmp_path):
     assert sorted(configured) == sorted(SECRETS.values()), "fixture did not configure secrets"
     doc = svc.build_snapshot()
     text = json.dumps(doc)
-    for secret in list(SECRETS.values()) + [TOKEN_SECRET]:
+    for secret in list(SECRETS.values()) + [TOKEN_SECRET, OWS_TOKEN_SECRET]:
         assert secret not in text, secret
     for _, _k, value in _walk(doc):
         if isinstance(value, str):
-            assert value not in configured and value != TOKEN_SECRET
+            assert value not in configured and value not in (TOKEN_SECRET, OWS_TOKEN_SECRET)
+    # The deny list names the sync credential fields (v7.1).
+    assert {"device_token", "pairing_code"} <= svc.DENY_SOURCE_FIELDS
 
 
 def test_no_local_path_or_data_dir_leaks(tmp_path):

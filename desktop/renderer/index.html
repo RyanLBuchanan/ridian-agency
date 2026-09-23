@@ -338,6 +338,8 @@
                   </svg>
                   <span>Settings</span>
                 </button>
+                <!-- v7.1: Owner Workspace sync state, one quiet line. -->
+                <p id="rail-ows-status" class="rail-sync-line" title="Owner Workspace sync — details in Settings">Owner Workspace · not connected</p>
                 </div><!-- /rail-footer -->
               </aside>
 
@@ -967,18 +969,20 @@
                     </div>
                   </div>
 
-                  <!-- Owner Snapshot v1: a local, allowlisted, read-only export  -->
-                  <!-- for the Owner Workspace. Nothing is uploaded; the exact   -->
-                  <!-- file path is shown so it can be inspected before it moves. -->
+                  <!-- v7.1 Owner Workspace sync: this PC keeps the Owner       -->
+                  <!-- Workspace on ridiantechnologies.com current by sending   -->
+                  <!-- the read-only snapshot itself. Outbound only; the device -->
+                  <!-- token is DPAPI-wrapped and never shown again.            -->
                   <div class="settings-block">
                     <div class="settings-row">
-                      <span class="settings-dot is-blank" aria-hidden="true"></span>
-                      <span class="settings-row-label">Owner snapshot</span>
-                      <span class="settings-row-inline">Export a read-only summary for the Owner Workspace. Stays on this PC.</span>
-                      <button id="settings-export-snapshot" type="button" class="btn btn-ghost btn-compact">Export</button>
+                      <span id="settings-dot-ows" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Owner Workspace</span>
+                      <span id="settings-ows-note" class="settings-row-inline">Keeps ridiantechnologies.com/owner current with a read-only summary.</span>
+                      <button id="settings-ows-connect" type="button" class="btn btn-ghost btn-compact">Connect</button>
+                      <button id="settings-ows-disconnect" type="button" class="btn btn-ghost btn-compact" disabled>Disconnect</button>
                     </div>
                     <div class="settings-row-note">
-                      <span id="settings-export-snapshot-status" role="status" aria-live="polite"></span>
+                      <span id="settings-ows-status" role="status" aria-live="polite"></span>
                     </div>
                   </div>
 
@@ -1037,6 +1041,23 @@
                         </select></label>
                       <label class="settings-adv-field"><span>Output folder</span>
                         <code id="settings-outputs-path" class="readonly-value">&mdash;</code></label>
+                      <label class="settings-adv-field"><span>Owner Workspace site</span>
+                        <input name="owner_workspace_url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://ridiantechnologies.com (default)" class="settings-input" /></label>
+                    </div>
+
+                    <!-- Owner Snapshot v1 file export (moved under Advanced in   -->
+                    <!-- v7.1: sync sends the same document automatically). This  -->
+                    <!-- writes a local file only; nothing is uploaded from here. -->
+                    <div class="settings-block settings-adv-block">
+                      <div class="settings-row">
+                        <span class="settings-dot is-blank" aria-hidden="true"></span>
+                        <span class="settings-row-label">Owner snapshot</span>
+                        <span class="settings-row-inline">Write the same read-only summary to a file on this PC. Nothing is uploaded.</span>
+                        <button id="settings-export-snapshot" type="button" class="btn btn-ghost btn-compact">Export</button>
+                      </div>
+                      <div class="settings-row-note">
+                        <span id="settings-export-snapshot-status" role="status" aria-live="polite"></span>
+                      </div>
                     </div>
                   </details>
 
@@ -1805,6 +1826,43 @@
         <footer class="modal-foot">
           <span class="modal-foot-spacer"></span>
           <button id="tips-done-btn" type="button" class="btn btn-primary">Got it</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--        OWNER WORKSPACE CONNECT (v7.1) — outside the settings  -->
+    <!--        form, so typing here never marks Settings unsaved.     -->
+    <!-- ============================================================ -->
+    <div
+      id="ows-connect-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ows-connect-title"
+      aria-hidden="true"
+    >
+      <div class="modal-card modal-card-narrow" role="document">
+        <header class="modal-head">
+          <h2 id="ows-connect-title">Connect to the Owner Workspace</h2>
+          <button id="ows-connect-close" type="button" class="modal-close" aria-label="Close">&times;</button>
+        </header>
+        <form id="ows-connect-form" class="modal-body ows-connect-body" autocomplete="off">
+          <p class="ows-connect-help">
+            On ridiantechnologies.com, open the Owner Workspace, choose Device tokens, and create a token for this PC.
+            It is shown once: paste it here as the pairing code. Ridian keeps it encrypted on this PC and uses it only
+            to send the Owner Workspace a read-only summary.
+          </p>
+          <label class="settings-adv-field"><span>Pairing code</span>
+            <input id="ows-connect-code" name="code" type="password" autocomplete="off" spellcheck="false" required class="settings-input" /></label>
+          <label class="settings-adv-field"><span>Device label</span>
+            <input id="ows-connect-label" name="label" type="text" maxlength="64" autocomplete="off" class="settings-input" /></label>
+          <div id="ows-connect-status" class="modal-status" role="status" aria-live="polite"></div>
+        </form>
+        <footer class="modal-foot">
+          <span class="modal-foot-spacer"></span>
+          <button id="ows-connect-cancel" type="button" class="btn btn-ghost">Cancel</button>
+          <button id="ows-connect-submit" type="submit" form="ows-connect-form" class="btn btn-primary">Connect</button>
         </footer>
       </div>
     </div>

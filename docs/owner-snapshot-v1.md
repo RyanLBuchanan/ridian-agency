@@ -5,6 +5,12 @@ Owner Workspace at ridiantechnologies.com/owner. The Operator writes a file;
 Ryan inspects it and moves it by hand. Nothing is uploaded, no network path
 exists, and the website gains no authority over this PC.
 
+**Since v7.1** the same document can also travel automatically: when the
+Owner Workspace is connected in Settings, `sync_service` pushes it to the
+site over HTTPS, outbound only (see `owner-workspace-sync.md`). The exporter
+itself still only builds the document and writes the local file, and the
+website still gains no authority over this PC.
+
 ## Contract
 
 - **Schema:** `docs/owner-snapshot-v1.schema.json` (JSON Schema 2020-12,

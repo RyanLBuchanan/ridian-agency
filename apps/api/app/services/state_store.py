@@ -32,6 +32,32 @@ from .runtime_paths import data_dir
 # projects, suggestion dismissals, logs — everything writable).
 STATE_DIR = data_dir() / "state"
 
+# v7.1 save listeners (Owner Workspace sync): called AFTER a successful save
+# with the store name and the data just written. Fire-and-forget — a
+# listener can never fail or undo the write that triggered it; an exception
+# is logged and swallowed. Listeners must be quick and must not mutate data.
+_save_listeners: list = []
+
+
+def add_save_listener(fn) -> None:
+    if fn not in _save_listeners:
+        _save_listeners.append(fn)
+
+
+def remove_save_listener(fn) -> None:
+    try:
+        _save_listeners.remove(fn)
+    except ValueError:
+        pass
+
+
+def _notify_saved(name: str, data: Any) -> None:
+    for fn in list(_save_listeners):
+        try:
+            fn(name, data)
+        except Exception:  # noqa: BLE001 — a listener never breaks a write
+            log.warning("state.save_listener_failed name=%s", name, exc_info=True)
+
 
 def _path_for(name: str) -> Path:
     """Resolve a safe path inside STATE_DIR for the given state name.
@@ -87,6 +113,7 @@ def save(name: str, data: Any) -> Any:
             pass
         raise
     log.info("state.saved name=%s", name)
+    _notify_saved(name, data)
     return data
 
 

@@ -35,6 +35,11 @@ const STATUS_TEXT = {
   'settings-calendar-note': 'Connected as ryan@ridiantechnologies.com — Test to verify.',
   // v6.9 Phone companion — the longest realistic line: URL + a device row.
   'settings-companion-status': 'Listening on your Wi-Fi — on the phone visit http://192.168.96.201:8000/companion · Pixel 7 (seen 2026-08-23 09:14) Revoke',
+  // v7.1 Owner Workspace sync — connected, plus the longest error line.
+  'settings-ows-note': 'Keeps ridiantechnologies.com/owner current with a read-only summary.',
+  'settings-ows-status': 'Connected as RYAN-DESKTOP · last sync 12 min ago · The Owner Workspace is rate limiting this device. Ridian will try again after the limit resets.',
+  // Owner snapshot export (under Advanced since v7.1).
+  'settings-export-snapshot-status': 'Saved owner-snapshot-20260922-101500.json in the Ridian Operator exports folder — 25 operations, 3 pending approvals, 2 obligations due. Nothing was uploaded.',
 };
 
 const MEASURE = `(() => {
@@ -42,6 +47,10 @@ const MEASURE = `(() => {
   const main = document.querySelector('.operator-main');
   if (main) main.classList.add('hidden');
   view.classList.remove('hidden');
+  // v7.1: the Owner snapshot export block lives under Advanced — measure
+  // with Advanced open so that block (and the grid) are checked too.
+  const adv = document.getElementById('settings-advanced');
+  if (adv) adv.open = true;
   const TEXT = ${JSON.stringify(STATUS_TEXT)};
   for (const [id, text] of Object.entries(TEXT)) {
     const el = document.getElementById(id);

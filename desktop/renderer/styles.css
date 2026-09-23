@@ -1436,6 +1436,18 @@ body {
   border-color: var(--color-accent);
 }
 
+/* v7.1 Owner Workspace sync: one quiet status line at the foot of the rail. */
+.rail-sync-line {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-sync-line.is-err { color: var(--color-error-text); }
+
 /* v2.8: Projects section — same item styling as chats; scrolls with the
    shared .rail-scroll region. */
 .rail-projects-head {
@@ -4934,6 +4946,11 @@ body {
   font-size: var(--fs-xs);
   color: var(--color-muted);
 }
+/* v7.1: the Owner snapshot file export lives under Advanced now. */
+.settings-advanced > .settings-adv-block { margin-top: var(--space-3); }
+/* v7.1 Owner Workspace connect dialog. */
+.ows-connect-body { display: grid; gap: var(--space-3); }
+.ows-connect-help { margin: 0; font-size: var(--fs-sm); color: var(--color-muted); line-height: 1.5; }
 .settings-status { min-height: 1.4em; font-size: var(--fs-sm); color: var(--color-muted); }
 .settings-status.is-ok { color: var(--color-success); font-weight: 600; }
 .settings-status.is-err { color: var(--color-error-text); font-weight: 600; }

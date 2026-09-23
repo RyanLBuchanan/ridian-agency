@@ -56,6 +56,7 @@ from .services import pdf_service  # noqa: E402
 from .services import project_service  # noqa: E402
 from .services import push_service  # noqa: E402
 from .services import quickbooks_service  # noqa: E402
+from .services import sync_service  # noqa: E402
 from .services import speech_service  # noqa: E402
 from .services import transcription_service  # noqa: E402
 from .services.agentic_advances_workflow_service import (  # noqa: E402
@@ -115,9 +116,16 @@ async def _lifespan(_app):
     """v6.9.7 item 3: the launch half of the obligations model. Whatever
     became notifiable while the PC was off is pushed now, once — in a
     background thread, so boot never waits on the push service. A no-op
-    when push is disabled (the default)."""
+    when push is disabled (the default).
+
+    v7.1: the Owner Workspace sync engine starts here and stops on
+    shutdown. It sends nothing until the owner connects in Settings."""
     push_service.startup_catch_up()
-    yield
+    sync_service.start_engine()
+    try:
+        yield
+    finally:
+        sync_service.stop_engine()
 
 
 app = FastAPI(title="Ridian Agency API", version="0.1.0", lifespan=_lifespan)
@@ -505,6 +513,9 @@ class SettingsView(BaseModel):
     twilio_from_number: str = ""
     twilio_auth_token_configured: bool = False
     sms_recipient_allowlist: str = ""
+    # v7.1: the Owner Workspace site override (Advanced). Blank = the Ridian
+    # site. The sync device token is never part of any settings view.
+    owner_workspace_url: str = ""
     outputs_path: str = ""
     # Populated on /settings POST when a non-blank root folder ID is saved
     # so the renderer can show a clear, actionable warning if the configured
@@ -554,6 +565,7 @@ class SettingsUpdate(BaseModel):
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
     sms_recipient_allowlist: str | None = None
+    owner_workspace_url: str | None = None
 
 
 class KeyTestResponse(BaseModel):
@@ -1138,6 +1150,20 @@ async def settings_post(payload: SettingsUpdate) -> SettingsView:
                 updates["twilio_from_number"] = normalized_from
         except sms_service.SmsError as exc:
             raise HTTPException(status_code=400, detail=f"Text (SMS) settings not saved — {exc.detail}")
+
+    # v7.1: the Owner Workspace site is stored as a bare https origin or not
+    # at all — the device token is a bearer credential, so plain HTTP is
+    # refused (a loopback dev server excepted). A changed site applies to
+    # the NEXT pairing; an existing connection keeps the site it paired with.
+    if "owner_workspace_url" in updates:
+        raw_site = (updates["owner_workspace_url"] or "").strip()
+        site = sync_service.normalize_site(raw_site)
+        if raw_site and not site:
+            raise HTTPException(
+                status_code=400,
+                detail=("Owner Workspace site not saved — use an https:// address with no "
+                        "path, e.g. https://ridiantechnologies.com."))
+        updates["owner_workspace_url"] = site
 
     settings_service.save_settings(updates)
     settings_service.apply_to_environment()
@@ -2153,6 +2179,42 @@ async def artifacts_open_file(payload: ArtifactFileRequest) -> ArtifactOpenRespo
     except ExportError as exc:
         raise _export_error_to_http(exc) from exc
     return ArtifactOpenResponse(status="success", detail="File opened.", path=str(path))
+
+
+@app.get("/owner-workspace/status")
+async def owner_workspace_status(request: Request) -> dict:
+    """Owner Workspace sync (v7.1, PC only): connection and last-sync state
+    for Settings and the rail line. Never contains the device token. Absent
+    from the companion allowlist AND loopback-checked here."""
+    _require_loopback(request)
+    return await asyncio.to_thread(sync_service.status_view)
+
+
+class OwnerWorkspaceConnectRequest(BaseModel):
+    # No length or format constraints here on purpose: a request-validation
+    # error would echo the pasted code back in its 422 body. pair() checks
+    # both and refuses without repeating the code.
+    code: str = ""
+    label: str = ""
+
+
+@app.post("/owner-workspace/connect")
+async def owner_workspace_connect(payload: OwnerWorkspaceConnectRequest,
+                                  request: Request) -> dict:
+    """Pair this PC with the Owner Workspace (PC only). The token is saved,
+    DPAPI-wrapped, only after the site has accepted it."""
+    _require_loopback(request)
+    try:
+        return await asyncio.to_thread(sync_service.pair, payload.code, payload.label)
+    except sync_service.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+
+
+@app.post("/owner-workspace/disconnect")
+async def owner_workspace_disconnect(request: Request) -> dict:
+    """Revoke locally (always) and remotely (best effort). PC only."""
+    _require_loopback(request)
+    return await asyncio.to_thread(sync_service.disconnect)
 
 
 @app.post("/owner-snapshot/export")

@@ -43,14 +43,17 @@ def test_every_settings_row_is_a_self_contained_block():
     status line — QuickBooks included, with no special case."""
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     form = html.split('id="settings-form"', 1)[1].split("</form>", 1)[0]
-    assert form.count('class="settings-block"') == 10  # + Owner snapshot (v1), Text (SMS) (v7.0)
+    # + Owner snapshot (v1, under Advanced since v7.1), Text (SMS) (v7.0),
+    # Owner Workspace (v7.1). The count matches both the literal class and
+    # the Advanced export block's "settings-block settings-adv-block".
+    assert form.count('class="settings-block') == 11
     # Every status note lives INSIDE a block, never as a bare sibling of it.
     for label in ("Anthropic", "OpenAI", "QuickBooks", "Text (SMS)", "Drive", "Gmail",
-                  "Calendar", "Phone"):
+                  "Calendar", "Phone", "Owner Workspace", "Owner snapshot"):
         idx = form.find(f">{label}<")
         assert idx != -1, label
-        block_start = form.rfind('class="settings-block"', 0, idx)
-        block_end = form.find('class="settings-block"', idx)
+        block_start = form.rfind('class="settings-block', 0, idx)
+        block_end = form.find('class="settings-block', idx)
         block = form[block_start:block_end if block_end != -1 else len(form)]
         assert "settings-row-note" in block, f"{label} has no status line in its block"
 
@@ -90,7 +93,7 @@ def test_no_text_collides_at_any_width(harness_output):
     """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
     painted elements from different rows share pixels."""
     for width in (1280, 1100, 1000, 940, 880):
-        assert f"{width}px: 10 blocks" in harness_output, harness_output[-3000:]  # + Owner snapshot (v1), Text (SMS) (v7.0)
+        assert f"{width}px: 11 blocks" in harness_output, harness_output[-3000:]  # + Owner snapshot (v1), Text (SMS) (v7.0), Owner Workspace (v7.1)
 
 
 def test_morning_brief_claims_the_chat_pane_cell(harness_output):
