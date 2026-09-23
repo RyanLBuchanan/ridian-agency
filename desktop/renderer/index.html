@@ -972,7 +972,9 @@
                   <!-- v7.1 Owner Workspace sync: this PC keeps the Owner       -->
                   <!-- Workspace on ridiantechnologies.com current by sending   -->
                   <!-- the read-only snapshot itself. Outbound only; the device -->
-                  <!-- token is DPAPI-wrapped and never shown again.            -->
+                  <!-- token is DPAPI-wrapped and never shown again. v7.2:      -->
+                  <!-- Connect is one click (approve in the browser); pasting a -->
+                  <!-- token lives under Advanced.                              -->
                   <div class="settings-block">
                     <div class="settings-row">
                       <span id="settings-dot-ows" class="settings-dot" aria-hidden="true"></span>
@@ -1043,6 +1045,17 @@
                         <code id="settings-outputs-path" class="readonly-value">&mdash;</code></label>
                       <label class="settings-adv-field"><span>Owner Workspace site</span>
                         <input name="owner_workspace_url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://ridiantechnologies.com (default)" class="settings-input" /></label>
+                    </div>
+
+                    <!-- v7.2: the only paste field for the Owner Workspace. Connect -->
+                    <!-- above approves this PC in the browser instead.              -->
+                    <div class="settings-block settings-adv-block">
+                      <div class="settings-row">
+                        <span class="settings-dot is-blank" aria-hidden="true"></span>
+                        <span class="settings-row-label">Owner Workspace token</span>
+                        <span class="settings-row-inline">Connect with a device token created on the Owner Workspace instead of approving in the browser.</span>
+                        <button id="settings-ows-token" type="button" class="btn btn-ghost btn-compact">Connect with a token&hellip;</button>
+                      </div>
                     </div>
 
                     <!-- Owner Snapshot v1 file export (moved under Advanced in   -->
@@ -1831,38 +1844,73 @@
     </div>
 
     <!-- ============================================================ -->
-    <!--        OWNER WORKSPACE CONNECT (v7.1) — outside the settings  -->
-    <!--        form, so typing here never marks Settings unsaved.     -->
+    <!--        OWNER WORKSPACE CONNECT (v7.2) — browser approval.     -->
+    <!--        Shows the code the approval page must also show; the   -->
+    <!--        backend polls the site until the token arrives.        -->
     <!-- ============================================================ -->
     <div
-      id="ows-connect-modal"
+      id="ows-pair-modal"
       class="modal-overlay hidden"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="ows-connect-title"
+      aria-labelledby="ows-pair-title"
       aria-hidden="true"
     >
       <div class="modal-card modal-card-narrow" role="document">
         <header class="modal-head">
-          <h2 id="ows-connect-title">Connect to the Owner Workspace</h2>
-          <button id="ows-connect-close" type="button" class="modal-close" aria-label="Close">&times;</button>
+          <h2 id="ows-pair-title">Approve this PC in your browser</h2>
+          <button id="ows-pair-close" type="button" class="modal-close" aria-label="Close">&times;</button>
         </header>
-        <form id="ows-connect-form" class="modal-body ows-connect-body" autocomplete="off">
+        <div class="modal-body ows-connect-body">
           <p class="ows-connect-help">
-            On ridiantechnologies.com, open the Owner Workspace, choose Device tokens, and create a token for this PC.
-            It is shown once: paste it here as the pairing code. Ridian keeps it encrypted on this PC and uses it only
+            Ridian opened the Owner Workspace in your default browser. Sign in if it asks, check that the page
+            shows this code, then choose Approve. This window closes by itself once the PC is connected.
+          </p>
+          <p id="ows-pair-code" class="ows-pair-code" aria-label="Code to match on the approval page"></p>
+          <div id="ows-pair-status" class="modal-status" role="status" aria-live="polite"></div>
+        </div>
+        <footer class="modal-foot">
+          <button id="ows-pair-reopen" type="button" class="btn btn-ghost">Open the page again</button>
+          <span class="modal-foot-spacer"></span>
+          <button id="ows-pair-cancel" type="button" class="btn btn-ghost">Cancel</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--        OWNER WORKSPACE TOKEN (v7.1; under Advanced in v7.2)   -->
+    <!--        — outside the settings form, so typing here never      -->
+    <!--        marks Settings unsaved.                                -->
+    <!-- ============================================================ -->
+    <div
+      id="ows-token-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ows-token-title"
+      aria-hidden="true"
+    >
+      <div class="modal-card modal-card-narrow" role="document">
+        <header class="modal-head">
+          <h2 id="ows-token-title">Connect with a token</h2>
+          <button id="ows-token-close" type="button" class="modal-close" aria-label="Close">&times;</button>
+        </header>
+        <form id="ows-token-form" class="modal-body ows-connect-body" autocomplete="off">
+          <p class="ows-connect-help">
+            On ridiantechnologies.com, open the Owner Workspace, choose Device tokens, and create a token for this PC
+            under Advanced. It is shown once: paste it here. Ridian keeps it encrypted on this PC and uses it only
             to send the Owner Workspace a read-only summary.
           </p>
-          <label class="settings-adv-field"><span>Pairing code</span>
-            <input id="ows-connect-code" name="code" type="password" autocomplete="off" spellcheck="false" required class="settings-input" /></label>
+          <label class="settings-adv-field"><span>Device token</span>
+            <input id="ows-token-code" name="code" type="password" autocomplete="off" spellcheck="false" required class="settings-input" /></label>
           <label class="settings-adv-field"><span>Device label</span>
-            <input id="ows-connect-label" name="label" type="text" maxlength="64" autocomplete="off" class="settings-input" /></label>
-          <div id="ows-connect-status" class="modal-status" role="status" aria-live="polite"></div>
+            <input id="ows-token-label" name="label" type="text" maxlength="64" autocomplete="off" class="settings-input" /></label>
+          <div id="ows-token-status" class="modal-status" role="status" aria-live="polite"></div>
         </form>
         <footer class="modal-foot">
           <span class="modal-foot-spacer"></span>
-          <button id="ows-connect-cancel" type="button" class="btn btn-ghost">Cancel</button>
-          <button id="ows-connect-submit" type="submit" form="ows-connect-form" class="btn btn-primary">Connect</button>
+          <button id="ows-token-cancel" type="button" class="btn btn-ghost">Cancel</button>
+          <button id="ows-token-submit" type="submit" form="ows-token-form" class="btn btn-primary">Connect</button>
         </footer>
       </div>
     </div>

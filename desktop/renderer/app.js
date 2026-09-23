@@ -6960,12 +6960,19 @@ if (_snapshotBtn) {
   });
 }
 
-/* ---- Owner Workspace sync (v7.1) ---- */
+/* ---- Owner Workspace sync (v7.1; one-click Connect v7.2) ---- */
 // The backend does the syncing (sync_service.py); this shows its state in
 // the Settings block and the rail line, and drives Connect / Disconnect.
-// The pasted code never lingers in the DOM: the field is cleared on
-// success, on cancel and on close. Every call is loopback-only.
+// Connect (v7.2) starts a browser approval: the backend asks the site for a
+// pairing request, this opens the approval page in the default browser
+// (main.js hands every window.open to shell.openExternal) and shows the code
+// to match, and the backend polls the site until the token arrives. The
+// polling secret never reaches this page. Pasting a token lives under
+// Advanced; the pasted value never lingers in the DOM: the field is cleared
+// on success, on cancel and on close. Every call is loopback-only.
 let _owsState = null;
+let _owsPairTimer = null;
+let _owsPairUrl = '';
 
 function _owsAgo(iso) {
   const t = Date.parse(iso || '');
@@ -6983,11 +6990,11 @@ function _owsAgo(iso) {
 function _owsDisconnectedText(reason) {
   switch (reason) {
     case 'unauthorized':
-      return 'Disconnected — the Owner Workspace refused this device’s token (revoked or expired). Connect again with a new token.';
+      return 'Disconnected — the Owner Workspace refused this device’s token (revoked or expired), so Ridian stopped sending. Choose Connect to approve this PC again.';
     case 'expired':
-      return 'Disconnected — this device’s token expired. Connect again with a new token.';
+      return 'Disconnected — this device’s token expired before it could be renewed. Choose Connect to approve this PC again.';
     case 'unreadable':
-      return 'Disconnected — the saved token can’t be read by this Windows account. Connect again.';
+      return 'Disconnected — the saved token can’t be read by this Windows account. Choose Connect to approve this PC again.';
     default:
       return 'Disconnected. Ridian is not sending the Owner Workspace updates.';
   }
@@ -7004,7 +7011,14 @@ function _owsRender(s) {
     const ago = _owsAgo(s.last_success_iso);
     text = `Connected as ${label}`;
     railText = 'Owner Workspace';
-    if (ago) {
+    if (s.up_to_date) {
+      // v7.2: the site holds this PC's current state; unchanged content is
+      // not sent again, so "checked" is the freshest honest time.
+      const checked = _owsAgo(s.last_checked_iso || s.last_success_iso);
+      text += ' · up to date' + (checked ? ` · checked ${checked}` : '');
+      railText += ' · up to date';
+      dot = true;
+    } else if (ago) {
       text += ` · last sync ${ago}`;
       railText += ` · synced ${ago}`;
       dot = true;
@@ -7022,7 +7036,7 @@ function _owsRender(s) {
     railText = 'Owner Workspace · disconnected';
     if (s.disconnected_reason && s.disconnected_reason !== 'operator') dot = false;
   } else {
-    text = 'Not connected. Create a device token in the Owner Workspace, then Connect.';
+    text = 'Not connected. Choose Connect and approve this PC in your browser.';
     railText = 'Owner Workspace · not connected';
   }
   const status = document.getElementById('settings-ows-status');
@@ -7037,6 +7051,8 @@ function _owsRender(s) {
   _setKeyDot('settings-dot-ows', dot);
   const connectBtn = document.getElementById('settings-ows-connect');
   if (connectBtn) connectBtn.disabled = !!s.connected;
+  const tokenBtn = document.getElementById('settings-ows-token');
+  if (tokenBtn) tokenBtn.disabled = !!s.connected;
   const disconnectBtn = document.getElementById('settings-ows-disconnect');
   if (disconnectBtn) disconnectBtn.disabled = !s.connected;
   const rail = document.getElementById('rail-ows-status');
@@ -7050,55 +7066,152 @@ function _owsRender(s) {
 async function _owsRefresh() {
   try {
     const res = await fetch(`${BACKEND}/owner-workspace/status`);
-    if (!res.ok) return;
-    _owsRender(await res.json());
-  } catch (_) { /* backend not up — keep the last known line */ }
+    if (!res.ok) return null;
+    const s = await res.json();
+    _owsRender(s);
+    return s;
+  } catch (_) { return null; /* backend not up — keep the last known line */ }
 }
 
-function _owsConnectKeydown(e) {
-  // Captured on window so Escape closes only this dialog, never the
+function _owsModalKeydown(e) {
+  // Captured on window so Escape closes only the open dialog, never the
   // Settings view underneath it.
   if (e.key !== 'Escape') return;
   e.preventDefault();
   e.stopPropagation();
-  _owsCloseConnect();
+  const pair = document.getElementById('ows-pair-modal');
+  if (pair && !pair.classList.contains('hidden')) _owsCancelPairing();
+  else _owsCloseToken();
 }
 
-function _owsOpenConnect() {
-  const modal = document.getElementById('ows-connect-modal');
-  if (!modal) return;
-  const code = document.getElementById('ows-connect-code');
-  const label = document.getElementById('ows-connect-label');
-  const status = document.getElementById('ows-connect-status');
-  if (code) code.value = '';
-  if (label) label.value = (_owsState && (_owsState.label || _owsState.default_label)) || '';
-  if (status) { status.textContent = ''; status.className = 'modal-status'; }
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-  window.addEventListener('keydown', _owsConnectKeydown, true);
-  if (code) code.focus();
+function _owsShowModal(id, show) {
+  const modal = document.getElementById(id);
+  if (!modal) return null;
+  modal.classList.toggle('hidden', !show);
+  modal.setAttribute('aria-hidden', show ? 'false' : 'true');
+  if (show) window.addEventListener('keydown', _owsModalKeydown, true);
+  else window.removeEventListener('keydown', _owsModalKeydown, true);
+  return modal;
 }
 
-function _owsCloseConnect() {
-  const modal = document.getElementById('ows-connect-modal');
-  if (!modal) return;
-  const code = document.getElementById('ows-connect-code');
-  if (code) code.value = '';
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-  window.removeEventListener('keydown', _owsConnectKeydown, true);
+function _owsPairStatus(text, isErr) {
+  const status = document.getElementById('ows-pair-status');
+  if (status) { status.textContent = text; status.className = isErr ? 'modal-status is-err' : 'modal-status'; }
+}
+
+function _owsOpenApprovalPage() {
+  // Only an http(s) page; the backend already checked it is the configured
+  // site's own approval page.
+  if (/^https?:\/\//i.test(_owsPairUrl)) window.open(_owsPairUrl, '_blank', 'noopener');
+}
+
+function _owsStopPairWatch() {
+  if (_owsPairTimer) { clearInterval(_owsPairTimer); _owsPairTimer = null; }
+}
+
+function _owsClosePairing() {
+  _owsStopPairWatch();
+  _owsPairUrl = '';
+  _owsShowModal('ows-pair-modal', false);
   const btn = document.getElementById('settings-ows-connect');
   if (btn && !btn.disabled) btn.focus();
 }
 
-async function _owsSubmitConnect(e) {
+// Step 1 of Connect: ask the backend to start a browser approval, open the
+// page, show the code, then watch the status until it resolves.
+async function _owsConnect() {
+  const btn = document.getElementById('settings-ows-connect');
+  const status = document.getElementById('settings-ows-status');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Starting a secure approval on the Owner Workspace…';
+  let data = {};
+  try {
+    const res = await fetch(`${BACKEND}/owner-workspace/connect/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: '' }),
+    });
+    data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+  } catch (err) {
+    if (status) status.textContent = err && err.message ? err.message : String(err);
+    if (btn) btn.disabled = false;
+    return;
+  }
+  _owsPairUrl = String(data.verifyUrl || '');
+  const code = document.getElementById('ows-pair-code');
+  if (code) code.textContent = data.userCode || '';
+  const cancel = document.getElementById('ows-pair-cancel');
+  if (cancel) cancel.textContent = 'Cancel';
+  const reopen = document.getElementById('ows-pair-reopen');
+  if (reopen) reopen.disabled = false;
+  _owsPairStatus('Waiting for approval in your browser…', false);
+  _owsShowModal('ows-pair-modal', true);
+  _owsOpenApprovalPage();
+  if (btn) btn.disabled = false;
+  _owsStopPairWatch();
+  _owsPairTimer = setInterval(_owsPairTick, 2000);
+}
+
+async function _owsPairTick() {
+  const s = await _owsRefresh();
+  if (!s) return;
+  const p = s.pairing;
+  if (s.connected && (!p || p.state === 'approved')) {
+    _owsClosePairing();
+    const status = document.getElementById('settings-ows-status');
+    if (status) status.textContent = `Connected as ${s.label || 'this PC'}. The first sync goes out in a few seconds.`;
+    return;
+  }
+  if (!p || p.state === 'waiting') return;
+  // denied / expired / failed / cancelled: say why, stop watching.
+  _owsStopPairWatch();
+  _owsPairStatus(p.detail || 'The approval did not complete. Choose Connect to try again.', true);
+  const cancel = document.getElementById('ows-pair-cancel');
+  if (cancel) cancel.textContent = 'Close';
+  const reopen = document.getElementById('ows-pair-reopen');
+  if (reopen) reopen.disabled = true;
+}
+
+async function _owsCancelPairing() {
+  const watching = !!_owsPairTimer;
+  _owsClosePairing();
+  if (!watching) return;
+  try {
+    await fetch(`${BACKEND}/owner-workspace/connect/cancel`, { method: 'POST' });
+  } catch (_) { /* the backend's own 10-minute limit still ends it */ }
+  _owsRefresh();
+}
+
+function _owsOpenToken() {
+  const modal = document.getElementById('ows-token-modal');
+  if (!modal) return;
+  const code = document.getElementById('ows-token-code');
+  const label = document.getElementById('ows-token-label');
+  const status = document.getElementById('ows-token-status');
+  if (code) code.value = '';
+  if (label) label.value = (_owsState && (_owsState.label || _owsState.default_label)) || '';
+  if (status) { status.textContent = ''; status.className = 'modal-status'; }
+  _owsShowModal('ows-token-modal', true);
+  if (code) code.focus();
+}
+
+function _owsCloseToken() {
+  const code = document.getElementById('ows-token-code');
+  if (code) code.value = '';
+  if (!_owsShowModal('ows-token-modal', false)) return;
+  const btn = document.getElementById('settings-ows-token');
+  if (btn && !btn.disabled) btn.focus();
+}
+
+async function _owsSubmitToken(e) {
   if (e) e.preventDefault();
-  const code = document.getElementById('ows-connect-code');
-  const label = document.getElementById('ows-connect-label');
-  const status = document.getElementById('ows-connect-status');
-  const submit = document.getElementById('ows-connect-submit');
+  const code = document.getElementById('ows-token-code');
+  const label = document.getElementById('ows-token-label');
+  const status = document.getElementById('ows-token-status');
+  const submit = document.getElementById('ows-token-submit');
   if (!code || !code.value.trim()) {
-    if (status) { status.textContent = 'Paste the pairing code first.'; status.className = 'modal-status is-err'; }
+    if (status) { status.textContent = 'Paste the device token first.'; status.className = 'modal-status is-err'; }
     return;
   }
   if (submit) submit.disabled = true;
@@ -7113,7 +7226,7 @@ async function _owsSubmitConnect(e) {
     if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
     code.value = '';
     _owsRender(data);
-    _owsCloseConnect();
+    _owsCloseToken();
   } catch (err) {
     if (status) {
       status.textContent = err && err.message ? err.message : String(err);
@@ -7144,15 +7257,23 @@ async function _owsDisconnect() {
 }
 
 const _owsConnectBtn = document.getElementById('settings-ows-connect');
-if (_owsConnectBtn) _owsConnectBtn.addEventListener('click', _owsOpenConnect);
+if (_owsConnectBtn) _owsConnectBtn.addEventListener('click', _owsConnect);
 const _owsDisconnectBtn = document.getElementById('settings-ows-disconnect');
 if (_owsDisconnectBtn) _owsDisconnectBtn.addEventListener('click', _owsDisconnect);
-const _owsConnectForm = document.getElementById('ows-connect-form');
-if (_owsConnectForm) _owsConnectForm.addEventListener('submit', _owsSubmitConnect);
-['ows-connect-close', 'ows-connect-cancel'].forEach((id) => {
+const _owsTokenBtn = document.getElementById('settings-ows-token');
+if (_owsTokenBtn) _owsTokenBtn.addEventListener('click', _owsOpenToken);
+const _owsTokenForm = document.getElementById('ows-token-form');
+if (_owsTokenForm) _owsTokenForm.addEventListener('submit', _owsSubmitToken);
+['ows-token-close', 'ows-token-cancel'].forEach((id) => {
   const b = document.getElementById(id);
-  if (b) b.addEventListener('click', _owsCloseConnect);
+  if (b) b.addEventListener('click', _owsCloseToken);
 });
+['ows-pair-close', 'ows-pair-cancel'].forEach((id) => {
+  const b = document.getElementById(id);
+  if (b) b.addEventListener('click', _owsCancelPairing);
+});
+const _owsReopenBtn = document.getElementById('ows-pair-reopen');
+if (_owsReopenBtn) _owsReopenBtn.addEventListener('click', _owsOpenApprovalPage);
 _owsRefresh();
 setInterval(_owsRefresh, 60000);
 

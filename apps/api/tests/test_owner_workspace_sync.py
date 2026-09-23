@@ -19,6 +19,15 @@ Pins, mutation-style like the other gates:
      redirect, and never appears in logs, records, status, settings, the
      pushed documents, or the export.
   7. Loopback only: nothing about sync is on the companion allowlist.
+  8. ONE-CLICK CONNECT (v7.2): authorize/start, the approval page opened in
+     the browser, polling until the token arrives (stored DPAPI-wrapped) or
+     10 minutes pass; denied, expired, cancelled, a foreign approval page or
+     a malformed answer saves nothing. The polling secret never leaves the
+     backend. Pasting a token lives only under Advanced.
+  9. SKIP-UNCHANGED (v7.2): a document whose content hash (without
+     generatedAt and localUtcOffset) equals the last accepted push is not
+     sent; the timer still runs and sends only on change; Settings says
+     "up to date". Refresh still runs when nothing is sent.
 
 The site is an httpx.MockTransport (FakeSite); no test touches the network.
 """
@@ -28,6 +37,7 @@ import inspect
 import json
 import logging
 import secrets
+import hashlib
 from pathlib import Path
 
 import httpx
@@ -48,6 +58,8 @@ CODE = "PAIRCODE-7Q2X"
 PC = ("127.0.0.1", 50000)
 HDR = {"X-Ridian-Companion": "1"}
 _DESKTOP = Path(__file__).resolve().parents[3] / "desktop"
+SPAWNED: list = []          # pairing ids start_browser_pairing() handed to a thread
+SLEEPS: list = []           # what the pairing poll loop slept, instead of sleeping
 
 
 def _offline_brief():
@@ -60,6 +72,19 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(settings_service, "SETTINGS_PATH", tmp_path / "local_settings.json")
     monkeypatch.setattr(sync_service, "SYNC_PATH", tmp_path / "owner_workspace.json")
     monkeypatch.setattr(sync_service, "_transport", None)
+    # Browser pairing: no real poll thread; tests drive run_pairing() themselves.
+    monkeypatch.setattr(sync_service, "_pairing", None)
+    SPAWNED.clear()
+    monkeypatch.setattr(sync_service, "_spawn_pairing", SPAWNED.append)
+    SLEEPS.clear()
+    pairing_clock = Clock()
+
+    def fake_sleep(seconds):
+        SLEEPS.append(seconds)
+        pairing_clock.advance(seconds)
+
+    monkeypatch.setattr(sync_service, "_pairing_clock", pairing_clock)
+    monkeypatch.setattr(sync_service, "_pairing_sleep", fake_sleep)
     # The real brief can reach Google; the exporter degrades honestly without it.
     monkeypatch.setattr(owner_snapshot_service.brief_service, "build_brief", _offline_brief)
     previous = sync_service.use_engine(None)
@@ -100,8 +125,16 @@ class FakeSite:
     disabled endpoint answers the way the live site's Origin gate answers
     any unknown non-GET path: 403 with a plain-text body."""
 
-    def __init__(self, *, pairing=True, refresh=True, revoke=True, days=90):
+    def __init__(self, *, pairing=True, refresh=True, revoke=True, days=90, authorize=True):
         self.pairing = pairing
+        # v7.2 browser approval (authorize/start + poll), as the live site.
+        self.authorize = authorize
+        self.authz: dict = {}
+        self.start_answers: list = []
+        self.poll_answers: list = []
+        self.decision = "approved"      # what the owner does on the approval page
+        self.decide_after = 2           # pending polls before the owner decides
+        self.on_poll = None
         self.refresh_supported = refresh
         self.revoke_supported = revoke
         self.days = days
@@ -132,6 +165,42 @@ class FakeSite:
         auth = request.headers.get("authorization", "")
         bearer = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
         path = request.url.path
+        if path == sync_service.AUTHORIZE_START_PATH:
+            if not self.authorize or request.headers.get("origin"):
+                return self._gate()
+            if self.start_answers:
+                status, body, headers = self.start_answers.pop(0)
+                return httpx.Response(status, json=body, headers=headers or {})
+            if request.headers.get("content-type") != "application/json":
+                return httpx.Response(415, json={"error": "json_required"})
+            label = json.loads(request.content or b"{}").get("label")
+            request_id, ref = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
+            self.authz[request_id] = {"state": "pending", "label": label, "polls": 0}
+            return httpx.Response(200, json={
+                "requestId": request_id, "userCode": "BCDF-GHJK",
+                "verifyUrl": f"{SITE}/owner/devices/approve?request={ref}",
+                "expiresAt": _iso(_now() + dt.timedelta(minutes=10)), "interval": 5})
+        if path == sync_service.AUTHORIZE_POLL_PATH:
+            if self.on_poll:
+                self.on_poll(request)
+            if self.poll_answers:
+                status, body = self.poll_answers.pop(0)
+                return httpx.Response(status, json=body)
+            entry = self.authz.get(request.url.params.get("request", ""))
+            if entry is None or entry["state"] in ("expired", "collected"):
+                return httpx.Response(410, json={"status": "expired"})
+            if entry["state"] == "pending":
+                entry["polls"] += 1
+                if not self.decision or entry["polls"] <= self.decide_after:
+                    return httpx.Response(200, json={"status": "pending", "interval": 5})
+                entry["state"] = self.decision
+            if entry["state"] == "denied":
+                return httpx.Response(200, json={"status": "denied"})
+            entry["state"] = "collected"                   # the token goes out once
+            token = self.issue()
+            return httpx.Response(200, json={"status": "approved", "token": token,
+                                             "expiresAt": _iso(self.tokens[token]),
+                                             "label": entry["label"]})
         if path == sync_service.PAIR_PATH:
             if not self.pairing:
                 return self._gate()
@@ -380,6 +449,9 @@ def test_each_trigger_fires_exactly_one_push_after_the_debounce(monkeypatch, tmp
         clock.advance(sync_service.STARTUP_DELAY_SECONDS)
         assert engine.tick() == "accepted"            # the startup push
         site.requests.clear()
+        # Content that changes without a write (a due date arriving):
+        # the timer is what sends it.
+        sync_service._update(None, last_pushed_content_hash="changed-since")
         clock.advance(sync_service.HEARTBEAT_SECONDS - 1)
         assert engine.tick() is None and not site.pushes
         clock.advance(1)
@@ -557,10 +629,11 @@ def test_refresh_rotates_the_token_within_seven_days_of_expiry(monkeypatch):
     assert sync_service._unseal(disk["device_token"]) == new
     assert disk["token_expires_iso"] == _iso(site.tokens[new])
     assert old not in json.dumps(disk) and new not in json.dumps(disk)
-    # The fresh token is 90 days out: the next push does not refresh again.
+    # The fresh token is 90 days out: the next attempt does not refresh again
+    # (and, the content being unchanged, sends nothing at all).
     site.requests.clear()
-    assert sync_service.push_now(["manual"]) == ("accepted", None)
-    assert [r.url.path for r in site.requests] == [sync_service.PUSH_PATH]
+    assert sync_service.push_now(["manual"]) == ("unchanged", None)
+    assert site.requests == []
 
 
 def test_a_site_without_refresh_is_asked_again_after_a_day_not_on_every_push(monkeypatch):
@@ -569,11 +642,13 @@ def test_a_site_without_refresh_is_asked_again_after_a_day_not_on_every_push(mon
     assert sync_service.push_now(["manual"]) == ("accepted", None)
     assert [r.url.path for r in site.requests] == [sync_service.REFRESH_PATH, sync_service.PUSH_PATH]
     site.requests.clear()
+    pipeline_service.add_deal(_deal(), written_by="pipeline")      # new content to send
     assert sync_service.push_now(["manual"]) == ("accepted", None)
     assert [r.url.path for r in site.requests] == [sync_service.PUSH_PATH]
     # A day later it asks again.
     sync_service._update(None, refresh_unsupported_until_iso=_iso(_now() - dt.timedelta(seconds=1)))
     site.requests.clear()
+    pipeline_service.add_deal(_deal(1), written_by="pipeline")
     sync_service.push_now(["manual"])
     assert [r.url.path for r in site.requests] == [sync_service.REFRESH_PATH, sync_service.PUSH_PATH]
     assert site.pushes[-1].headers["authorization"] == f"Bearer {token}"
@@ -745,6 +820,7 @@ def test_a_policy_refused_snapshot_is_never_sent(monkeypatch):
 def test_the_token_never_appears_in_logs_records_status_settings_pushes_or_the_export(
         monkeypatch, tmp_path, caplog):
     caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.INFO, logger="httpx")
     site = FakeSite().install(monkeypatch)
     clock = Clock()
     engine = _engine(clock)
@@ -755,6 +831,7 @@ def test_the_token_never_appears_in_logs_records_status_settings_pushes_or_the_e
     pipeline_service.add_deal(_deal(), written_by="pipeline")
     clock.advance(sync_service.DEBOUNCE_SECONDS)
     assert engine.tick() == "accepted"
+    pipeline_service.add_deal(_deal(1), written_by="pipeline")    # content to send
     site.push_answers.append((422, {"ok": False, "error": "rejected", "reason": "schema_invalid",
                                     "detail": "$.deals[0]"}, None))
     assert sync_service.push_now(["manual"])[0] == "rejected"
@@ -764,15 +841,22 @@ def test_the_token_never_appears_in_logs_records_status_settings_pushes_or_the_e
     assert sync_service.push_now(["manual"])[0] == "accepted"      # refreshed first
     current = site.pushes[-1].headers["authorization"][len("Bearer "):]
     site.revoked.add(current)
+    pipeline_service.add_deal(_deal(2), written_by="pipeline")
     assert sync_service.push_now(["manual"])[0] == "unauthorized"
     site.pairing = False
     third = site.issue()
     sync_service.pair(third, "Ryan desktop")
+    sync_service.disconnect()
+    # A browser-approved connection too; its polling secret is a credential.
+    sync_service.start_browser_pairing("Ryan desktop")
+    request_id = sync_service._pairing["request_id"]
+    _run_pairing(monkeypatch)
     _stage_approval(tmp_path)
     operation_log_service.upsert_operation({"id": "op_9", "status": "completed", "command": "x"})
     sync_service.disconnect()
-    secrets_seen = [CODE] + list(site.tokens)
+    secrets_seen = [CODE, request_id] + list(site.tokens)
     assert first in secrets_seen and current in secrets_seen and third in secrets_seen
+    assert len(site.tokens) == 4
 
     pc = TestClient(app, client=PC)
     state_text = "".join(p.read_text(encoding="utf-8")
@@ -796,6 +880,7 @@ def test_the_token_never_appears_in_logs_records_status_settings_pushes_or_the_e
 
 def test_sync_routes_are_pc_only_and_off_the_companion_allowlist():
     routes = [("GET", "/owner-workspace/status"), ("POST", "/owner-workspace/connect"),
+              ("POST", "/owner-workspace/connect/start"), ("POST", "/owner-workspace/connect/cancel"),
               ("POST", "/owner-workspace/disconnect")]
     for method, path in routes:
         assert not companion_service.device_request_allowed(method, path), path
@@ -817,14 +902,21 @@ def test_sync_routes_are_pc_only_and_off_the_companion_allowlist():
         class client:
             host = "192.168.1.50"
 
-    for handler in (main_module.owner_workspace_status, main_module.owner_workspace_disconnect):
+    for handler in (main_module.owner_workspace_status, main_module.owner_workspace_disconnect,
+                    main_module.owner_workspace_connect_cancel):
         with pytest.raises(HTTPException) as exc:
             asyncio.run(handler(_Req()))
         assert exc.value.status_code == 403
     with pytest.raises(HTTPException):
         asyncio.run(main_module.owner_workspace_connect(
             main_module.OwnerWorkspaceConnectRequest(code=CODE), _Req()))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main_module.owner_workspace_connect_start(
+            main_module.OwnerWorkspaceStartRequest(label="PC"), _Req()))
+    assert exc.value.status_code == 403
     for handler in (main_module.owner_workspace_status, main_module.owner_workspace_connect,
+                    main_module.owner_workspace_connect_start,
+                    main_module.owner_workspace_connect_cancel,
                     main_module.owner_workspace_disconnect):
         assert "_require_loopback(request)" in inspect.getsource(handler)
 
@@ -854,6 +946,414 @@ def test_the_engine_starts_and_stops_with_the_app():
 
 
 # ---------------------------------------------------------------------------
+# 8. One-click Connect: browser approval (v7.2)
+# ---------------------------------------------------------------------------
+
+def _run_pairing(_monkeypatch=None) -> str:
+    """Drive the poll loop the way its thread would. The fixture's fake
+    clock moves by each sleep instead of waiting (SLEEPS records them)."""
+    assert SPAWNED, "start_browser_pairing() hands the poll to a thread"
+    SLEEPS.clear()
+    return sync_service.run_pairing(SPAWNED[-1])
+
+
+def _polls(site: FakeSite) -> list:
+    return [r for r in site.requests if r.url.path == sync_service.AUTHORIZE_POLL_PATH]
+
+
+def test_connect_opens_the_approval_page_and_stores_the_approved_token_dpapi_wrapped(
+        monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    # sms_service quiets httpx today; the redaction must not depend on that.
+    caplog.set_level(logging.INFO, logger="httpx")
+    site = FakeSite().install(monkeypatch)
+    clock = Clock()
+    engine = _engine(clock)
+    view = sync_service.start_browser_pairing()
+    # What the renderer gets: the page to open and the code to match. Never
+    # the polling secret.
+    request_id = next(iter(site.authz))
+    assert view["state"] == "waiting" and view["userCode"] == "BCDF-GHJK"
+    assert view["verifyUrl"].startswith(SITE + "/owner/devices/approve?request=")
+    assert view["label"] == sync_service.default_label()
+    assert request_id not in json.dumps(view) and "requestId" not in view
+    start = site.requests[0]
+    assert start.method == "POST" and start.url.path == "/api/devices/authorize/start"
+    assert start.headers["content-type"] == "application/json"
+    assert "authorization" not in start.headers and "origin" not in start.headers
+    assert json.loads(start.content) == {"label": sync_service.default_label()}
+    assert SPAWNED == [sync_service._pairing["id"]]
+    assert not sync_service.SYNC_PATH.exists(), "nothing is saved before the approval"
+
+    assert _run_pairing(monkeypatch) == "approved"
+    polls = _polls(site)
+    assert len(polls) == site.decide_after + 1
+    assert all(p.method == "GET" and p.url.params["request"] == request_id for p in polls)
+    assert SLEEPS == [5.0] * len(polls), "the site's interval paces the polls"
+    token = next(iter(site.tokens))
+    status = sync_service.status_view()
+    assert status["connected"] is True and status["paired_via"] == "browser"
+    assert status["label"] == sync_service.default_label()
+    assert status["token_expires_iso"] == _iso(site.tokens[token]), "browser pairing knows the expiry"
+    assert status["pairing"]["state"] == "approved"
+    disk = sync_service.SYNC_PATH.read_text(encoding="utf-8")
+    assert token not in disk and request_id not in disk
+    stored = json.loads(disk)["device_token"]
+    assert stored.startswith("dpapi1:") and sync_service._unseal(stored) == token
+    # Connected: exactly one push after the debounce, with the new token.
+    clock.advance(sync_service.DEBOUNCE_SECONDS)
+    assert engine.tick() == "accepted"
+    assert len(site.pushes) == 1 and site.pushes[0].headers["authorization"] == f"Bearer {token}"
+    pc = TestClient(app, client=PC)
+    assert "authorize/poll?request=[redacted]" in caplog.text, "httpx logged the poll, redacted"
+    for text in (caplog.text, pc.get("/owner-workspace/status").text):
+        assert request_id not in text and token not in text
+
+
+def test_a_denied_or_expired_approval_saves_nothing(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    site.decision = "denied"
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert _run_pairing(monkeypatch) == "denied"
+    view = sync_service.pairing_view()
+    assert view["state"] == "denied" and "denied" in view["detail"]
+    assert not sync_service.SYNC_PATH.exists() and not site.tokens
+    # The site answers 410 once the request is gone.
+    site.decision = None
+    sync_service.start_browser_pairing("Ryan desktop")
+    next(e for e in site.authz.values() if e["state"] == "pending")["state"] = "expired"
+    assert _run_pairing(monkeypatch) == "expired"
+    assert "expired" in sync_service.pairing_view()["detail"]
+    assert not sync_service.SYNC_PATH.exists() and not site.tokens
+    assert sync_service.status_view()["status"] == "not_connected"
+
+
+def test_the_wait_ends_after_ten_minutes_even_if_the_site_keeps_saying_pending(monkeypatch):
+    assert sync_service.PAIRING_MAX_SECONDS == 600
+    site = FakeSite().install(monkeypatch)
+    site.decision = None                        # the owner never answers
+    sync_service.start_browser_pairing("Ryan desktop")
+    started = sync_service._pairing_clock()
+    assert _run_pairing(monkeypatch) == "expired"
+    assert sync_service._pairing_clock() - started == 600, "ten minutes of waiting, no more"
+    assert sum(SLEEPS) == 600 and len(_polls(site)) == 600 // 5
+    assert sync_service.pairing_view()["state"] == "expired"
+    assert not sync_service.SYNC_PATH.exists()
+
+
+def test_transient_poll_failures_are_retried_but_never_forever(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    # Two failures, then the approval: the pairing completes.
+    site.poll_answers += [(503, {"status": "unavailable"}), (503, {"status": "unavailable"})]
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert _run_pairing(monkeypatch) == "approved"
+    sync_service.disconnect()
+    # A site that keeps failing: give up after PAIRING_ERROR_LIMIT in a row.
+    site.poll_answers += [(503, {"status": "unavailable"})] * 10
+    sync_service.start_browser_pairing("Ryan desktop")
+    before = len(_polls(site))
+    assert _run_pairing(monkeypatch) == "failed"
+    assert len(_polls(site)) - before == sync_service.PAIRING_ERROR_LIMIT
+    assert "Could not hear back" in sync_service.pairing_view()["detail"]
+
+
+def test_cancel_stops_the_wait_and_a_late_approval_is_revoked_not_stored(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert sync_service.cancel_browser_pairing()["state"] == "cancelled"
+    assert _run_pairing(monkeypatch) == "cancelled"
+    assert _polls(site) == [], "a cancelled wait never polls"
+    # Cancelled while the approval is already on its way back.
+    site.decide_after = 0
+
+    def cancel_in_flight(_request):
+        sync_service.cancel_browser_pairing()
+
+    site.on_poll = cancel_in_flight
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert _run_pairing(monkeypatch) == "cancelled"
+    token = next(iter(site.tokens))
+    assert token in site.revoked, "the token the site issued is retired, not left live"
+    assert not sync_service.SYNC_PATH.exists()
+    # A newer Connect supersedes an older one: the old loop just ends.
+    site.on_poll = None
+    sync_service.start_browser_pairing("Ryan desktop")
+    first = SPAWNED[-1]
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert sync_service.run_pairing(first) == "superseded"
+
+
+def test_connect_refuses_a_foreign_approval_page_or_a_malformed_answer(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    good = {"requestId": secrets.token_urlsafe(32), "userCode": "BCDF-GHJK",
+            "verifyUrl": f"{SITE}/owner/devices/approve?request=abc",
+            "expiresAt": _iso(_now() + dt.timedelta(minutes=10)), "interval": 5}
+    bad_answers = [
+        {"verifyUrl": "https://evil.example/owner/devices/approve?request=abc"},
+        {"verifyUrl": "https://ridiantechnologies.com.evil.example/owner/devices/approve?request=abc"},
+        {"verifyUrl": "https://ridiantechnologies.com@evil.example/owner/devices/approve?request=abc"},
+        {"verifyUrl": "https://owner@ridiantechnologies.com/owner/devices/approve?request=abc"},
+        {"verifyUrl": f"{SITE}/owner/devices/approve?request=abc#frag"},
+        {"verifyUrl": "https://ridiantechnologies.com:8443/owner/devices/approve?request=abc"},
+        {"verifyUrl": "http://ridiantechnologies.com/owner/devices/approve?request=abc"},
+        {"verifyUrl": f"{SITE}/owner/devices?request=abc"},
+        {"verifyUrl": f"{SITE}/owner/devices/approve"},
+        {"verifyUrl": "javascript:alert(1)"},
+        {"userCode": "not a code"},
+        {"requestId": "short"},
+        {"requestId": ""},
+    ]
+    for change in bad_answers:
+        site.start_answers.append((200, {**good, **change}, None))
+        with pytest.raises(sync_service.SyncError) as exc:
+            sync_service.start_browser_pairing("Ryan desktop")
+        assert exc.value.status == 502 and "Nothing was opened" in exc.value.detail, change
+    assert sync_service.pairing_view() is None and SPAWNED == []
+    assert _polls(site) == []
+    # And the good answer is accepted.
+    site.start_answers.append((200, good, None))
+    assert sync_service.start_browser_pairing("Ryan desktop")["verifyUrl"] == good["verifyUrl"]
+
+
+def test_connect_explains_a_rate_limit_a_missing_endpoint_and_an_existing_connection(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    site.start_answers.append((429, {"error": "rate_limited", "retryAfterSeconds": 1800},
+                               {"retry-after": "1800"}))
+    with pytest.raises(sync_service.SyncError) as exc:
+        sync_service.start_browser_pairing("Ryan desktop")
+    assert exc.value.status == 429 and "about 30 minute(s)" in exc.value.detail
+    site.authorize = False
+    with pytest.raises(sync_service.SyncError) as exc:
+        sync_service.start_browser_pairing("Ryan desktop")
+    assert "Connect with a token under Advanced" in exc.value.detail
+    site.fail_network = True
+    with pytest.raises(sync_service.SyncError) as exc:
+        sync_service.start_browser_pairing("Ryan desktop")
+    assert exc.value.status == 502 and "Could not reach" in exc.value.detail
+    site.fail_network = False
+    site.authorize = True
+    _connected(site)
+    sent = len(site.requests)
+    with pytest.raises(sync_service.SyncError) as exc:
+        sync_service.start_browser_pairing("Ryan desktop")
+    assert exc.value.status == 409 and "Disconnect first" in exc.value.detail
+    assert len(site.requests) == sent
+    assert SPAWNED == []
+
+
+def test_an_approval_arriving_after_a_token_connect_is_revoked_not_stored(monkeypatch):
+    site = FakeSite(pairing=False).install(monkeypatch)
+    sync_service.start_browser_pairing("Ryan desktop")
+    pasted = site.issue()
+    sync_service.pair(pasted, "Ryan desktop")          # connected under Advanced meanwhile
+    assert _run_pairing(monkeypatch) == "cancelled"
+    approved = [t for t in site.tokens if t != pasted]
+    assert len(approved) == 1 and approved[0] in site.revoked
+    assert sync_service._unseal(json.loads(
+        sync_service.SYNC_PATH.read_text(encoding="utf-8"))["device_token"]) == pasted
+
+
+def test_the_connect_routes_start_report_and_cancel_without_the_polling_secret(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    pc = TestClient(app, client=PC)
+    started = pc.post("/owner-workspace/connect/start", json={"label": "  Ryan   desktop "})
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert body["userCode"] == "BCDF-GHJK" and body["label"] == "Ryan desktop"
+    request_id = next(iter(site.authz))
+    status = pc.get("/owner-workspace/status")
+    assert status.json()["pairing"]["state"] == "waiting"
+    assert status.json()["pairing"]["verifyUrl"] == body["verifyUrl"]
+    cancelled = pc.post("/owner-workspace/connect/cancel")
+    assert cancelled.status_code == 200 and cancelled.json()["pairing"]["state"] == "cancelled"
+    for response in (started, status, cancelled):
+        assert request_id not in response.text
+    site.authorize = False
+    refused = pc.post("/owner-workspace/connect/start", json={})
+    assert refused.status_code == 502 and "under Advanced" in refused.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# 9. Skip-unchanged (v7.2)
+# ---------------------------------------------------------------------------
+
+def _with_new_clock_fields(monkeypatch, **source_changes):
+    """The exporter's document, re-stamped as a later export would be."""
+    real = owner_snapshot_service.build_snapshot
+
+    def rebuilt():
+        document = real()
+        document["generatedAt"] = "2031-01-02T03:04:05Z"
+        document["source"] = {**document["source"], "localUtcOffset": "+09:30", **source_changes}
+        return document
+
+    monkeypatch.setattr(owner_snapshot_service, "build_snapshot", rebuilt)
+
+
+def test_the_content_hash_ignores_only_generated_at_and_the_local_offset():
+    document = owner_snapshot_service.build_snapshot()
+    base = sync_service._content_hash(document)
+    stripped = json.loads(json.dumps(document))
+    del stripped["generatedAt"]
+    del stripped["source"]["localUtcOffset"]
+    expected = hashlib.sha256(json.dumps(stripped, sort_keys=True, ensure_ascii=False,
+                                         separators=(",", ":")).encode("utf-8")).hexdigest()
+    assert base == expected
+    restamped = json.loads(json.dumps(document))
+    restamped["generatedAt"] = "2031-01-02T03:04:05Z"
+    restamped["source"]["localUtcOffset"] = "+09:30"
+    assert sync_service._content_hash(restamped) == base
+    reordered = dict(reversed(list(document.items())))
+    assert sync_service._content_hash(reordered) == base, "key order is not content"
+    for path in (("summary", "obligations"), ("source", "appVersion")):
+        changed = json.loads(json.dumps(document))
+        changed[path[0]][path[1]] = "different"
+        assert sync_service._content_hash(changed) != base, path
+
+
+def test_unchanged_content_is_not_sent_again_and_a_change_is(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    _connected(site)
+    assert sync_service.push_now(["manual"]) == ("accepted", None)
+    assert len(site.pushes) == 1
+    # A later export of the same content: new generatedAt and offset only.
+    _with_new_clock_fields(monkeypatch)
+    assert sync_service.push_now(["deals"]) == ("unchanged", None)
+    assert len(site.pushes) == 1, "nothing is sent when nothing changed"
+    view = sync_service.status_view()
+    assert view["up_to_date"] is True and view["last_result"] == "unchanged"
+    assert view["last_checked_iso"] and view["last_error"] == ""
+    # A real change goes out.
+    obligations_service.add_obligation(dict(OBLIGATION), written_by="manual")
+    assert sync_service.push_now(["obligations"]) == ("accepted", None)
+    assert len(site.pushes) == 2
+    assert sync_service.push_now(["manual"]) == ("unchanged", None)
+    assert len(site.pushes) == 2
+    # The site's own "duplicate" also means it holds this content.
+    pipeline_service.add_deal(_deal(), written_by="pipeline")
+    site.push_answers.append((200, {"ok": True, "duplicate": True, "snapshotId": "snap-x"}, None))
+    assert sync_service.push_now(["deals"]) == ("duplicate", None)
+    assert sync_service.push_now(["manual"]) == ("unchanged", None)
+    assert len(site.pushes) == 3
+
+
+def test_a_push_the_site_did_not_accept_is_sent_again_with_the_same_content(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    _connected(site)
+    site.push_answers.append((503, {"ok": False, "error": "storage_unavailable"}, None))
+    assert sync_service.push_now(["manual"])[0] == "server_error"
+    assert sync_service.status_view()["up_to_date"] is False
+    assert sync_service.push_now(["manual"]) == ("accepted", None)
+    assert len(site.pushes) == 2, "only an ACCEPTED push counts as the site's copy"
+
+
+def test_a_new_connection_always_sends_its_first_snapshot(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    _connected(site)
+    assert sync_service.push_now(["manual"]) == ("accepted", None)
+    sync_service.disconnect()
+    _connected(site)
+    assert sync_service.push_now(["paired"]) == ("accepted", None)
+    assert len(site.pushes) == 2
+
+
+def test_the_timer_still_runs_but_sends_only_on_change(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    _connected(site)
+    clock = Clock()
+    engine = _engine(clock)
+    engine.arm()
+    clock.advance(sync_service.STARTUP_DELAY_SECONDS)
+    assert engine.tick() == "accepted"
+    for _ in range(3):
+        clock.advance(sync_service.HEARTBEAT_SECONDS)
+        assert engine.tick() is None                     # the timer fired
+        assert engine.pending()
+        clock.advance(sync_service.DEBOUNCE_SECONDS)
+        assert engine.tick() == "unchanged"
+    assert len(site.pushes) == 1
+    # No backoff from "unchanged": the next trigger is the plain debounce.
+    pipeline_service.add_deal(_deal(), written_by="pipeline")
+    assert engine.next_wake() == clock() + sync_service.DEBOUNCE_SECONDS
+    clock.advance(sync_service.DEBOUNCE_SECONDS)
+    assert engine.tick() == "accepted"
+    assert len(site.pushes) == 2
+    # Content that changes with no write at all (a due date arriving, a new
+    # brief) is what the timer is for.
+    _with_new_clock_fields(monkeypatch, appVersion="changed-without-a-write")
+    clock.advance(sync_service.HEARTBEAT_SECONDS)
+    engine.tick()
+    clock.advance(sync_service.DEBOUNCE_SECONDS)
+    assert engine.tick() == "accepted"
+    assert len(site.pushes) == 3
+
+
+def test_status_is_up_to_date_only_when_connected_and_clean(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    assert sync_service.status_view()["up_to_date"] is False
+    token = _connected(site)
+    assert sync_service.status_view()["up_to_date"] is False, "nothing sent yet"
+    sync_service.push_now(["manual"])
+    assert sync_service.status_view()["up_to_date"] is True
+    pipeline_service.add_deal(_deal(), written_by="pipeline")
+    site.push_answers.append((429, {"ok": False, "error": "rate_limited"}, {"retry-after": "60"}))
+    sync_service.push_now(["manual"])
+    assert sync_service.status_view()["up_to_date"] is False
+    site.revoked.add(token)
+    sync_service.push_now(["manual"])
+    view = sync_service.status_view()
+    assert view["up_to_date"] is False and view["connected"] is False
+
+
+# ---------------------------------------------------------------------------
+# 10. Refresh within 7 days; 401 disconnects and says so (v7.2)
+# ---------------------------------------------------------------------------
+
+def test_a_browser_paired_token_is_refreshed_within_seven_days_even_when_nothing_is_sent(
+        monkeypatch):
+    site = FakeSite(days=10).install(monkeypatch)
+    sync_service.start_browser_pairing("Ryan desktop")
+    assert _run_pairing(monkeypatch) == "approved"
+    first = next(iter(site.tokens))
+    site.requests.clear()
+    # Ten days out: outside the window, no refresh.
+    assert sync_service.push_now(["paired"]) == ("accepted", None)
+    assert [r.url.path for r in site.requests] == [sync_service.PUSH_PATH]
+    # Six days out: the next attempt rotates first, even though the content
+    # is unchanged and nothing else is sent.
+    sync_service._update(None, token_expires_iso=_iso(_now() + dt.timedelta(days=6)))
+    site.requests.clear()
+    assert sync_service.push_now(["timer"]) == ("unchanged", None)
+    assert [r.url.path for r in site.requests] == [sync_service.REFRESH_PATH]
+    assert site.requests[0].headers["authorization"] == f"Bearer {first}"
+    assert first in site.revoked
+    disk = json.loads(sync_service.SYNC_PATH.read_text(encoding="utf-8"))
+    fresh = sync_service._unseal(disk["device_token"])
+    assert fresh != first and fresh in site.tokens
+    assert disk["token_expires_iso"] == _iso(site.tokens[fresh])
+    # The rotated token is what the next change is sent with.
+    pipeline_service.add_deal(_deal(), written_by="pipeline")
+    assert sync_service.push_now(["deals"]) == ("accepted", None)
+    assert site.pushes[-1].headers["authorization"] == f"Bearer {fresh}"
+
+
+def test_a_401_on_refresh_disconnects_sends_nothing_and_says_so(monkeypatch):
+    site = FakeSite().install(monkeypatch)
+    token = _connected(site, days=3)
+    site.revoked.add(token)                             # revoked on /owner/devices
+    assert sync_service.push_now(["timer"]) == ("unauthorized", None)
+    assert [r.url.path for r in site.requests] == [sync_service.REFRESH_PATH]
+    assert site.pushes == [], "the dead token is not tried again for the push"
+    view = sync_service.status_view()
+    assert view["connected"] is False and view["status"] == "disconnected"
+    assert view["disconnected_reason"] == "unauthorized" and view["up_to_date"] is False
+    assert json.loads(sync_service.SYNC_PATH.read_text(encoding="utf-8"))["device_token"] == ""
+    sent = len(site.requests)
+    assert sync_service.push_now(["manual"]) == ("not_connected", None)
+    assert len(site.requests) == sent
+
+
+# ---------------------------------------------------------------------------
 # Renderer: the Settings block, the dialog, Advanced, the rail line
 # ---------------------------------------------------------------------------
 
@@ -869,21 +1369,53 @@ def test_renderer_surfaces_connect_disconnect_status_advanced_and_the_rail_line(
     assert 'id="settings-export-snapshot"' in advanced
     assert 'id="settings-export-snapshot"' not in primary
     assert 'name="owner_workspace_url"' in advanced and html.count('name="owner_workspace_url"') == 1
-    # The dialog sits OUTSIDE the settings form and asks for code + label.
-    assert 'id="ows-connect-modal"' not in form
-    modal = html.split('id="ows-connect-modal"', 1)[1].split("</form>", 1)[0]
-    assert 'id="ows-connect-code"' in modal and 'type="password"' in modal
-    assert 'id="ows-connect-label"' in modal
+    # v7.2: no paste field except under Advanced. Connect opens the browser
+    # approval dialog (a code to match, no input at all); the token dialog
+    # is reached only from the Advanced button.
+    assert 'id="settings-ows-token"' in advanced and 'id="settings-ows-token"' not in primary
+    ows_block = primary.split("v7.1 Owner Workspace sync", 1)[1]
+    assert "<input" not in ows_block and "<textarea" not in ows_block
+    assert 'id="ows-pair-modal"' not in form and 'id="ows-token-modal"' not in form
+    pair_modal = html.split('id="ows-pair-modal"', 1)[1].split('id="ows-token-modal"', 1)[0]
+    assert 'id="ows-pair-code"' in pair_modal and 'id="ows-pair-reopen"' in pair_modal
+    assert 'id="ows-pair-cancel"' in pair_modal and "<input" not in pair_modal
+    token_modal = html.split('id="ows-token-modal"', 1)[1].split("</form>", 1)[0]
+    assert 'id="ows-token-code"' in token_modal and 'type="password"' in token_modal
+    assert 'id="ows-token-label"' in token_modal
+    assert html.count('type="password"') == form.count('type="password"') + 1, \
+        "the token dialog is the only password field outside the settings form"
     # A small line in the rail footer.
     footer = html.split('class="rail-footer"', 1)[1].split("/rail-footer", 1)[0]
     assert 'id="rail-ows-status"' in footer
     app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
     fields = app_js.split("const SETTINGS_FIELDS", 1)[1].split("];", 1)[0]
     assert "'owner_workspace_url'" in fields
-    for route in ("/owner-workspace/status", "/owner-workspace/connect",
+    for route in ("/owner-workspace/status", "/owner-workspace/connect/start",
+                  "/owner-workspace/connect/cancel", "/owner-workspace/connect`",
                   "/owner-workspace/disconnect"):
         assert route in app_js, route
     render = app_js.split("function _owsRender(", 1)[1].split("async function _owsRefresh(", 1)[0]
     assert "Connected as ${label}" in render and "last sync ${ago}" in render
-    close = app_js.split("function _owsCloseConnect(", 1)[1][:500]
-    assert "code.value = ''" in close, "the pasted code never lingers in the DOM"
+    assert "s.up_to_date" in render and "' · up to date'" in render
+    assert "railText += ' · up to date'" in render
+    # Connect = start, open the page in the default browser, watch the status.
+    connect = app_js.split("async function _owsConnect(", 1)[1].split("async function _owsPairTick(", 1)[0]
+    assert "/owner-workspace/connect/start" in connect and "_owsOpenApprovalPage()" in connect
+    assert "setInterval(_owsPairTick" in connect
+    opener = app_js.split("function _owsOpenApprovalPage(", 1)[1].split("function _owsStopPairWatch(", 1)[0]
+    assert "window.open(_owsPairUrl" in opener and "https?:" in opener
+    tick = app_js.split("async function _owsPairTick(", 1)[1].split("async function _owsCancelPairing(", 1)[0]
+    assert "p.state === 'approved'" in tick and "p.detail" in tick
+    assert "_owsConnectBtn.addEventListener('click', _owsConnect)" in app_js
+    assert "_owsTokenBtn.addEventListener('click', _owsOpenToken)" in app_js
+    close = app_js.split("function _owsCloseToken(", 1)[1][:500]
+    assert "code.value = ''" in close, "the pasted token never lingers in the DOM"
+    # 401: Settings says the site refused the token and that sending stopped.
+    words = app_js.split("function _owsDisconnectedText(", 1)[1].split("function _owsRender(", 1)[0]
+    unauthorized = words.split("case 'unauthorized':", 1)[1].split("case ", 1)[0]
+    assert "refused this device" in unauthorized and "stopped sending" in unauthorized
+    assert "Connect" in unauthorized
+    # The window-open handler is what sends the approval page to the browser.
+    main_js = (_DESKTOP / "main.js").read_text(encoding="utf-8")
+    handler = main_js.split("setWindowOpenHandler(", 1)[1][:200]
+    assert "shell.openExternal(url)" in handler and "action: 'deny'" in handler

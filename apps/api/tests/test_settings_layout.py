@@ -44,9 +44,10 @@ def test_every_settings_row_is_a_self_contained_block():
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     form = html.split('id="settings-form"', 1)[1].split("</form>", 1)[0]
     # + Owner snapshot (v1, under Advanced since v7.1), Text (SMS) (v7.0),
-    # Owner Workspace (v7.1). The count matches both the literal class and
-    # the Advanced export block's "settings-block settings-adv-block".
-    assert form.count('class="settings-block') == 11
+    # Owner Workspace (v7.1), Owner Workspace token (v7.2, under Advanced).
+    # The count matches both the literal class and the Advanced blocks'
+    # "settings-block settings-adv-block".
+    assert form.count('class="settings-block') == 12
     # Every status note lives INSIDE a block, never as a bare sibling of it.
     for label in ("Anthropic", "OpenAI", "QuickBooks", "Text (SMS)", "Drive", "Gmail",
                   "Calendar", "Phone", "Owner Workspace", "Owner snapshot"):
@@ -93,7 +94,7 @@ def test_no_text_collides_at_any_width(harness_output):
     """Renders index.html at 1280/1100/1000/940/880 px and asserts no two
     painted elements from different rows share pixels."""
     for width in (1280, 1100, 1000, 940, 880):
-        assert f"{width}px: 11 blocks" in harness_output, harness_output[-3000:]  # + Owner snapshot (v1), Text (SMS) (v7.0), Owner Workspace (v7.1)
+        assert f"{width}px: 12 blocks" in harness_output, harness_output[-3000:]  # + Owner snapshot (v1), Text (SMS) (v7.0), Owner Workspace (v7.1), Owner Workspace token (v7.2)
 
 
 def test_morning_brief_claims_the_chat_pane_cell(harness_output):

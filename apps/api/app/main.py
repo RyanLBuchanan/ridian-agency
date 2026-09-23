@@ -2198,10 +2198,35 @@ class OwnerWorkspaceConnectRequest(BaseModel):
     label: str = ""
 
 
+class OwnerWorkspaceStartRequest(BaseModel):
+    label: str = ""
+
+
+@app.post("/owner-workspace/connect/start")
+async def owner_workspace_connect_start(payload: OwnerWorkspaceStartRequest,
+                                        request: Request) -> dict:
+    """Connect (v7.2, PC only): start a browser-approved pairing. Returns the
+    approval page and the code to match; the renderer opens the page in the
+    default browser and watches /owner-workspace/status while this process
+    polls the site. The polling secret never leaves this process."""
+    _require_loopback(request)
+    try:
+        return await asyncio.to_thread(sync_service.start_browser_pairing, payload.label)
+    except sync_service.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+
+
+@app.post("/owner-workspace/connect/cancel")
+async def owner_workspace_connect_cancel(request: Request) -> dict:
+    """Stop waiting for a browser approval. PC only."""
+    _require_loopback(request)
+    return {"pairing": await asyncio.to_thread(sync_service.cancel_browser_pairing)}
+
+
 @app.post("/owner-workspace/connect")
 async def owner_workspace_connect(payload: OwnerWorkspaceConnectRequest,
                                   request: Request) -> dict:
-    """Pair this PC with the Owner Workspace (PC only). The token is saved,
+    """Connect with a token (Advanced, PC only). The token is saved,
     DPAPI-wrapped, only after the site has accepted it."""
     _require_loopback(request)
     try:

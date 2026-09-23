@@ -4951,6 +4951,20 @@ body {
 /* v7.1 Owner Workspace connect dialog. */
 .ows-connect-body { display: grid; gap: var(--space-3); }
 .ows-connect-help { margin: 0; font-size: var(--fs-sm); color: var(--color-muted); line-height: 1.5; }
+/* v7.2: the code the browser approval page must also show. */
+.ows-pair-code {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--color-text);
+  user-select: all;
+}
 .settings-status { min-height: 1.4em; font-size: var(--fs-sm); color: var(--color-muted); }
 .settings-status.is-ok { color: var(--color-success); font-weight: 600; }
 .settings-status.is-err { color: var(--color-error-text); font-weight: 600; }

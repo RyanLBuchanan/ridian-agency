@@ -22,6 +22,14 @@ THE CONTRACT WITH THE SITE (docs/owner-workspace-sync.md):
            200 -> {"token", "expiresAt"}, and the old token is dead.
   revoke   POST <site>/api/devices/revoke with the current token. Best
            effort: Disconnect never depends on it.
+  authorize (v7.2, what Connect does)
+           POST <site>/api/devices/authorize/start {label} -> {requestId,
+           userCode, verifyUrl, expiresAt, interval}. The renderer opens
+           verifyUrl in the default browser; the owner approves it there.
+           GET <site>/api/devices/authorize/poll?request=<requestId> ->
+           pending | denied | approved {token, expiresAt} exactly once |
+           410 expired. requestId is a polling secret: it stays in this
+           process's memory and never reaches the renderer or a log.
 
 THE RULES, each pinned by tests/test_owner_workspace_sync.py:
 
@@ -43,8 +51,13 @@ THE RULES, each pinned by tests/test_owner_workspace_sync.py:
   5. A token within 7 days of its known expiry is refreshed before the push;
      a site without the refresh endpoint is asked again after a day, not on
      every push. A token past its known expiry is never sent.
+  6. An unchanged document is not sent (v7.2). The content hash of the last
+     push the site accepted (sha256 of the canonical document without
+     generatedAt and source.localUtcOffset) is remembered; a trigger or the
+     timer that finds the same hash records "unchanged" and sends nothing.
 
 The loopback-only routes in main.py are the only callers of pair(),
+start_browser_pairing(), cancel_browser_pairing(),
 disconnect() and status_view(); none of them is on the companion allowlist.
 """
 
@@ -52,6 +65,7 @@ from __future__ import annotations
 
 import base64
 import datetime as _dt
+import hashlib
 import json
 import logging
 import os
@@ -74,6 +88,9 @@ PUSH_PATH = "/api/operator-snapshot/push"
 PAIR_PATH = "/api/devices/pair"
 REFRESH_PATH = "/api/devices/refresh"
 REVOKE_PATH = "/api/devices/revoke"
+AUTHORIZE_START_PATH = "/api/devices/authorize/start"
+AUTHORIZE_POLL_PATH = "/api/devices/authorize/poll"
+APPROVE_PATH = "/owner/devices/approve"
 
 # Beside local_settings.json, never under state/ — see rule 1.
 SYNC_PATH = data_dir() / "owner_workspace.json"
@@ -91,9 +108,15 @@ MAX_BODY_BYTES = 2 * 1024 * 1024       # the site's own cap
 TIMEOUT = 20.0
 REVOKE_TIMEOUT = 10.0
 LABEL_MAX_CHARS = 64
+PAIRING_MAX_SECONDS = 10 * 60.0      # the site's own request lifetime
+POLL_INTERVAL_DEFAULT = 5.0
+POLL_INTERVAL_MIN = 2.0
+POLL_INTERVAL_MAX = 30.0
+PAIRING_ERROR_LIMIT = 5              # consecutive transient poll failures
 
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{4,256}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
+USER_CODE_RE = re.compile(r"^[A-Z0-9]{4}-[A-Z0-9]{4}$")
 
 # Answers that mean "this site has no such endpoint": the site's Origin gate
 # refuses an unknown non-GET path with 403, a router answers 404/405.
@@ -328,6 +351,8 @@ def _connect(site: str, label: str, token: str, expires: Optional[_dt.datetime],
             "last_result": "",
             "last_error": "",
             "last_snapshot_id": "",
+            "last_pushed_content_hash": "",
+            "last_checked_iso": "",
             "refresh_unsupported_until_iso": "",
             "disconnected_reason": "",
             "disconnected_iso": "",
@@ -377,12 +402,18 @@ def status_view() -> dict:
         "last_success_iso": str(data.get("last_success_iso") or ""),
         "last_result": str(data.get("last_result") or ""),
         "last_error": str(data.get("last_error") or ""),
+        "last_checked_iso": str(data.get("last_checked_iso") or ""),
+        # The site holds this PC's current state: the last attempt was sent
+        # and accepted, or found nothing new to send (all three clear last_error).
+        "up_to_date": connected and str(data.get("last_result") or "") in (
+            "accepted", "duplicate", "unchanged"),
         "disconnected_reason": str(data.get("disconnected_reason") or ""),
         "disconnected_iso": str(data.get("disconnected_iso") or ""),
         "remote_revoked": bool(data.get("remote_revoked")),
         "default_label": default_label(),
         "next_attempt_iso": engine.next_attempt_iso() if (engine is not None and connected) else "",
         "sync_running": engine is not None,
+        "pairing": pairing_view(),
     }
 
 
@@ -390,10 +421,23 @@ def status_view() -> dict:
 # The document
 # ---------------------------------------------------------------------------
 
-def _snapshot_body() -> bytes:
-    """The Owner Snapshot v1 document exactly as the exporter builds it,
-    compact-encoded. SyncError when the exporter's own policy check refuses
-    it or it is over the site's size cap."""
+def _content_hash(document: Any) -> str:
+    """sha256 of the canonical document WITHOUT generatedAt and
+    source.localUtcOffset, the two fields that change on every export even
+    when nothing else did. The same rule the site uses to spot duplicates."""
+    copy = json.loads(json.dumps(document))
+    if isinstance(copy, dict):
+        copy.pop("generatedAt", None)
+        if isinstance(copy.get("source"), dict):
+            copy["source"].pop("localUtcOffset", None)
+    canonical = json.dumps(copy, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _snapshot_body() -> tuple[bytes, str]:
+    """(body, content hash): the Owner Snapshot v1 document exactly as the
+    exporter builds it, compact-encoded. SyncError when the exporter's own
+    policy check refuses it or it is over the site's size cap."""
     from . import owner_snapshot_service  # lazy: it imports half the services
     try:
         document = owner_snapshot_service.build_snapshot()
@@ -405,7 +449,7 @@ def _snapshot_body() -> bytes:
     if len(body) > MAX_BODY_BYTES:
         raise SyncError(f"The snapshot is {len(body)} bytes; the Owner Workspace accepts "
                         f"at most {MAX_BODY_BYTES}.", code="too_large")
-    return body
+    return body, _content_hash(document)
 
 
 def _issued(resp: httpx.Response) -> tuple[str, Optional[_dt.datetime]]:
@@ -428,7 +472,7 @@ def _retry_after(resp: httpx.Response) -> float:
 
 
 def _record_push(connection_id: str, site: str, resp: httpx.Response,
-                 reasons: list) -> tuple[str, Optional[float]]:
+                 reasons: list, content_hash: str = "") -> tuple[str, Optional[float]]:
     """Store what a push answer means. Returns (result, backoff): backoff
     None clears any backoff, 0.0 backs off on the exponential schedule, and
     a positive value backs off at least that many seconds."""
@@ -439,8 +483,9 @@ def _record_push(connection_id: str, site: str, resp: httpx.Response,
         data = _json(resp)
         result = "duplicate" if data.get("duplicate") else "accepted"
         snapshot_id = str(data.get("snapshotId") or "")[:64]
-        _update(connection_id, last_attempt_iso=now, last_success_iso=now, last_result=result,
-                last_error="", last_snapshot_id=snapshot_id)
+        _update(connection_id, last_attempt_iso=now, last_success_iso=now, last_checked_iso=now,
+                last_result=result, last_error="", last_snapshot_id=snapshot_id,
+                last_pushed_content_hash=content_hash)
         log.info("owner_sync.pushed result=%s snapshot=%s sha256=%s bytes=%s reasons=%s",
                  result, snapshot_id, str(data.get("sha256") or "")[:12], data.get("bytes"),
                  ",".join(reasons) or "-")
@@ -542,12 +587,17 @@ def push_now(reasons: Optional[list] = None) -> tuple[str, Optional[float]]:
             if not token:
                 return "unauthorized", None
         try:
-            body = _snapshot_body()
+            body, content_hash = _snapshot_body()
         except SyncError as exc:
             _update(connection_id, last_attempt_iso=_iso(now), last_result=exc.code or "refused",
                     last_error=exc.detail)
             log.warning("owner_sync.snapshot_refused code=%s", exc.code or "refused")
             return exc.code or "refused", 0.0
+        if content_hash and content_hash == data.get("last_pushed_content_hash"):
+            # Rule 6: the site already holds exactly this content.
+            _update(connection_id, last_checked_iso=_iso(now), last_result="unchanged", last_error="")
+            log.info("owner_sync.unchanged reasons=%s", ",".join(reasons) or "-")
+            return "unchanged", None
         try:
             resp = client.post(site + PUSH_PATH, content=body,
                                headers={**_bearer(token), "Content-Type": "application/json"})
@@ -557,7 +607,7 @@ def push_now(reasons: Optional[list] = None) -> tuple[str, Optional[float]]:
                                 "Ridian will try again later."))
             log.warning("owner_sync.network_error host=%s type=%s", _host(site), type(exc).__name__)
             return "network_error", 0.0
-    return _record_push(connection_id, site, resp, reasons)
+    return _record_push(connection_id, site, resp, reasons, content_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -617,7 +667,7 @@ def _pair_with_device_token(client: httpx.Client, site: str, code: str, label: s
     itself. One real push verifies it; nothing is saved unless the site
     authenticated it."""
     host = _host(site)
-    body = _snapshot_body()          # a SyncError here saves nothing
+    body, content_hash = _snapshot_body()   # a SyncError here saves nothing
     try:
         resp = client.post(site + PUSH_PATH, content=body,
                            headers={**_bearer(code), "Content-Type": "application/json"})
@@ -634,11 +684,259 @@ def _pair_with_device_token(client: httpx.Client, site: str, code: str, label: s
     log.info("owner_sync.paired host=%s via=device_token verify_status=%s", host,
              resp.status_code)
     # The verifying push was a real sync: record it like any other.
-    result, backoff = _record_push(connection_id, site, resp, ["paired"])
+    result, backoff = _record_push(connection_id, site, resp, ["paired"], content_hash)
     engine = _engine
     if engine is not None:
         engine.apply_result(result, backoff)
     return status_view()
+
+
+# ---------------------------------------------------------------------------
+# One-click pairing: browser approval (what Connect does)
+# ---------------------------------------------------------------------------
+
+class _RedactPollSecret(logging.Filter):
+    """httpx logs every request line, URL included, at INFO; the poll URL
+    carries the pairing request's polling secret in its query. Redact it
+    before any handler sees the record."""
+
+    _SECRET = re.compile(r"(\brequest=)[^&\s\"']+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 — never break logging
+            return True
+        if AUTHORIZE_POLL_PATH in message and "request=" in message:
+            record.msg = self._SECRET.sub(r"\1[redacted]", message)
+            record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactPollSecret())
+
+_pairing_lock = threading.Lock()
+_pairing: Optional[dict] = None
+_pairing_sleep: Callable[[float], None] = time.sleep      # test seam
+_pairing_clock: Callable[[], float] = time.monotonic      # test seam
+
+
+def _spawn_pairing(pairing_id: str) -> None:
+    threading.Thread(target=run_pairing, args=(pairing_id,), name="ridian-owner-pairing",
+                     daemon=True).start()
+
+
+def pairing_view() -> Optional[dict]:
+    """The public side of the current browser pairing. Never the polling secret."""
+    with _pairing_lock:
+        p = _pairing
+        if p is None:
+            return None
+        return {"state": p["state"], "userCode": p["user_code"], "verifyUrl": p["verify_url"],
+                "expiresAt": p["expires_iso"], "label": p["label"], "detail": p["detail"]}
+
+
+def _set_pairing(pairing_id: str, **fields: Any) -> bool:
+    with _pairing_lock:
+        if _pairing is None or _pairing["id"] != pairing_id:
+            return False
+        _pairing.update(fields)
+        return True
+
+
+def _pairing_waiting(pairing_id: str) -> bool:
+    with _pairing_lock:
+        return _pairing is not None and _pairing["id"] == pairing_id and _pairing["state"] == "waiting"
+
+
+def _clamp_interval(value: Any) -> float:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        seconds = POLL_INTERVAL_DEFAULT
+    return max(POLL_INTERVAL_MIN, min(POLL_INTERVAL_MAX, seconds))
+
+
+def _valid_verify_url(url: str, site: str) -> bool:
+    """The approval page on the SAME site, and nothing else: a pairing answer
+    can never make this app open an arbitrary address."""
+    try:
+        parts, home = urlsplit(url or ""), urlsplit(site)
+        same_port = parts.port == home.port
+    except ValueError:
+        return False
+    return (parts.scheme == home.scheme and (parts.hostname or "") == (home.hostname or "")
+            and same_port and parts.path == APPROVE_PATH and not parts.username
+            and not parts.password and not parts.fragment and bool(parts.query))
+
+
+def start_browser_pairing(label: str = "") -> dict:
+    """Connect: ask the site for a pairing request and return what the
+    renderer needs to open the approval page and show the code. The polling
+    secret stays in this process's memory; a background thread polls until
+    the token arrives, the owner denies, or the request expires (10 minutes
+    at most). A newer Connect supersedes an older one."""
+    global _pairing
+    wanted = str(label or "").strip()
+    label = normalize_label(wanted) if wanted else default_label()
+    if not label:
+        raise SyncError(f"The device label must be 1 to {LABEL_MAX_CHARS} characters.")
+    current = _load()
+    if current.get("status") == "connected" and current.get("device_token"):
+        raise SyncError(f"This PC is already connected as {current.get('label') or 'this PC'}. "
+                        "Disconnect first.", status=409)
+    site = configured_site()
+    host = _host(site)
+    try:
+        with _client() as client:
+            resp = client.post(site + AUTHORIZE_START_PATH, json={"label": label})
+    except httpx.HTTPError as exc:
+        raise SyncError(f"Could not reach {host} ({type(exc).__name__}). Check the connection "
+                        "and try again.", status=502) from exc
+    if resp.status_code == 429:
+        minutes = int((_retry_after(resp) + 59) // 60)
+        raise SyncError(f"{host} is limiting connection attempts from this network. Try again in "
+                        f"about {minutes} minute(s).", status=429)
+    if resp.status_code in _UNAVAILABLE:
+        raise SyncError(f"{host} does not offer browser approval. Use Connect with a token "
+                        "under Advanced instead.", status=502)
+    if resp.status_code == 400:
+        raise SyncError(f"{host} did not accept the device label. Set a shorter one under "
+                        "Advanced and try again.")
+    if resp.status_code != 200:
+        raise SyncError(f"{host} could not start pairing (HTTP {resp.status_code}). Try again "
+                        "in a minute.", status=502)
+    data = _json(resp)
+    request_id = str(data.get("requestId") or "")
+    user_code = str(data.get("userCode") or "")
+    verify_url = str(data.get("verifyUrl") or "")
+    expires = _parse_iso(data.get("expiresAt"))
+    if not (TOKEN_RE.match(request_id) and USER_CODE_RE.match(user_code)
+            and _valid_verify_url(verify_url, site)):
+        raise SyncError(f"{host} answered with a pairing request this app does not recognise. "
+                        "Nothing was opened.", status=502)
+    started = _pairing_clock()
+    deadline = started + PAIRING_MAX_SECONDS
+    if expires is not None:
+        deadline = min(deadline, started + max(0.0, (expires - _utcnow()).total_seconds()))
+    pairing_id = secrets.token_hex(8)
+    with _pairing_lock:
+        _pairing = {"id": pairing_id, "state": "waiting", "request_id": request_id,
+                    "user_code": user_code, "verify_url": verify_url,
+                    "expires_iso": _iso(expires), "label": label, "site": site,
+                    "interval": _clamp_interval(data.get("interval")), "deadline": deadline,
+                    "detail": ""}
+    log.info("owner_sync.pairing_started host=%s", host)
+    _spawn_pairing(pairing_id)
+    return pairing_view() or {}
+
+
+def cancel_browser_pairing() -> Optional[dict]:
+    with _pairing_lock:
+        if _pairing is not None and _pairing["state"] == "waiting":
+            _pairing["state"] = "cancelled"
+            _pairing["detail"] = "Cancelled on this PC. Nothing was saved."
+            log.info("owner_sync.pairing_cancelled")
+    return pairing_view()
+
+
+def _revoke_quietly(site: str, token: str) -> bool:
+    try:
+        with _client(timeout=REVOKE_TIMEOUT) as client:
+            resp = client.post(site + REVOKE_PATH, headers=_bearer(token), json={})
+        return resp.status_code in (200, 204)
+    except httpx.HTTPError:
+        return False
+
+
+def _poll_pairing_once(pairing_id: str, pending: dict) -> str:
+    """One poll. Returns the pairing state, or "error" for a transient failure."""
+    site = pending["site"]
+    host = _host(site)
+    try:
+        with _client() as client:
+            resp = client.get(site + AUTHORIZE_POLL_PATH, params={"request": pending["request_id"]})
+    except httpx.HTTPError as exc:
+        log.warning("owner_sync.pairing_poll_unreachable type=%s", type(exc).__name__)
+        return "error"
+    data = _json(resp)
+    status = str(data.get("status") or "")
+    if resp.status_code == 200 and status == "pending":
+        _set_pairing(pairing_id, interval=_clamp_interval(data.get("interval", pending["interval"])))
+        return "waiting"
+    if resp.status_code == 200 and status == "denied":
+        _set_pairing(pairing_id, state="denied", detail=f"The request was denied on {host}. Nothing was saved.")
+        log.info("owner_sync.pairing_denied host=%s", host)
+        return "denied"
+    if resp.status_code == 200 and status == "approved":
+        token, expires = _issued(resp)
+        if not token:
+            _set_pairing(pairing_id, state="failed",
+                         detail=f"{host} approved the request but sent no usable token. Try again.")
+            log.warning("owner_sync.pairing_without_token")
+            return "failed"
+        with _pairing_lock:
+            claimed = (_pairing is not None and _pairing["id"] == pairing_id
+                       and _pairing["state"] == "waiting" and not is_connected())
+            if claimed:
+                _pairing.update(state="approved", detail="Connected.")
+        if not claimed:
+            # Cancelled, superseded, or connected another way while the
+            # approval was in flight: the site already issued this token, so
+            # retire it there too rather than leave it live and unused.
+            _revoke_quietly(site, token)
+            log.info("owner_sync.pairing_token_discarded")
+            return "cancelled"
+        try:
+            _connect(site, pending["label"], token, expires, via="browser")
+        except Exception as exc:  # e.g. DPAPI unavailable: nothing half-saved
+            _set_pairing(pairing_id, state="failed",
+                         detail="The approval arrived but this PC could not store the token. Try again.")
+            log.warning("owner_sync.pairing_store_failed type=%s", type(exc).__name__)
+            _revoke_quietly(site, token)
+            return "failed"
+        log.info("owner_sync.paired host=%s via=browser expires=%s", host, _iso(expires) or "unknown")
+        notify("paired")
+        return "approved"
+    if resp.status_code == 410:
+        _set_pairing(pairing_id, state="expired",
+                     detail="The approval request expired or was already used. Choose Connect to start again.")
+        log.info("owner_sync.pairing_expired host=%s", host)
+        return "expired"
+    log.warning("owner_sync.pairing_poll_status status=%s", resp.status_code)
+    return "error"
+
+
+def run_pairing(pairing_id: str) -> str:
+    """Polls until the pairing ends and returns its final state. Runs on its
+    own thread in production; tests call it with a fake clock and sleep."""
+    errors = 0
+    while True:
+        with _pairing_lock:
+            pending = dict(_pairing) if _pairing is not None and _pairing["id"] == pairing_id else None
+        if pending is None:
+            return "superseded"
+        if pending["state"] != "waiting":
+            return pending["state"]
+        if _pairing_clock() >= pending["deadline"]:
+            _set_pairing(pairing_id, state="expired",
+                         detail="The approval request expired. Choose Connect to start again.")
+            log.info("owner_sync.pairing_expired")
+            return "expired"
+        _pairing_sleep(pending["interval"])
+        if not _pairing_waiting(pairing_id):
+            continue
+        state = _poll_pairing_once(pairing_id, pending)
+        if state == "error":
+            errors += 1
+            if errors >= PAIRING_ERROR_LIMIT:
+                _set_pairing(pairing_id, state="failed",
+                             detail=f"Could not hear back from {_host(pending['site'])}. Choose Connect to try again.")
+                return "failed"
+            continue
+        errors = 0
+        if state != "waiting":
+            return state
 
 
 def disconnect() -> dict:
