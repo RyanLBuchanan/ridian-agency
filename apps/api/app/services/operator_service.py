@@ -92,6 +92,17 @@ class _OperationSession:
 
 
 _SESSIONS: dict[str, _OperationSession] = {}
+
+# v7.8 (0.9.18): closing the app. drain() sets _DRAINING; a run in flight
+# stops at its next step boundary (the model turn and its tools done and
+# mirrored) and is checkpointed; it resumes from there after the restart.
+# _IN_FLIGHT holds the runs inside a planner turn right now.
+_DRAINING = False
+_IN_FLIGHT: set = set()
+DRAIN_GRACE_SECONDS = 20.0
+CHECKPOINTED = "checkpointed"
+CLOSING_MESSAGE = ("Ridian Operator is closing — this run stopped after its current step "
+                   "and continues from there when Ridian Operator starts again.")
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 
 # v7.3 Ridian Jobs: in-process run lifecycle listeners. Pauses and endings
@@ -419,22 +430,11 @@ async def _persist_and_complete(emit: EmitFn, record: dict, folder: Path) -> dic
 
     snapshot = _finalized_view(record)
     try:
+        # v7.8: the run's own log is bookkeeping, never one of its files —
+        # it is written here but no longer listed as an artifact.
         (folder / "operation_log.json").write_text(
             json.dumps(snapshot, indent=2) + "\n", encoding="utf-8",
         )
-        # The operation_log.json itself is an artifact the renderer should see.
-        if not any(a["name"] == "operation_log.json" for a in record["artifacts"]):
-            await emit({"event": "artifact", "data": {
-                "name": "operation_log.json",
-                "path": str(folder / "operation_log.json"),
-                "kind": "json",
-            }})
-            record["artifacts"].append({
-                "name": "operation_log.json",
-                "path": str(folder / "operation_log.json"),
-                "kind": "json",
-            })
-            snapshot = _finalized_view(record)
     except OSError:
         pass
 
@@ -537,12 +537,23 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
             # AFTER mirroring so the history stays consistent for a /continue.
             if await _absorb_planner_spend(session.operator, message):
                 session.input_list = messages
-                return
+                return None
+            # v7.8: the app is closing. This step — the model turn and the
+            # tools it called — is done and mirrored: stop here, at a clean
+            # boundary, before the next model call. (A turn that ended with
+            # no tool call is the run's last; it finishes normally.)
+            if _DRAINING and tool_response is not None:
+                session.input_list = messages
+                return CHECKPOINTED
         if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
             break
+        if _DRAINING:
+            session.input_list = messages
+            return CHECKPOINTED
         restarts += 1
 
     session.input_list = messages
+    return None
 
 
 async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
@@ -1036,6 +1047,10 @@ EXPIRED_REASONS = {
     "state_unreadable": "This run's saved state could not be read.",
     "interrupted": ("Ridian Operator closed while this run was continuing after your "
                     "answer, so it cannot pick up from the middle."),
+    # v7.8: closed in the middle of a step (the drain's grace ran out, or
+    # the app was killed): the step's outcome is unknown.
+    "mid_step": ("Ridian Operator closed in the middle of one of this run's steps, "
+                 "so it cannot pick up from the middle."),
 }
 
 
@@ -1078,18 +1093,22 @@ def _restore_session(operation_id: str) -> "tuple[_OperationSession | None, str]
     payload, why = _usable_parked(operation_id)
     if payload is None:
         return None, why
+    session = _session_from_payload(payload)
+    _SESSIONS[operation_id] = session
+    log.info("operation.restored id=%s", operation_id)
+    return session, ""
+
+
+def _session_from_payload(payload: dict) -> "_OperationSession":
     folder = Path(payload["folder"])
     operator = OperatorContext(
         folder=folder, record=payload["record"], emit=_discard_event,
         sources_packet_text=str(payload.get("sources_packet_text") or ""),
         script_text=str(payload.get("script_text") or ""))
-    session = _OperationSession(
+    return _OperationSession(
         operator=operator, folder=folder, system=payload["system"],
         input_list=payload["input_list"],
         upload_state_line=str(payload.get("upload_state_line") or ""))
-    _SESSIONS[operation_id] = session
-    log.info("operation.restored id=%s", operation_id)
-    return session, ""
 
 
 def _mark_expired(op: dict, why: str, message: str, now: str) -> None:
@@ -1102,7 +1121,7 @@ def _mark_expired(op: dict, why: str, message: str, now: str) -> None:
         "started_at": now, "completed_at": now, "detail": message})
 
 
-def expire_run(operation_id: str, why: str) -> dict:
+def expire_run(operation_id: str, why: str, record: "dict | None" = None) -> dict:
     """v7.6: a parked run that truly cannot continue must not stay waiting.
     Marks it failed with the reason — the jobs engine reports that to the
     site (awaiting_input / awaiting_approval -> failed) — voids its staged
@@ -1112,13 +1131,29 @@ def expire_run(operation_id: str, why: str) -> dict:
     _drop_session(operation_id)
     ops = state_store.load_list("operations")
     op = next((o for o in ops if isinstance(o, dict) and o.get("id") == operation_id), None)
+    created = False
+    if op is None and isinstance(record, dict) and record.get("id") == operation_id:
+        # v7.8: closed mid-step before it ever parked — the record comes from
+        # its "running" file, so the run is on record, honestly ended.
+        try:
+            op = _finalized_view(record)
+        except (KeyError, TypeError, ValueError):
+            op = {k: record.get(k) for k in ("id", "command", "artifact_folder", "started_at")}
+            op.update(steps=list(record.get("steps") or []), errors=list(record.get("errors") or []),
+                      artifacts=list(record.get("artifacts") or []), needs_input=[])
+        for key in ("source", "job_id"):
+            if record.get(key):
+                op[key] = record[key]
+        op["status"] = "running"
+        ops.insert(0, op)
+        created = True
     info = {"id": operation_id, "command": str((op or {}).get("command") or ""),
             "status": str((op or {}).get("status") or ""), "reason": why, "expired": False}
     if op is None:
         info["message"] = ("This run is no longer on this PC, so there is nothing to "
                            "answer. Send the command again if it is still needed.")
         return info
-    if op.get("status") != "awaiting_input":
+    if op.get("status") not in ("awaiting_input", "running"):
         info["message"] = (f"This run already ended ({info['status'] or 'unknown'}), so "
                            "there is nothing left to answer. Send the command again if "
                            "it is still needed.")
@@ -1130,7 +1165,12 @@ def expire_run(operation_id: str, why: str) -> dict:
     from .approval_inbox_service import void_for_operation  # lazy: cycle
     void_for_operation(operation_id, "owning run expired")
     folder_log = Path(str(op.get("artifact_folder") or "")) / "operation_log.json"
-    if op.get("artifact_folder") and folder_log.is_file():
+    if created and op.get("artifact_folder") and folder_log.parent.is_dir() and not folder_log.exists():
+        try:
+            folder_log.write_text(json.dumps(op, indent=2, default=str) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+    elif op.get("artifact_folder") and folder_log.is_file():
         try:
             logged = json.loads(folder_log.read_text(encoding="utf-8"))
             if isinstance(logged, dict) and logged.get("id") == operation_id:
@@ -1204,27 +1244,145 @@ def live_state(operation_id: str = "", artifact_folder: str = "") -> dict:
 
 
 def recover_parked_runs() -> dict:
-    """v7.6, at startup before the jobs engine: every run still waiting
-    either has a usable parked file — it stays waiting and the answer
-    rebuilds it — or it expires now, so nothing sits "waiting" that can
-    never continue. Parked files of runs no longer waiting are removed."""
+    """At startup, before the jobs engine.
+
+    v7.6: every run still waiting either has a usable parked file — it
+    stays waiting and the answer rebuilds it — or it expires now, so nothing
+    sits "waiting" that can never continue.
+    v7.8: a run checkpointed at a step boundary when the app closed is
+    rebuilt now and listed in ``resumed`` (the lifespan continues it); a run
+    the app closed in the middle of a step expires honestly — on record
+    even if it never parked. Files of runs that already ended are removed."""
     kept: list[str] = []
     expired: list[str] = []
-    for op in state_store.load_list("operations"):
-        oid = str(op.get("id") or "") if isinstance(op, dict) else ""
-        if not oid or op.get("status") != "awaiting_input" or oid in _SESSIONS:
-            continue
-        payload, why = _usable_parked(oid)
-        if payload is not None:
-            kept.append(oid)
-        else:
-            expire_run(oid, why)
-            expired.append(oid)
+    resumed: list[str] = []
+    ops = {str(o.get("id")): o for o in state_store.load_list("operations")
+           if isinstance(o, dict) and o.get("id")}
+    seen: set = set()
     for oid in parked_runs.list_ids():
-        if oid not in kept and oid not in _SESSIONS:
-            parked_runs.delete(oid)
-    log.info("parked_runs.recovered kept=%d expired=%d", len(kept), len(expired))
-    return {"kept": kept, "expired": expired}
+        if oid in _SESSIONS:
+            continue
+        seen.add(oid)
+        payload = parked_runs.load(oid)
+        op = ops.get(oid)
+        state = payload["state"] if payload else ""
+        ended = op is not None and op.get("status") in _TERMINAL_STATUSES
+        if state == parked_runs.CHECKPOINT and not ended:
+            _SESSIONS[oid] = _session_from_payload(payload)
+            resumed.append(oid)
+        elif state == parked_runs.PARKED and op is not None and op.get("status") == "awaiting_input":
+            kept.append(oid)
+        elif state in (parked_runs.RUNNING, parked_runs.RESUMING) and not ended:
+            expire_run(oid, "mid_step" if state == parked_runs.RUNNING else "interrupted",
+                       record=payload["record"])
+            expired.append(oid)
+        elif payload is None and op is not None and op.get("status") == "awaiting_input":
+            expire_run(oid, "state_unreadable")
+            expired.append(oid)
+        else:
+            parked_runs.delete(oid)       # the run already ended, or nothing to go on
+    for oid, op in ops.items():
+        if oid in seen or oid in _SESSIONS or op.get("status") != "awaiting_input":
+            continue
+        expire_run(oid, "state_missing")
+        expired.append(oid)
+    log.info("parked_runs.recovered kept=%d expired=%d resumed=%d", len(kept), len(expired), len(resumed))
+    return {"kept": kept, "expired": expired, "resumed": resumed}
+
+
+# ---------------------------------------------------------------------------
+# v7.8 (0.9.18): closing the app — checkpoint at a step boundary, resume
+# ---------------------------------------------------------------------------
+
+def is_draining() -> bool:
+    return _DRAINING
+
+
+def is_live(operation_id: str) -> bool:
+    """A run this process holds in memory (in flight, parked, or resumed)."""
+    return str(operation_id or "") in _SESSIONS
+
+
+async def drain(grace: float = DRAIN_GRACE_SECONDS) -> dict:
+    """The app is closing (POST /app/drain, from Electron's before-quit).
+    No run starts or resumes from here on; each run in flight finishes its
+    current step and is checkpointed at the boundary. Waits up to ``grace``
+    seconds. A run still inside a step when the grace runs out is left
+    mid-step: its "running" file makes the restart expire it honestly."""
+    global _DRAINING
+    _DRAINING = True
+    log.info("operator.draining in_flight=%d", len(_IN_FLIGHT))
+    deadline = time.monotonic() + max(0.0, float(grace))
+    while _IN_FLIGHT and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    checkpointed = sorted(oid for oid in list(_SESSIONS)
+                          if (parked_runs.load(oid) or {}).get("state") == parked_runs.CHECKPOINT)
+    mid_step = sorted(_IN_FLIGHT)
+    log.info("operator.drained checkpointed=%d mid_step=%d", len(checkpointed), len(mid_step))
+    return {"checkpointed": checkpointed, "mid_step": mid_step}
+
+
+def end_drain() -> None:
+    """Tests (and a quit that was called off): runs may start again."""
+    global _DRAINING
+    _DRAINING = False
+
+
+async def _checkpoint(session: "_OperationSession", emit: EmitFn) -> dict:
+    record = session.operator.record
+    parked_runs.save(session, parked_runs.CHECKPOINT)
+    log.info("operation.checkpointed id=%s", record.get("id"))
+    await emit({"event": "checkpointed", "data": {"id": record.get("id"), "message": CLOSING_MESSAGE}})
+    return {"id": record.get("id"), "checkpointed": True}
+
+
+def _resume_emit(record: dict) -> EmitFn:
+    """Where a resumed run's events go: the PC window's job-run feed, so the
+    window can follow it live as it follows a claimed job run."""
+    try:
+        from . import jobs_service     # lazy: jobs_service imports this module
+        return jobs_service.event_sink(str(record.get("id") or ""))
+    except Exception:  # noqa: BLE001 — the run never depends on being watched
+        return _discard_event
+
+
+async def resume_checkpointed(operation_id: str) -> dict:
+    """v7.8: continue a run checkpointed when the app closed, from exactly
+    the step boundary it stopped at — the same conversation, record and
+    context, no new message. Scheduled by the lifespan after the sweep."""
+    session = _SESSIONS.get(operation_id)
+    if session is None or _DRAINING:
+        return {}
+    apply_to_environment()
+    record = session.operator.record
+    emit = _resume_emit(record)
+    session.operator.emit = emit
+    parked_runs.save(session, parked_runs.RUNNING)
+    log.info("operation.resuming_checkpoint id=%s", operation_id)
+    try:
+        from . import jobs_service
+        jobs_service.note_run_resumed(record)
+    except Exception:  # noqa: BLE001 — notification is never load-bearing
+        log.warning("operator.resume_notice_failed", exc_info=True)
+    await emit({"event": "start", "data": {
+        "id": record.get("id"), "command": record.get("command", ""), "resumed": True,
+        "artifact_folder": str(session.folder), "started_at": record.get("started_at", "")}})
+    _announce_run(record, "resumed")
+    outcome = None
+    async with _session_lock(operation_id):
+        _IN_FLIGHT.add(operation_id)
+        try:
+            outcome = await _run_turn(session, list(session.input_list or []))
+        except Exception as exc:  # noqa: BLE001
+            log.exception("operator.resume_failed id=%s", operation_id)
+            msg = f"Planner failed: {type(exc).__name__}: {exc}"
+            record["errors"].append(msg)
+            await emit({"event": "error", "data": {"message": msg}})
+        finally:
+            _IN_FLIGHT.discard(operation_id)
+    if outcome == CHECKPOINTED:
+        return await _checkpoint(session, emit)
+    return await _persist_or_pause(emit, record, session.folder)
 
 
 def _apply_restore_answer(operator: OperatorContext, answer: str) -> str:
@@ -1292,6 +1450,10 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
         await emit({"event": "error", "data": {
             "message": "ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key."
         }})
+        return {}
+    if _DRAINING:
+        await emit({"event": "error", "data": {
+            "message": "Ridian Operator is closing — send this again after it restarts."}})
         return {}
 
     command = (command or "").strip()
@@ -1363,18 +1525,27 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
         input_list=[], upload_state_line=upload_state_line,
     )
     _SESSIONS[record["id"]] = session
+    # v7.8: on disk from the start, so a run the app closes mid-step is
+    # expired honestly after the restart even if it never parked.
+    parked_runs.save(session, parked_runs.RUNNING)
 
     planner_input = _build_planner_input(command, upload_state_line)
     if staged_note:
         planner_input = staged_note + "\n" + planner_input
+    outcome = None
+    _IN_FLIGHT.add(record["id"])
     try:
-        await _run_turn(session, [{"role": "user", "content": planner_input}])
+        outcome = await _run_turn(session, [{"role": "user", "content": planner_input}])
     except Exception as exc:  # noqa: BLE001 — top-level safety net
         log.exception("operator.run_failed id=%s", record.get("id"))
         msg = f"Planner failed: {type(exc).__name__}: {exc}"
         record["errors"].append(msg)
         await emit({"event": "error", "data": {"message": msg}})
+    finally:
+        _IN_FLIGHT.discard(record["id"])
 
+    if outcome == CHECKPOINTED:
+        return await _checkpoint(session, emit)
     return await _persist_or_pause(emit, record, folder)
 
 
@@ -1389,6 +1560,10 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
     answer = (answer or "").strip()
     if not answer:
         await emit({"event": "error", "data": {"message": "Type an answer first."}})
+        return {}
+    if _DRAINING:
+        await emit({"event": "error", "data": {"message":
+            "Ridian Operator is closing — answer again after it restarts; the question stays open."}})
         return {}
 
     # v7.6: a parked run survives a restart — its session is rebuilt from the
@@ -1408,6 +1583,9 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         operator.emit = emit                 # rebind to THIS request's SSE stream
         record = operator.record
         record["awaiting_input"] = False     # cleared; set again only if it re-asks
+        # v7.8: questions raised from here on are this turn's; the ones
+        # before were answered by this answer (one card per pending item).
+        record["needs_turn_start"] = len(record.get("needs_input") or [])
         # v7.6: until it parks again or ends, a restart means the run was
         # interrupted mid-way — it must never replay from the question.
         parked_runs.save(session, parked_runs.RESUMING)
@@ -1467,12 +1645,18 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         )
         items = (session.input_list or []) + [{"role": "user", "content": user_content}]
 
+        outcome = None
+        _IN_FLIGHT.add(operation_id)
         try:
-            await _run_turn(session, items)
+            outcome = await _run_turn(session, items)
         except Exception as exc:  # noqa: BLE001
             log.exception("operator.continue_failed id=%s", operation_id)
             msg = f"Planner failed: {type(exc).__name__}: {exc}"
             record["errors"].append(msg)
             await emit({"event": "error", "data": {"message": msg}})
+        finally:
+            _IN_FLIGHT.discard(operation_id)
 
+        if outcome == CHECKPOINTED:
+            return await _checkpoint(session, emit)
         return await _persist_or_pause(emit, record, session.folder)

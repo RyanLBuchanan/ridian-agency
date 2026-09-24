@@ -202,6 +202,8 @@ def collect_project_artifacts(project_id: str) -> Optional[dict]:
         chats += 1
         artifacts = []
         for a in op.get("artifacts", []):
+            if (a or {}).get("name") == "operation_log.json":
+                continue    # v7.8: bookkeeping, never a file (older runs listed it)
             if not isinstance(a, dict):
                 continue
             path = str(a.get("path") or "")

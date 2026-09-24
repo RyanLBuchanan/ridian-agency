@@ -3,6 +3,10 @@
 Reads recent inbox threads and sorts them into four buckets:
 
   - needs_reply    : they spoke last; the ball is in the operator's court
+                     — never a no-reply or marketing sender (v7.8)
+  - also_in_inbox  : v7.8 — they spoke last, but it is bulk mail: a
+                     List-Unsubscribe header, bulk/list/junk precedence, or
+                     a no-reply / marketing address. Counted, not owed.
   - waiting_on     : the operator spoke last; waiting on someone else
   - gone_quiet     : no message in 7+ days and still unresolved
   - from_contacts  : any thread with a party in the contacts store
@@ -23,6 +27,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import re
 from email.utils import parseaddr
 from typing import Optional
 
@@ -42,7 +47,16 @@ GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 DEFAULT_QUERY = "in:inbox -in:chats newer_than:30d"
 DEFAULT_MAX_THREADS = 25
 QUIET_AFTER_DAYS = 7
-_HEADERS = ["From", "To", "Cc", "Subject", "Date"]
+_HEADERS = ["From", "To", "Cc", "Subject", "Date",
+            # v7.8: what marks bulk mail (never a reply owed).
+            "List-Unsubscribe", "Precedence"]
+
+# v7.8: senders that never expect an answer. Local parts: no-reply variants
+# and marketing / newsletter mailboxes; or a marketing/newsletter mail host.
+_NO_ANSWER_LOCAL = re.compile(
+    r"^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|marketing|"
+    r"newsletters?|news|promotions?)([-_.+][^@]*)?$")
+_NO_ANSWER_HOST = re.compile(r"^(marketing|newsletters?|news|promo)\.")
 
 
 class InboxError(Exception):
@@ -107,6 +121,21 @@ def _headers_of(message: dict) -> dict:
     return {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in hs}
 
 
+def _bulk_reason(headers: dict, sender: str) -> str:
+    """v7.8: why the latest inbound message is bulk mail, or "" when it is
+    a person who may expect an answer."""
+    if headers.get("list-unsubscribe", "").strip():
+        return "list-unsubscribe"
+    if headers.get("precedence", "").strip().lower() in ("bulk", "list", "junk"):
+        return "bulk precedence"
+    local, _, host = (sender or "").partition("@")
+    if _NO_ANSWER_LOCAL.match(local):
+        return "no-reply sender" if "reply" in local or "daemon" in local else "marketing sender"
+    if host and _NO_ANSWER_HOST.match(host):
+        return "marketing sender"
+    return ""
+
+
 def normalize_thread(raw: dict, me: str) -> dict:
     """Gmail thread -> the flat shape classification works on. Only header
     metadata and Gmail's own snippet are kept; message bodies are never
@@ -116,6 +145,7 @@ def normalize_thread(raw: dict, me: str) -> dict:
     parties: list[str] = []
     subject = ""
     last_from = ""
+    last_headers: dict = {}
     last_ms = 0
     for m in messages:
         h = _headers_of(m)
@@ -131,6 +161,7 @@ def normalize_thread(raw: dict, me: str) -> dict:
         if ms >= last_ms:
             last_ms = ms
             last_from = _addr(h.get("from", ""))
+            last_headers = h
     last_dt = (_dt.datetime.fromtimestamp(last_ms / 1000)
                if last_ms else None)
     return {
@@ -139,6 +170,7 @@ def normalize_thread(raw: dict, me: str) -> dict:
         "parties": parties,
         "last_from": last_from,
         "from_me": bool(me) and last_from == me,
+        "bulk": _bulk_reason(last_headers, last_from),
         "last_message_at": last_dt.isoformat(timespec="minutes") if last_dt else "",
         "_last_dt": last_dt,
         "message_count": len(messages),
@@ -203,10 +235,12 @@ def classify(threads: list[dict], *, now: Optional[_dt.datetime] = None,
                             reverse=True)
         return sorted(by_recency, key=_rank)
 
-    needs_reply, waiting_on, gone_quiet, from_contacts = [], [], [], []
+    needs_reply, waiting_on, gone_quiet, from_contacts, also_in_inbox = [], [], [], [], []
     for r in enriched:
         if r["from_me"]:
             waiting_on.append(r)          # the operator spoke last
+        elif r.get("bulk"):
+            also_in_inbox.append(r)       # v7.8: bulk mail is never a reply owed
         else:
             needs_reply.append(r)         # they spoke last — operator's move
         if r["days_quiet"] is not None and r["days_quiet"] >= quiet_after_days:
@@ -219,6 +253,7 @@ def classify(threads: list[dict], *, now: Optional[_dt.datetime] = None,
         "waiting_on": _order(waiting_on),
         "gone_quiet": _order(gone_quiet),
         "from_contacts": _order(from_contacts),
+        "also_in_inbox": _order(also_in_inbox),
         "quiet_after_days": quiet_after_days,
         "checked": len(enriched),
         "quiet_before": quiet_before.isoformat(timespec="minutes"),

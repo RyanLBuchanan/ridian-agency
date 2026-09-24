@@ -18,6 +18,12 @@ an answer is accepted until the run parks again or ends. A "resuming" file
 found after a restart means the app closed mid-run: the run cannot pick up
 from the middle, so it expires rather than replaying from the question.
 
+v7.8 (0.9.18): "running" is written when a run starts, so a run the app
+closes in the middle of a step expires honestly after the restart even if
+it never parked. "checkpoint" is written when the app closes between steps
+(operator_service.drain): the step finished and was mirrored, and the run
+resumes from exactly there after the restart.
+
 Local only: never synced, exported, logged or snapshotted (the backups
 copy only the top-level ``state/*.json``).
 """
@@ -40,6 +46,9 @@ log = logging.getLogger("ridian.parked_runs")
 VERSION = 1
 PARKED = "parked"
 RESUMING = "resuming"
+RUNNING = "running"          # v7.8: mid-step — a restart expires it
+CHECKPOINT = "checkpoint"    # v7.8: stopped at a step boundary — a restart resumes it
+_STATES = (PARKED, RESUMING, RUNNING, CHECKPOINT)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
@@ -129,7 +138,7 @@ def load(operation_id: str) -> Optional[dict]:
     record = data.get("record") if isinstance(data, dict) else None
     if (data.get("version") != VERSION
             or data.get("operation_id") != operation_id
-            or data.get("state") not in (PARKED, RESUMING)
+            or data.get("state") not in _STATES
             or not isinstance(record, dict) or record.get("id") != operation_id
             or not isinstance(data.get("input_list"), list)
             or not isinstance(data.get("system"), str)

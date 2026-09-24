@@ -30,6 +30,11 @@ from typing import Any, Awaitable, Callable
 # hallucinating planner can't invent a "category" that bypasses validation.
 ALLOWED_PROPOSAL_KINDS: tuple[str, ...] = ("fact", "contact", "follow_up", "decision")
 
+# v7.8: the planner's own question (request_missing_info). A gate's question
+# about a pending item is canonical; the planner's paraphrase of it while it
+# is pending never becomes a second card.
+PLANNER_ITEM = "request_missing_info"
+
 # An emit function pushes a single dict event into the SSE queue. Mirrors
 # the operator_service.EmitFn alias so the two stay interchangeable.
 EmitFn = Callable[[dict], Awaitable[None]]
@@ -80,6 +85,10 @@ class OperatorContext:
     # directly to disk and return the path, or write here as a convenience.
     sources_packet_text: str = ""
     script_text: str = ""
+    # v7.8: the step running right now. An artifact emitted while it runs
+    # names it as the step that produced it, so the window can put the
+    # output's action ("Open in Gmail", "Open") on that step.
+    _current_step: str = ""
 
     async def emit_step(self, *, name: str, status: str, detail: str = "") -> None:
         """Append a step to the record and broadcast it via SSE."""
@@ -98,11 +107,17 @@ class OperatorContext:
             step["detail"] = detail or step.get("detail", "")
             if status in ("completed", "failed", "skipped"):
                 step["completed_at"] = now
+        if status == "running":
+            self._current_step = name
+        elif name == self._current_step:
+            self._current_step = ""
         await self.emit({"event": "step", "data": dict(step)})
 
-    async def emit_artifact(self, *, name: str, path: str, kind: str) -> None:
-        """Record an artifact + broadcast it (renderer adds to artifacts panel)."""
-        artifact = {"name": name, "path": path, "kind": kind}
+    async def emit_artifact(self, *, name: str, path: str, kind: str, step: "str | None" = None) -> None:
+        """Record an artifact + broadcast it. v7.8: ``step`` is the step that
+        produced it — by default the step running right now ("" when none)."""
+        artifact = {"name": name, "path": path, "kind": kind,
+                    "step": self._current_step if step is None else step}
         self.record["artifacts"].append(artifact)
         await self.emit({"event": "artifact", "data": artifact})
 
@@ -120,6 +135,7 @@ class OperatorContext:
         options: "list[dict] | None" = None,
         buttons_only: bool = False,
         task_summary: str = "",
+        item: str = "",
     ) -> dict:
         """Record a missing-information request + broadcast it to the renderer.
 
@@ -128,7 +144,29 @@ class OperatorContext:
         guessing or failing. The renderer shows an amber "Ridian needs one
         answer" card; the user replies in the command box and the 5-minute
         conversational-follow-up window carries the context forward.
+
+        v7.8 — ONE question per pending item. ``item`` names what is being
+        asked (the gate and its subject: "invoice:<customer>", "research_plan";
+        PLANNER_ITEM for the planner's own question). Within one turn (since
+        the last answer, ``record["needs_turn_start"]``):
+          - the same item asked again updates its entry IN PLACE (same id,
+            the gate's latest wording) — never a second card;
+          - the planner's own question while a gate's question is pending is
+            folded into it: nothing new is recorded or shown, and the entry
+            returned carries ``folded: True``.
+        On 2026-09-24 one invoice quantity rendered as three cards: the gate
+        asked twice (qty 1, then no qty) and the planner paraphrased it.
         """
+        needs = self.record.setdefault("needs_input", [])
+        pending = needs[int(self.record.get("needs_turn_start") or 0):]
+        item = (item or "").strip()
+        if item == PLANNER_ITEM:
+            gate = next((n for n in reversed(pending)
+                         if n.get("item") and n.get("item") != PLANNER_ITEM), None)
+            if gate is not None:
+                self.record["awaiting_input"] = True
+                return {**gate, "folded": True}
+        same = next((n for n in pending if item and n.get("item") == item), None)
         entry = {
             "id": "need_" + uuid.uuid4().hex[:10],
             "question": (question or "").strip(),
@@ -150,10 +188,14 @@ class OperatorContext:
             # needed."), so the ask never lives only in a scrolled-away
             # chat bubble. Blank = the strip shows the question itself.
             "task_summary": (task_summary or "").strip(),
+            "item": item,
         }
-        if "needs_input" not in self.record:
-            self.record["needs_input"] = []
-        self.record["needs_input"].append(entry)
+        if same is not None:
+            same.update({k: entry[k] for k in ("question", "context_hint", "options",
+                                               "buttons_only", "task_summary")})
+            entry = same
+        else:
+            needs.append(entry)
         # v2: mark the run as paused-awaiting-the-user. operator_service uses
         # this to keep the operation session alive for a /continue instead of
         # finalizing, and to compute "awaiting_input" (not "partial") status.

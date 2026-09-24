@@ -211,7 +211,7 @@ def test_park_then_restart_then_answer_continues_and_the_site_hears_it(monkeypat
         # The restart: sessions, locks and the engine are gone; the disk stays.
         engine.detach()
         _restart()
-        assert operator_service.recover_parked_runs() == {"kept": [oid], "expired": []}
+        assert operator_service.recover_parked_runs() == {"kept": [oid], "expired": [], "resumed": []}
         after = _engine(clock)
         after.recover()
         await after.tick()
@@ -282,8 +282,8 @@ def test_an_unresumable_parked_job_fails_is_reported_and_notifies_once(monkeypat
         parked_runs.delete(oid)
         engine.detach()
         _restart()
-        assert operator_service.recover_parked_runs() == {"kept": [], "expired": [oid]}
-        assert operator_service.recover_parked_runs() == {"kept": [], "expired": []}
+        assert operator_service.recover_parked_runs() == {"kept": [], "expired": [oid], "resumed": []}
+        assert operator_service.recover_parked_runs() == {"kept": [], "expired": [], "resumed": []}
         after = _engine(clock)
         after.recover()
         assert await after.tick() == "result_accepted"
@@ -376,7 +376,7 @@ def test_a_restart_during_a_resumed_turn_expires_instead_of_replaying_the_questi
         oid = (await operator_service.run_operation(command=COMMAND, emit=emit))["id"]
         parked_runs.save(operator_service._SESSIONS[oid], parked_runs.RESUMING)
         _restart()
-        assert operator_service.recover_parked_runs() == {"kept": [], "expired": [oid]}
+        assert operator_service.recover_parked_runs() == {"kept": [], "expired": [oid], "resumed": []}
         return oid
 
     oid = asyncio.run(scenario())
@@ -424,7 +424,7 @@ def test_dismiss_removes_the_parked_file_and_the_sweep_removes_strays(monkeypatc
     stray = SimpleNamespace(operator=SimpleNamespace(record={"id": oid}, sources_packet_text="", script_text=""),
                             folder=Path("C:/runs/x"), system="s", input_list=[], upload_state_line="")
     assert parked_runs.save(stray)
-    assert operator_service.recover_parked_runs() == {"kept": [], "expired": []}
+    assert operator_service.recover_parked_runs() == {"kept": [], "expired": [], "resumed": []}
     assert not parked_runs.exists(oid)
 
 

@@ -295,3 +295,36 @@ def test_a_run_opened_right_after_claim_is_never_failed_while_alive(harness_outp
     assert ("controls: failed run=Failed | unknown run with no log=Could not load run (failed dot=false) "
             "| dismissed run whose folder says waiting=Cancelled (armed=false)") in section
     assert "never Failed while alive" in section
+
+
+
+def test_bulk_mail_sits_under_the_replies_in_the_brief(harness_output):
+    """v7.8: the brief keeps its nine sections; no-reply and marketing mail
+    is a count under "Needs your reply" ("Also in the inbox"), never a row
+    among the replies owed. (Matched without the middle dot, which the
+    harness output decodes in the console code page.)"""
+    brief = harness_output.split("Morning brief view", 1)[1].split("View switching", 1)[0]
+    for width in (1280, 1100, 1000, 940, 880):
+        line = next(l for l in brief.splitlines() if l.startswith(f"{width}px:"))
+        assert "9 sections | Also in the inbox" in line and " 3 | view" in line, line
+
+
+def test_the_ui_cleanup_items_hold_in_the_real_renderer(harness_output):
+    """v7.8 (0.9.18), in Chromium: outputs' actions on the steps that made
+    them (and Gmail at the end of the reply); Files only for documents,
+    spreadsheets and PDFs, never the run log; one card per pending question;
+    obligations editable beside Delete; the mic's Recording indicator and
+    Start task never leave anything stale."""
+    section = harness_output.split("--- UI cleanup (real DOM) ---", 1)[1].split("--- Sidebar ---", 1)[0]
+    assert ("steps: gmail=Open in Gmail invoice=Open in QuickBooks proposal=Open+Open deck=Open in Slides "
+            "| reply=Open in Gmail") in section
+    assert ("files: shown=true title=Files names=proposal.docx,proposal.md | no documents: files=false card=true "
+            "error=true | nothing: card=false") in section
+    assert "question: cards=1 text=How many of 'WRN Monthly Support Retainer' should I invoice?" in section
+    assert "obligations: buttons=Edit+Delete prefilled=" in section
+    assert '"cadence":{"kind":"weekly","weekday":4}}' in section
+    assert ('mic: double-press recorders=1 | recording=true | run started: recording=false status="" transcribed=0 '
+            'composer="" | run finished: status="" | during a run: recording=true | stopped: composer="dictated words"') in section
+    assert 'start task: while running composer="my own draft" | with a question pending sent=run:Invoice Greg Alexander' in section
+    assert 'composer="" armed=false' in section
+    assert "ui cleanup: actions on their steps, Files for documents only, one card per question" in section

@@ -42,9 +42,18 @@ def create_run_folder(task: str) -> Path:
     outputs = _outputs_dir()
     outputs.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    folder = outputs / f"{stamp}_{_slugify(task)}"
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+    base = f"{stamp}_{_slugify(task)}"
+    # v7.8: a run always gets its OWN folder. Two runs of the same command
+    # in the same second used to share one and overwrite each other's
+    # operation_log.json.
+    for n in range(1, 1000):
+        folder = outputs / (base if n == 1 else f"{base}-{n}")
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            return folder
+        except FileExistsError:
+            continue
+    raise OSError(f"no free run folder for {base}")
 
 
 def write_artifact(folder: Path, filename: str, content: str) -> Path:

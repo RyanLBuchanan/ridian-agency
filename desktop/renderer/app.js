@@ -4699,6 +4699,8 @@ function _opSetRunning(running) {
     OPERATOR.runBtn.setAttribute('aria-label', running ? 'Running…' : 'Send');
   }
   if (OPERATOR.cancelBtn) OPERATOR.cancelBtn.classList.toggle('hidden', !running);
+  // v7.8: a run that finished leaves no stale Recording… behind.
+  if (!running) _opMicSync();
   // v3.6: "Continue in background" rides only while a run is in flight.
   const bgBtn = document.getElementById('operator-background-btn');
   if (bgBtn) bgBtn.classList.toggle('hidden', !running);
@@ -4869,6 +4871,8 @@ function _opClearLive() {
   }
   if (OPERATOR.timeline) OPERATOR.timeline.innerHTML = '';
   if (OPERATOR.artifactsList) OPERATOR.artifactsList.innerHTML = '';
+  { const files = document.getElementById('operator-files'); if (files) files.classList.add('hidden'); }
+  { const acts = document.querySelector('#operator-receipt .operator-receipt-actions'); if (acts) acts.remove(); }
   if (OPERATOR.errors) { OPERATOR.errors.innerHTML = ''; OPERATOR.errors.classList.add('hidden'); }
   if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.add('hidden');
   if (OPERATOR.audioPlayer) OPERATOR.audioPlayer.classList.add('hidden');
@@ -4933,6 +4937,9 @@ function _opArchiveCurrentTurn() {
       try { b.disabled = true; } catch (_) {}
       b.classList.add('is-frozen');
     });
+    // v7.8: a status line ("Recording…", "Transcribing…") is live state,
+    // never part of a finished turn.
+    clone.querySelectorAll('.operator-actions-status').forEach((n) => { n.textContent = ''; });
     turn.appendChild(clone);
     any = true;
   }
@@ -4964,10 +4971,13 @@ function _opRenderStep(step) {
       <span class="operator-step-body">
         <span class="operator-step-name"></span>
         <span class="operator-step-detail"></span>
+        <span class="operator-step-actions"></span>
       </span>
       <span class="operator-step-time"></span>
     `;
     OPERATOR.timeline.appendChild(li);
+    // v7.8: outputs that arrived before their step row.
+    (operatorState.artifacts || []).forEach((a) => _opAttachStepAction(a));
   }
   li.classList.remove('is-running', 'is-completed', 'is-failed', 'is-skipped');
   li.classList.add('is-' + step.status);
@@ -4996,9 +5006,92 @@ const OPERATOR_EXTERNAL_KINDS = {
   spreadsheet:  { label: 'Open in Sheets', meta: 'Live Google Sheet (in your Drive)' },
   slides:       { label: 'Open in Slides', meta: 'Live Google Slides deck (in your Drive)' },
   browser:      { label: 'Open again',     meta: 'Opened in your browser' },
-  quickbooks_invoice: { label: 'Review in QuickBooks',
+  quickbooks_invoice: { label: 'Open in QuickBooks',
                         meta: 'UNSENT invoice — review and send in QuickBooks' },
 };
+
+// v7.8: what the Files list holds — documents, spreadsheets and PDFs. Every
+// other output (a Gmail draft, an invoice, a deck, a Drive folder, audio)
+// has its action on the step that produced it, not in a list.
+const _OP_FILE_KINDS = new Set(['docx', 'markdown', 'text', 'pdf', 'spreadsheet', 'csv', 'xlsx']);
+// Older runs' artifacts carry no step: the step each external kind comes from.
+const _OP_KIND_STEP = {
+  gmail_draft: 'gmail_draft', quickbooks_invoice: 'quickbooks_invoice', spreadsheet: 'spreadsheet',
+  slides: 'deck', browser: 'browser', drive_folder: 'drive_upload',
+};
+
+function _opIsFile(art) {
+  return !!art && art.name !== 'operation_log.json' && _OP_FILE_KINDS.has(art.kind);
+}
+
+// One action element for an output: a link for a live thing elsewhere
+// (Gmail, QuickBooks, Sheets…), an Open button for a local file.
+function _opArtifactAction(art, className) {
+  const extKind = OPERATOR_EXTERNAL_KINDS[art.kind];
+  if (extKind && art.path && art.path.startsWith('http')) {
+    // Electron routes target=_blank http(s) links to the default browser.
+    const a = document.createElement('a');
+    a.className = className;
+    a.textContent = extKind.label;
+    a.href = art.path;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('data-artifact-name', art.name);
+    return a;
+  }
+  if (extKind) return null;             // an external output with no link
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = className;
+  b.textContent = 'Open';
+  b.setAttribute('data-artifact-name', art.name);
+  b.addEventListener('click', () => _opOpenArtifactFile(art.name));
+  return b;
+}
+
+// v7.8: put an output's action on the step that produced it. The step row
+// may not exist yet (the artifact can arrive first); _opRenderStep attaches
+// whatever is waiting for it.
+function _opAttachStepAction(art) {
+  if (!OPERATOR.timeline || !art || art.name === 'operation_log.json' || art.kind === 'audio') return;
+  const stepName = art.step || _OP_KIND_STEP[art.kind] || '';
+  if (!stepName) return;
+  const li = OPERATOR.timeline.querySelector(`[data-step="${CSS.escape(stepName)}"]`);
+  if (!li) return;
+  const row = li.querySelector('.operator-step-actions');
+  if (!row || row.querySelector(`[data-artifact-name="${CSS.escape(art.name)}"]`)) return;
+  const action = _opArtifactAction(art, 'operator-step-action');
+  if (action) row.appendChild(action);
+}
+
+// v7.8: "Open in Gmail" also closes the reply — one per draft this run made.
+function _opRenderReplyActions() {
+  const card = document.getElementById('operator-receipt');
+  if (!card) return;
+  let row = card.querySelector('.operator-receipt-actions');
+  const drafts = (operatorState.artifacts || []).filter((a) => a.kind === 'gmail_draft' && a.path && a.path.startsWith('http'));
+  if (!drafts.length) { if (row) row.remove(); return; }
+  if (!row) {
+    row = document.createElement('div');
+    row.className = 'operator-receipt-actions';
+    card.appendChild(row);
+  }
+  row.replaceChildren(...drafts.map((a) => _opArtifactAction(a, 'operator-receipt-action')));
+}
+
+// v7.8: the outputs card shows exactly when something in it has content.
+function _opSyncOutputsCard() {
+  const card = OPERATOR.artifactsCard;
+  if (!card) return;
+  const shown = (el) => !!el && !el.classList.contains('hidden');
+  const status = document.getElementById('operator-actions-status');
+  const visible = shown(document.getElementById('operator-files'))
+    || shown(document.getElementById('operator-audio-player'))
+    || shown(document.getElementById('operator-proposals'))
+    || shown(OPERATOR.errors)
+    || !!(status && status.textContent.trim());
+  card.classList.toggle('hidden', !visible);
+}
 
 function _opIconForKind(kind) {
   if (kind === 'audio') return '♪';
@@ -5013,10 +5106,16 @@ function _opIconForKind(kind) {
 }
 
 function _opRenderArtifact(art) {
-  if (!OPERATOR.artifactsCard) return;
-  OPERATOR.artifactsCard.classList.remove('hidden');
+  if (!OPERATOR.artifactsCard || !art || art.name === 'operation_log.json') return;
+  // v7.8: the action on the step that made it (and Gmail at the reply's end).
+  _opAttachStepAction(art);
+  if (art.kind === 'gmail_draft') _opRenderReplyActions();
+  if (art.kind === 'audio' && art.name.toLowerCase().endsWith('.mp3')) _opShowAudio(art.name);
+  if (!_opIsFile(art)) return;
+  const files = document.getElementById('operator-files');
+  if (files) files.classList.remove('hidden');
   // Replace if same name already present (avoid duplicates).
-  const existing = OPERATOR.artifactsList.querySelector(`[data-artifact-name="${art.name}"]`);
+  const existing = OPERATOR.artifactsList.querySelector(`[data-artifact-name="${CSS.escape(art.name)}"]`);
   if (existing) existing.remove();
 
   const li = document.createElement('li');
@@ -5033,30 +5132,9 @@ function _opRenderArtifact(art) {
     </span>
   `;
 
-  if (extKind && art.path && art.path.startsWith('http')) {
-    // External artifacts (Gmail draft, Drive folder, Sheet, Slides deck)
-    // open in the user's default browser. Electron renderer respects
-    // target=_blank for http(s) URLs via shell.openExternal.
-    const openA = document.createElement('a');
-    openA.className = 'operator-artifact-open';
-    openA.textContent = extKind.label;
-    openA.href = art.path;
-    openA.target = '_blank';
-    openA.rel = 'noopener noreferrer';
-    li.appendChild(openA);
-  } else {
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'operator-artifact-open';
-    openBtn.textContent = 'Open';
-    openBtn.addEventListener('click', () => _opOpenArtifactFile(art.name));
-    li.appendChild(openBtn);
-  }
+  const open = _opArtifactAction(art, 'operator-artifact-open');
+  if (open) li.appendChild(open);
   OPERATOR.artifactsList.appendChild(li);
-
-  if (art.kind === 'audio' && art.name.toLowerCase().endsWith('.mp3')) {
-    _opShowAudio(art.name);
-  }
 }
 
 function _opShowAudio(filename) {
@@ -5186,6 +5264,7 @@ function _opRenderReceipt(text) {
   if (window.RidianMarkdown) window.RidianMarkdown.renderInto(body, text);
   else body.textContent = text;
   card.classList.remove('hidden');
+  _opRenderReplyActions();
 }
 
 // The question renders as a normal Ridian message in the thread — no separate
@@ -5197,8 +5276,27 @@ function _opRenderReceipt(text) {
 function _opRenderNeedsInput(need, interactive = true) {
   const host = OPERATOR.live || OPERATOR.active;
   if (!host) return;
-  // Dedupe by id on rehydrate + live double-fires.
-  if (need.id && host.querySelector(`[data-need-id="${need.id}"]`)) return;
+  // Dedupe by id on rehydrate + live double-fires. v7.8: the same pending
+  // item asked again arrives with the SAME id and its latest wording — the
+  // one card is updated in place, never a second card.
+  const existing = need.id ? host.querySelector(`[data-need-id="${need.id}"]`) : null;
+  if (existing) {
+    const q = existing.querySelector('.operator-question-q');
+    if (q) q.textContent = need.question || '';
+    let hint = existing.querySelector('.operator-question-hint');
+    if (need.context_hint) {
+      if (!hint) {
+        hint = document.createElement('span');
+        hint.className = 'operator-question-hint';
+        existing.appendChild(hint);
+      }
+      hint.textContent = need.context_hint;
+    } else if (hint) {
+      hint.remove();
+    }
+    if (interactive) _opRenderOptionsRow(need);
+    return;
+  }
   const block = document.createElement('div');
   block.className = 'operator-question';
   if (need.id) block.setAttribute('data-need-id', need.id);
@@ -5493,35 +5591,81 @@ function _opSpeak(text) {
 
 /* ----- v1.7: voice input (MediaRecorder → Whisper) ----- */
 
-const _micState = { recorder: null, chunks: [], timer: null };
+const _micState = { recorder: null, chunks: [], timer: null, starting: false, discard: false, runSeq: 0 };
+// v7.8: bumped whenever a run starts (a new command, an answer, Start task).
+// A dictation belongs to the composer it began in: one still recording or
+// transcribing when a run starts is dropped, never pasted in afterwards.
+var _opRunSeq = 0;
+const _MIC_RECORDING = 'Recording…';
+
+function _opMicActive() {
+  return !!(_micState.recorder && _micState.recorder.state === 'recording');
+}
+
+// v7.8: the indicator says Recording… only while a recorder really is.
+function _opMicSync() {
+  const btn = document.getElementById('operator-mic-btn');
+  const active = _opMicActive();
+  if (btn) btn.classList.toggle('is-recording', active);
+  if (!active && OPERATOR.status && OPERATOR.status.textContent.startsWith(_MIC_RECORDING)) _opSetStatus('');
+}
+
+// v7.8: a run is starting — it owns the composer now.
+function _opRunStarting() {
+  _opRunSeq += 1;
+  if (_opMicActive()) {
+    _micState.discard = true;
+    _micState.recorder.stop();
+  }
+  _opMicSync();
+}
 
 async function _opMicToggle() {
   const btn = document.getElementById('operator-mic-btn');
   if (!btn) return;
-  if (_micState.recorder && _micState.recorder.state === 'recording') {
+  if (_opMicActive()) {
     _micState.recorder.stop();
     return;
   }
+  // v7.8: a second press while the microphone is still opening must not
+  // start a second recorder (the first would record, orphaned, for 60 s).
+  if (_micState.starting || _micState.recorder) return;
+  _micState.starting = true;
   // v3.8 barge-in: reaching for the mic yields the floor — stop the current
   // read before recording starts. Not a mute; the next reply speaks.
   _opStopSpeaking();
   let stream;
+  let recorder;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
   } catch (err) {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
     _opSetStatus('Microphone unavailable — check Windows mic permissions for Ridian.', 'err');
     return;
+  } finally {
+    _micState.starting = false;
   }
   _micState.chunks = [];
-  const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+  _micState.discard = false;
+  _micState.runSeq = _opRunSeq;
   _micState.recorder = recorder;
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) _micState.chunks.push(e.data); };
   recorder.onstop = async () => {
     clearTimeout(_micState.timer);
     btn.classList.remove('is-recording');
+    stream.getTracks().forEach((t) => t.stop());
+    const stale = () => _micState.discard || _micState.runSeq !== _opRunSeq;
+    if (stale()) {
+      // A run started while recording: the dictation is dropped and the
+      // indicator clears (nothing lands in the composer after the start).
+      _micState.recorder = null;
+      _micState.chunks = [];
+      _opMicSync();
+      return;
+    }
     btn.classList.add('is-transcribing');
     _opSetStatus('Transcribing…');
-    stream.getTracks().forEach((t) => t.stop());
     try {
       const blob = new Blob(_micState.chunks, { type: 'audio/webm' });
       const b64 = await new Promise((resolve, reject) => {
@@ -5538,7 +5682,9 @@ async function _opMicToggle() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
       const text = (data.text || '').trim();
-      if (text && OPERATOR.command) {
+      if (stale()) {
+        _opSetStatus('');     // a run started while transcribing: dropped
+      } else if (text && OPERATOR.command) {
         OPERATOR.command.value = OPERATOR.command.value
           ? OPERATOR.command.value.trimEnd() + ' ' + text
           : text;
@@ -5558,7 +5704,7 @@ async function _opMicToggle() {
   };
   recorder.start();
   btn.classList.add('is-recording');
-  _opSetStatus('Recording… click the mic again to stop.');
+  _opSetStatus(`${_MIC_RECORDING} click the mic again to stop.`);
   // Hard cap: auto-stop at 60 seconds.
   _micState.timer = setTimeout(() => {
     if (recorder.state === 'recording') recorder.stop();
@@ -5772,6 +5918,12 @@ function _opHandleEvent(evt) {
     case 'error':
       _opRenderError((evt.data && evt.data.message) || 'Unknown error');
       break;
+    case 'checkpointed':
+      // v7.8: the app is closing; the run stopped after its current step and
+      // continues from there when Ridian Operator starts again.
+      operatorState.finalRecord = { ...(evt.data || {}), status: 'running' };
+      _opSetStatus((evt.data && evt.data.message) || 'Paused until Ridian Operator starts again.', 'ok');
+      break;
     case 'expired':
       // v7.6: the answer reached a run that cannot continue.
       _opSetAnswerMode(null);
@@ -5833,6 +5985,7 @@ async function _opSubmit(e) {
   // per-conversation, never a lingering global state. (The answer-mode
   // branch above resumes the SAME run and deliberately keeps the mute.)
   _opResetSessionMute();
+  _opRunStarting();
   _opArchiveCurrentTurn();
   _opClearLive();
   if (OPERATOR.command) OPERATOR.command.value = '';
@@ -5908,6 +6061,7 @@ function _opAppendUserMessage(text) {
 // via POST /operations/{id}/continue — the operation keeps its context/folder.
 async function _opContinue(opId, answer) {
   if (operatorState.running) return;
+  _opRunStarting();
   if (OPERATOR.command) OPERATOR.command.value = '';
   _opAppendUserMessage(answer);
   // Dispatched: disarming also clears the question furniture (placeholder +
@@ -6332,8 +6486,8 @@ async function loadOperatorRun(run) {
   _opSetAnswerMode(null);
 
   // Reveal panels even before the fetch resolves so the user has feedback.
+  // v7.8: the outputs card shows itself when it has content.
   if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
-  if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.remove('hidden');
   if (OPERATOR.folder) OPERATOR.folder.textContent = run.artifact_folder;
   _opSetStatusDot('running');
   if (OPERATOR.statusLabel) OPERATOR.statusLabel.textContent = 'Loading saved run…';
@@ -6392,6 +6546,9 @@ async function loadOperatorRun(run) {
   // Replay artifacts. For audio, check the presence flag from the backend so
   // a stale log path that no longer exists doesn't show a broken player.
   const artifacts = Array.isArray(log.artifacts) ? log.artifacts : [];
+  // v7.8: the reloaded run's outputs are its artifact state (the reply's
+  // Gmail action and late-arriving step rows read it).
+  operatorState.artifacts = artifacts.filter((a) => a && a.name !== 'operation_log.json');
   artifacts.forEach((a) => {
     if (a.kind === 'audio' && a.name === 'audiobook.mp3' && !data.has_audio) {
       // Don't render an audio artifact if the file is no longer on disk;
@@ -6596,11 +6753,11 @@ function _opRenderRehydrateError(folder, message, status) {
       </ul>
     `;
   }
-  // Show the artifacts card so the "Open output folder" button is reachable.
-  if (OPERATOR.artifactsCard) OPERATOR.artifactsCard.classList.remove('hidden');
+  // Show the Files section so the "Open output folder" button is reachable.
+  { const files = document.getElementById('operator-files'); if (files) files.classList.remove('hidden'); }
   if (OPERATOR.artifactsList) {
     OPERATOR.artifactsList.innerHTML =
-      '<li class="dashboard-empty">No artifacts could be loaded for this run.</li>';
+      '<li class="dashboard-empty">No files could be loaded for this run.</li>';
   }
   // Wire activeRunFolder so Open output folder still works even without a log.
   operatorState.active = {
@@ -6608,6 +6765,14 @@ function _opRenderRehydrateError(folder, message, status) {
   };
   operatorState.finalRecord = null;
   operatorState.drive = null;
+}
+
+// v7.8: the outputs card shows exactly when something in it has content —
+// recomputed on any change inside it.
+if (OPERATOR.artifactsCard && typeof MutationObserver !== 'undefined') {
+  new MutationObserver(_opSyncOutputsCard).observe(OPERATOR.artifactsCard, {
+    subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'],
+  });
 }
 
 // Wire up the operator surface (only fires if elements exist).
@@ -8119,8 +8284,8 @@ function _folderArtifactsRender(card, data) {
   const path = active ? (parent ? `${parent.name} / ${active.name}` : active.name) : 'this folder';
   const n = data.artifacts || 0;
   const c = data.chats || 0;
-  title.textContent = `Artifacts in ${path} — `
-    + (n === 1 ? '1 artifact' : `${n} artifacts`)
+  title.textContent = `Files in ${path} — `
+    + (n === 1 ? '1 file' : `${n} files`)
     + ` from ${c === 1 ? '1 operation' : `${c} operations`}`;
   body.innerHTML = '';
   if (!data.runs || !data.runs.length) {
@@ -8554,13 +8719,26 @@ function _briefDealRows(items) {
     </div>`).join('');
 }
 
-function _briefSection(title, section, rowFn) {
+function _briefSection(title, section, rowFn, extra = '') {
   const body = section.unavailable
     ? `<p class="brief-note brief-unavailable">${_briefEsc(section.note)}</p>`
     : (section.empty
         ? `<p class="brief-note">${_briefEsc(section.note)}</p>`
         : rowFn(section.items));
-  return `<section class="brief-section"><h3>${_briefEsc(title)}</h3>${body}</section>`;
+  return `<section class="brief-section"><h3>${_briefEsc(title)}</h3>${body}${extra}</section>`;
+}
+
+// v7.8: bulk mail (no-reply, marketing, mailing lists) is never a reply
+// owed — counted under the replies, listed on request.
+function _briefAlsoInInbox(section) {
+  const also = section && section.also_in_inbox;
+  if (!also || !also.count) return '';
+  const rows = (also.items || []).map((m) => `
+        <div class="brief-item">
+          <span class="brief-item-main">${_briefEsc(m.subject)}</span>
+          <span class="brief-item-meta">${_briefEsc(m.last_from)}${m.bulk ? ` · ${_briefEsc(m.bulk)}` : ''}</span>
+        </div>`).join('');
+  return `<details class="brief-also"><summary>Also in the inbox · ${Number(also.count)}</summary>${rows}</details>`;
 }
 
 async function loadMorningBrief() {
@@ -8589,7 +8767,7 @@ async function loadMorningBrief() {
         <div class="brief-item">
           <span class="brief-item-main">${(m.contact && m.contact.in_pipeline) ? '<span class="brief-pipeline">PIPELINE</span> ' : ''}${_briefEsc(m.subject)}</span>
           <span class="brief-item-meta">${_briefEsc(m.contact ? `${m.contact.name} <${m.last_from}>` : m.last_from)}${m.days_quiet != null ? ` · ${m.days_quiet}d ago` : ''}</span>
-        </div>`).join('')),
+        </div>`).join(''), _briefAlsoInInbox(s.needs_reply)),
       _briefSection('Due today', s.due_today, _briefDealRows),
       _briefSection('Due this week', s.due_this_week, _briefDealRows),
       _briefSection('Gone quiet (no touch in 7+ days)', s.stale_deals, _briefDealRows),
@@ -8906,6 +9084,7 @@ async function loadObligations() {
           ${due ? `<button type="button" class="btn btn-compact ob-start">Start task</button>
           <button type="button" class="btn btn-ghost btn-compact ob-complete">Mark complete</button>
           <button type="button" class="btn btn-ghost btn-compact ob-dismiss">Dismiss this one</button>` : ''}
+          <button type="button" class="btn btn-ghost btn-compact ob-edit">Edit</button>
           <button type="button" class="btn btn-ghost btn-compact ob-delete">Delete</button>
         </span>
       </div>`;
@@ -8917,6 +9096,7 @@ async function loadObligations() {
       wire('.ob-start', () => _obStartTask(ob));
       wire('.ob-complete', () => _obAction(id, 'complete'));
       wire('.ob-dismiss', () => _obAction(id, 'dismiss'));
+      wire('.ob-edit', () => _obEditRow(row, ob));
       wire('.ob-delete', () => { if (window.confirm(`Delete obligation "${ob.name}"?`)) _obAction(id, 'delete'); });
     });
   } catch (err) {
@@ -8928,31 +9108,111 @@ function _obStartTask(ob) {
   // Surfacing only: starting the task runs it as a normal command through
   // EVERY existing gate — customer provenance, catalog id selection,
   // quantity, approval. Nothing is staged by the obligation itself.
-  closeObligations();
+  // v7.8: it always starts a NEW run, or does nothing — the task text never
+  // sits in the composer afterwards: not when a run is already going (the
+  // composer is left alone), not as the answer to a pending question
+  // (answer mode is disarmed first), not behind a refused view change.
+  if (!_showWorkspaceView(null)) return;
   if (!OPERATOR.command) return;
+  if (operatorState.running) {
+    _opSetStatus('Ridian is still working — start the task when this run finishes.', 'err');
+    return;
+  }
+  _opSetAnswerMode(null);
+  operatorState.pendingDecisionText = null;
   OPERATOR.command.value = ob.task;
   _opSubmit(new Event('submit'));
+}
+
+// The cadence fields shared by the add form and the edit form.
+function _obSyncCadenceFields(els) {
+  const k = els['ob-kind'].value;
+  els['ob-day'].hidden = k !== 'monthly_day';
+  els['ob-weekday'].hidden = k !== 'weekly';
+  els['ob-date'].hidden = k !== 'once';
+}
+
+function _obCadenceFrom(els) {
+  const kind = els['ob-kind'].value;
+  const cadence = { kind };
+  if (kind === 'monthly_day') cadence.day = parseInt(els['ob-day'].value, 10);
+  if (kind === 'weekly') cadence.weekday = parseInt(els['ob-weekday'].value, 10);
+  if (kind === 'once') cadence.date = els['ob-date'].value;
+  return cadence;
+}
+
+// v7.8: edit an obligation in place — name, task text, cadence — beside
+// Delete. Saved through POST /obligations/{id}/update (validated on the
+// server, PC only). The fields are filled by value, never as markup.
+function _obEditRow(row, ob) {
+  const c = ob.cadence || {};
+  const form = document.createElement('form');
+  form.className = 'obligation-add obligation-edit';
+  form.setAttribute('autocomplete', 'off');
+  form.innerHTML = `
+    <input name="ob-name" type="text" class="settings-input" required aria-label="Name" />
+    <textarea name="ob-task" class="settings-input" rows="2" required aria-label="Task to start"></textarea>
+    <div class="obligation-add-row">
+      <select name="ob-kind" class="settings-input settings-input-compact" aria-label="Cadence">
+        <option value="monthly_first_business_day">Monthly — first business day</option>
+        <option value="monthly_day">Monthly — day N</option>
+        <option value="weekly">Weekly</option>
+        <option value="once">One time</option>
+      </select>
+      <input name="ob-day" type="number" min="1" max="31" class="settings-input settings-input-compact" placeholder="Day (1-31)" />
+      <select name="ob-weekday" class="settings-input settings-input-compact">
+        <option value="0">Monday</option><option value="1">Tuesday</option>
+        <option value="2">Wednesday</option><option value="3">Thursday</option>
+        <option value="4">Friday</option><option value="5">Saturday</option>
+        <option value="6">Sunday</option>
+      </select>
+      <input name="ob-date" type="date" class="settings-input settings-input-compact" />
+      <button type="submit" class="btn btn-primary btn-compact ob-save">Save</button>
+      <button type="button" class="btn btn-ghost btn-compact ob-cancel">Cancel</button>
+    </div>
+    <span class="ob-edit-status" role="status" aria-live="polite"></span>`;
+  const els = form.elements;
+  els['ob-name'].value = ob.name || '';
+  els['ob-task'].value = ob.task || '';
+  els['ob-kind'].value = c.kind || 'monthly_first_business_day';
+  if (c.day != null) els['ob-day'].value = String(c.day);
+  if (c.weekday != null) els['ob-weekday'].value = String(c.weekday);
+  if (c.date) els['ob-date'].value = String(c.date);
+  els['ob-kind'].addEventListener('change', () => _obSyncCadenceFields(els));
+  _obSyncCadenceFields(els);
+  form.querySelector('.ob-cancel').addEventListener('click', () => loadObligations());
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = form.querySelector('.ob-edit-status');
+    try {
+      const res = await fetch(`${BACKEND}/obligations/${encodeURIComponent(ob.id)}/update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: els['ob-name'].value.trim(), task: els['ob-task'].value.trim(),
+                               cadence: _obCadenceFrom(els) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+      loadObligations();
+      refreshObligationsDue();
+    } catch (err) {
+      status.className = 'ob-edit-status is-err';
+      status.textContent = `✗ ${err && err.message ? err.message : err}`;
+    }
+  });
+  row.replaceChildren(form);
+  els['ob-name'].focus();
 }
 
 const _obligationAddForm = document.getElementById('obligation-add-form');
 if (_obligationAddForm) {
   const kindSel = _obligationAddForm.elements['ob-kind'];
-  const sync = () => {
-    const k = kindSel.value;
-    _obligationAddForm.elements['ob-day'].hidden = k !== 'monthly_day';
-    _obligationAddForm.elements['ob-weekday'].hidden = k !== 'weekly';
-    _obligationAddForm.elements['ob-date'].hidden = k !== 'once';
-  };
+  const sync = () => _obSyncCadenceFields(_obligationAddForm.elements);
   kindSel.addEventListener('change', sync);
   sync();
   _obligationAddForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const els2 = _obligationAddForm.elements;
-    const kind = els2['ob-kind'].value;
-    const cadence = { kind };
-    if (kind === 'monthly_day') cadence.day = parseInt(els2['ob-day'].value, 10);
-    if (kind === 'weekly') cadence.weekday = parseInt(els2['ob-weekday'].value, 10);
-    if (kind === 'once') cadence.date = els2['ob-date'].value;
+    const cadence = _obCadenceFrom(els2);
     const status = document.getElementById('obligation-add-status');
     try {
       const res = await fetch(`${BACKEND}/obligations`, {
@@ -9245,6 +9505,17 @@ function _jobsHandleNotice(notice) {
     };
     const idle = _activeWorkspaceView === null && !operatorState.running && !operatorState.answerMode;
     if (idle) _jobsOpenLive(notice);
+  } else if (notice.kind === 'resumed') {
+    // v7.8: checkpointed when the app closed, continuing now — pinned like a
+    // claimed run, and opened from its live state when the pane is idle.
+    _jobsActiveRun = {
+      id: notice.operation_id, command: notice.command || '', status: 'running',
+      source: notice.job_id ? 'owner-workspace' : '', artifact_folder: notice.artifact_folder || '', completed_at: '',
+    };
+    const idle = _activeWorkspaceView === null && !operatorState.running && !operatorState.answerMode;
+    if (idle && notice.artifact_folder) {
+      loadOperatorRun({ artifact_folder: notice.artifact_folder, name: notice.command || '', id: notice.operation_id || '' });
+    }
   } else {
     _jobsActiveRun = null;
     refreshApprovalsBadge();

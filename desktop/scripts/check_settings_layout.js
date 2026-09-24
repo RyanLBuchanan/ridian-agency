@@ -202,7 +202,10 @@ const BRIEF_PAYLOAD = {
   sections: {
     obligations_due: { items: [{ id: 'obl1', name: 'WRN Monthly Support Retainer — Greg Alexander', status: 'overdue', days_overdue: 7, due_date: '2026-08-03', missed_periods: 1 }], empty: false, unavailable: false, note: '' },
     today_events: { items: [{ summary: 'Sandy discovery call', start: '2026-08-07T10:00:00', all_day: false, location: 'Zoom' }], empty: false, unavailable: false, note: '' },
-    needs_reply: { items: [{ subject: 'Re: Discovery scope', last_from: 'sandy@gulf.test', days_quiet: 1, contact: { name: 'Sandy Alvarez', in_pipeline: true } }], empty: false, unavailable: false, note: '' },
+    needs_reply: { items: [{ subject: 'Re: Discovery scope', last_from: 'sandy@gulf.test', days_quiet: 1, contact: { name: 'Sandy Alvarez', in_pipeline: true } }], empty: false, unavailable: false, note: '',
+      also_in_inbox: { count: 3, items: [{ subject: 'Fall sale', last_from: 'marketing@brand.test', bulk: 'marketing sender' },
+        { subject: 'Your digest', last_from: 'updates@tool.test', bulk: 'bulk precedence' },
+        { subject: '[repo] New issue', last_from: 'noreply@github.com', bulk: 'no-reply sender' }] } },
     due_today: { items: [], empty: true, unavailable: false, note: 'Nothing due today — no next actions dated today or overdue.' },
     due_this_week: { items: [{ id: 'd1', contact: 'Cam Fox', title: 'Week deal', stage: 'lead', next_action: 'Prep demo', next_action_date: '2026-08-10', last_touch: '2026-08-05T09:00:00', overdue: false }], empty: false, unavailable: false, note: '' },
     stale_deals: { items: [], empty: true, unavailable: false, note: 'No active deals have gone quiet — every deal has a touch in the last 7 days.' },
@@ -251,6 +254,12 @@ const MEASURE_BRIEF = `(() => {
     sectionTitles: sections.map((s) => (s.querySelector('h3') || {}).textContent || ''),
     sectionRects: sections.map((s) => read(s)),
     bodyText: (document.getElementById('brief-body').textContent || '').slice(0, 200),
+    // v7.8: bulk mail sits under "Needs your reply" as a count, not as replies.
+    alsoInInbox: (() => {
+      const sec = sections.find((x) => ((x.querySelector('h3') || {}).textContent || '').includes('Needs your reply'));
+      const also = sec ? sec.querySelector('.brief-also > summary') : null;
+      return { summary: also ? also.textContent : '', replies: sec ? sec.querySelectorAll(':scope > .brief-item').length : -1 };
+    })(),
   };
 })()`;
 
@@ -284,6 +293,10 @@ function checkBrief(width, b) {
       problems.push(`[${width}px] section missing from the view: "${want}" `
         + `(rendered: ${b.sectionTitles.join(' | ') || 'none'})`);
     }
+  }
+  // v7.8: bulk mail is counted under the replies, never listed as one.
+  if (b.alsoInInbox.summary !== 'Also in the inbox · 3' || b.alsoInInbox.replies !== 1) {
+    problems.push(`[${width}px] "Needs your reply" does not keep bulk mail apart: ${JSON.stringify(b.alsoInInbox)}`);
   }
   // 5. Sections must not overlap each other.
   for (let i = 0; i + 1 < b.sectionRects.length; i++) {
@@ -764,6 +777,189 @@ async function openAfterClaimProbe() {
   }
 }
 
+// v7.8 (0.9.18): runs INSIDE the renderer page — the UI cleanup items.
+async function uiCleanupProbe() {
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  const NL = String.fromCharCode(10);
+  const out = {};
+  const realFetch = window.fetch;
+  const calls = [];
+  let obligations = [];
+  const json = (obj, status) => new Response(JSON.stringify(obj), { status: status || 200, headers: { 'content-type': 'application/json' } });
+  const sse = (events) => new Response(events.map((e) => 'event: ' + e.event + NL + 'data: ' + JSON.stringify(e.data) + NL + NL).join(''),
+    { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  window.fetch = async (url, opts) => {
+    const u = new URL(String(url), 'http://x');
+    const body = opts && opts.body ? (() => { try { return JSON.parse(opts.body); } catch (_) { return opts.body; } })() : null;
+    calls.push({ path: u.pathname, method: (opts && opts.method) || 'GET', body });
+    if (u.pathname.endsWith('/operations/transcribe')) return json({ text: 'dictated words' });
+    if (u.pathname.endsWith('/operations/run')) return sse([{ event: 'end', data: {} }]);
+    if (u.pathname.endsWith('/obligations') && (!opts || !opts.method || opts.method === 'GET')) {
+      return json({ obligations, due: [], findings: {} });
+    }
+    if (/\/obligations\/[^/]+\/update$/.test(u.pathname)) return json({ ok: true });
+    if (u.pathname.endsWith('/approvals')) return json({ approvals: [], count: 0 });
+    if (u.pathname.endsWith('/approvals/questions')) return json({ count: 0, questions: [] });
+    return new Response('{}', { status: 404 });
+  };
+  const texts = (nodes) => [...nodes].map((n) => (n.textContent || '').trim());
+  try {
+    if (typeof closeSettings === 'function') closeSettings();
+    _opNewChat();
+    if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+
+    // 1. Actions on the steps that produced them; Files only for documents.
+    const GMAIL = 'https://mail.google.com/mail/u/0/#drafts?compose=r2097253336';
+    const QBO = 'https://app.qbo.intuit.com/app/invoice?txnId=9&deeplinkcompanyid=1';
+    const ev = (event, data) => _opHandleEvent({ event, data });
+    ev('start', { id: 'op_ui_1', command: 'Recap the Navigator call, draft Greg, invoice him', artifact_folder: 'C:/harness/ui1', started_at: '' });
+    ev('step', { name: 'gmail_draft', status: 'running', detail: 'Drafting' });
+    ev('artifact', { name: 'gmail_draft_r209725333', path: GMAIL, kind: 'gmail_draft', step: 'gmail_draft' });
+    ev('step', { name: 'gmail_draft', status: 'completed', detail: 'Draft saved to Gmail Drafts' });
+    ev('step', { name: 'quickbooks_invoice', status: 'running', detail: 'Creating' });
+    ev('artifact', { name: 'qb_invoice_1042', path: QBO, kind: 'quickbooks_invoice', step: 'quickbooks_invoice' });
+    ev('step', { name: 'quickbooks_invoice', status: 'completed', detail: 'Invoice 1042 created' });
+    ev('step', { name: 'proposal', status: 'running', detail: 'Writing' });
+    ev('artifact', { name: 'proposal.docx', path: 'C:/harness/ui1/proposal.docx', kind: 'docx', step: 'proposal' });
+    ev('artifact', { name: 'proposal.md', path: 'C:/harness/ui1/proposal.md', kind: 'markdown', step: 'proposal' });
+    ev('step', { name: 'proposal', status: 'completed', detail: 'Written' });
+    // An output that arrives before its step row, and the old-style run log.
+    ev('artifact', { name: 'Navigator deck', path: 'https://docs.google.com/presentation/d/abc', kind: 'slides', step: 'deck' });
+    ev('step', { name: 'deck', status: 'completed', detail: 'Deck built' });
+    ev('artifact', { name: 'operation_log.json', path: 'C:/harness/ui1/operation_log.json', kind: 'json' });
+    ev('message', { text: 'Drafted the follow-up to Greg and created invoice 1042.' });
+    ev('complete', { id: 'op_ui_1', status: 'completed', artifacts: [] });
+    await settle(50);
+    const stepActions = (name) => texts(document.querySelectorAll(`#operator-timeline [data-step="${name}"] .operator-step-actions > *`));
+    const files = document.getElementById('operator-files');
+    out.steps = { gmail: stepActions('gmail_draft'), invoice: stepActions('quickbooks_invoice'),
+                  proposal: stepActions('proposal'), deck: stepActions('deck') };
+    out.gmailHref = (document.querySelector('#operator-timeline [data-step="gmail_draft"] .operator-step-actions a') || {}).href || '';
+    out.reply = texts(document.querySelectorAll('#operator-receipt .operator-receipt-actions > *'));
+    out.files = { shown: !files.classList.contains('hidden'), title: (files.querySelector('h3') || {}).textContent || '',
+                  names: texts(document.querySelectorAll('#operator-artifacts-list .operator-artifact-name')) };
+
+    // A run with no document and an error: no Files, and the error still shows.
+    _opNewChat();
+    ev('start', { id: 'op_ui_2', command: 'Draft a note to Sandy', artifact_folder: 'C:/harness/ui2', started_at: '' });
+    ev('step', { name: 'gmail_draft', status: 'running', detail: 'Drafting' });
+    ev('artifact', { name: 'gmail_draft_x', path: GMAIL, kind: 'gmail_draft', step: 'gmail_draft' });
+    ev('error', { message: 'Calendar unavailable (not connected).' });
+    await settle(50);
+    out.noDocs = { files: !document.getElementById('operator-files').classList.contains('hidden'),
+                   card: !OPERATOR.artifactsCard.classList.contains('hidden'),
+                   error: !OPERATOR.errors.classList.contains('hidden') };
+    _opNewChat();
+    ev('start', { id: 'op_ui_3', command: 'What is on my calendar?', artifact_folder: 'C:/harness/ui3', started_at: '' });
+    ev('message', { text: 'Nothing today.' });
+    await settle(50);
+    out.nothing = { card: !OPERATOR.artifactsCard.classList.contains('hidden') };
+
+    // 2. The same pending item asked again: one card, the latest wording.
+    _opNewChat();
+    ev('start', { id: 'op_ui_4', command: 'Invoice Greg Alexander $1,000', artifact_folder: 'C:/harness/ui4', started_at: '' });
+    ev('needs_input', { id: 'need_q', question: "Confirm the quantity for 'WRN Monthly Support Retainer' — 1 isn't a count you typed.", options: [] });
+    ev('needs_input', { id: 'need_q', question: "How many of 'WRN Monthly Support Retainer' should I invoice?", options: [] });
+    await settle(30);
+    out.question = { cards: document.querySelectorAll('.operator-question:not(.operator-expired)').length,
+                     text: texts(document.querySelectorAll('.operator-question .operator-question-q')) };
+    _opSetAnswerMode(null);
+
+    // 3. Obligations: Edit beside Delete, prefilled, saved by value.
+    obligations = [{ id: 'obl_ui000001', name: 'WRN retainer — Greg', task: 'Invoice Greg Alexander $1,000',
+                     cadence: { kind: 'monthly_day', day: 1 }, next_due: '2026-10-01', due: null, last_completed_iso: '' }];
+    await loadObligations();
+    const row = document.querySelector('.obligation-item[data-ob-id="obl_ui000001"]');
+    out.obButtons = row ? texts(row.querySelectorAll('.approval-actions button')) : [];
+    if (row) row.querySelector('.ob-edit').click();
+    const form = document.querySelector('.obligation-edit');
+    out.obPrefill = form ? { name: form.elements['ob-name'].value, task: form.elements['ob-task'].value,
+                             kind: form.elements['ob-kind'].value, day: form.elements['ob-day'].value,
+                             dayShown: !form.elements['ob-day'].hidden } : null;
+    if (form) {
+      form.elements['ob-name'].value = 'WRN Monthly Support Retainer — Greg Alexander';
+      form.elements['ob-kind'].value = 'weekly';
+      form.elements['ob-kind'].dispatchEvent(new Event('change'));
+      form.elements['ob-weekday'].value = '4';
+      form.requestSubmit();
+      await settle(80);
+    }
+    const save = calls.filter((c) => /\/obligations\/obl_ui000001\/update$/.test(c.path)).pop();
+    out.obSaved = save ? save.body : null;
+
+    // 4. The mic follows the run; Start task leaves nothing behind.
+    const recorders = [];
+    let tracksStopped = 0;
+    function FakeRecorder() { this.state = 'inactive'; recorders.push(this); }
+    FakeRecorder.prototype.start = function () { this.state = 'recording'; };
+    FakeRecorder.prototype.stop = function () {
+      if (this.state !== 'recording') return;
+      this.state = 'inactive';
+      if (this.ondataavailable) this.ondataavailable({ data: new Blob(['x']) });
+      setTimeout(() => this.onstop && this.onstop(), 0);
+    };
+    const realRecorder = window.MediaRecorder;
+    const realGUM = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    window.MediaRecorder = FakeRecorder;
+    navigator.mediaDevices.getUserMedia = async () => { await settle(30);
+      return { getTracks: () => [{ stop() { tracksStopped += 1; } }] }; };
+    const mic = document.getElementById('operator-mic-btn');
+    const statusText = () => (OPERATOR.status ? OPERATOR.status.textContent : '');
+    const transcribes = () => calls.filter((c) => c.path.endsWith('/operations/transcribe')).length;
+    try {
+      _opNewChat();
+      // a double press while the microphone opens starts ONE recorder
+      const p1 = _opMicToggle(); const p2 = _opMicToggle();
+      await p1; await p2;
+      out.micDouble = recorders.length;
+      out.micRecording = { status: statusText(), cls: mic.classList.contains('is-recording') };
+      // a run starts while recording: the dictation is dropped, the indicator clears
+      OPERATOR.command.value = 'Recap Tuesday with the Chamber';
+      await _opSubmit();
+      await settle(60);
+      out.micAfterStart = { status: statusText(), cls: mic.classList.contains('is-recording'),
+                            transcribed: transcribes(), composer: OPERATOR.command.value, tracksStopped };
+      // a run finishing leaves no stale Recording… (none is recording now)
+      _opSetStatus('Recording… click the mic again to stop.');
+      _opSetRunning(true); _opSetRunning(false);
+      out.micAfterFinish = statusText();
+      // dictating the next command while a run works: kept, and pasted when it stops
+      _opSetRunning(true);
+      await _opMicToggle();
+      _opSetRunning(false);
+      out.micDuringRun = { status: statusText(), cls: mic.classList.contains('is-recording') };
+      await _opMicToggle();
+      await settle(120);
+      out.micStopped = { composer: OPERATOR.command.value, cls: mic.classList.contains('is-recording'), transcribed: transcribes() };
+    } finally {
+      window.MediaRecorder = realRecorder;
+      if (realGUM) navigator.mediaDevices.getUserMedia = realGUM;
+    }
+    // Start task while a run is going: the composer is left alone.
+    const task = { id: 'obl_ui000001', name: 'WRN', task: 'Invoice Greg Alexander $1,000 for the WRN Monthly Support Retainer' };
+    OPERATOR.command.value = 'my own draft';
+    _opSetRunning(true);
+    _obStartTask(task);
+    out.startWhileRunning = { composer: OPERATOR.command.value, status: statusText() };
+    _opSetRunning(false);
+    // Start task with a question pending: a NEW run, never sent as the answer.
+    _opNewChat();
+    operatorState.active = { id: 'op_ui_5', command: 'Which Greg?', artifact_folder: 'C:/harness/ui5' };
+    _opSetAnswerMode({ opId: 'op_ui_5', question: 'Which Greg?', buttonsOnly: false, summary: '' });
+    const before = calls.length;
+    _obStartTask(task);
+    await settle(80);
+    const sent = calls.slice(before).filter((c) => /\/operations\/(run|op_ui_5\/continue)$/.test(c.path));
+    out.startWithQuestion = { sent: sent.map((c) => c.path.split('/').pop() + ':' + ((c.body && (c.body.command || c.body.answer)) || '')),
+                              composer: OPERATOR.command.value, armed: !!operatorState.answerMode };
+    _opNewChat();
+    return out;
+  } finally {
+    window.fetch = realFetch;
+    if (typeof closeObligations === 'function') closeObligations();
+  }
+}
+
 app.whenReady().then(async () => {
   const allProblems = [];
   await openOnce();
@@ -778,7 +974,7 @@ app.whenReady().then(async () => {
     await new Promise((r) => setTimeout(r, 250));
     const b = await win.webContents.executeJavaScript(MEASURE_BRIEF, true);
     const problems = checkBrief(width, b);
-    console.log(`${width}px: ${b.sectionTitles.length} sections | `
+    console.log(`${width}px: ${b.sectionTitles.length} sections | ${b.alsoInInbox.summary || 'no also-in-inbox'} | `
       + `view ${b.viewRect.width.toFixed(0)}x${b.viewRect.height.toFixed(0)} @left ${b.viewRect.left.toFixed(0)} | `
       + `main display=${b.mainDisplay}`);
     allProblems.push(...problems);
@@ -1013,6 +1209,36 @@ app.whenReady().then(async () => {
   if (oc.unknownControl.label !== 'Could not load run' || oc.unknownControl.dotFailed || !oc.unknownControl.errors) allProblems.push('claim: an unknown run was painted ' + JSON.stringify(oc.unknownControl));
   if (oc.dismissedControl.label !== 'Cancelled' || oc.dismissedControl.armed) allProblems.push('claim: the folder, not the live state, set the pane: ' + JSON.stringify(oc.dismissedControl));
   if (!allProblems.some((p) => p.startsWith('claim:'))) console.log('  never Failed while alive: shown live from memory, folder loaded when written; Failed only for a failed run');
+
+  // --- v7.8 (0.9.18): the UI cleanup items, in the REAL renderer.
+  console.log('');
+  console.log('--- UI cleanup (real DOM) ---');
+  const ui = await win.webContents.executeJavaScript('(' + uiCleanupProbe.toString() + ')()', true);
+  console.log(`  steps: gmail=${ui.steps.gmail.join('+')} invoice=${ui.steps.invoice.join('+')} proposal=${ui.steps.proposal.join('+')} deck=${ui.steps.deck.join('+')} | reply=${ui.reply.join('+')}`);
+  console.log(`  files: shown=${ui.files.shown} title=${ui.files.title} names=${ui.files.names.join(',')} | no documents: files=${ui.noDocs.files} card=${ui.noDocs.card} error=${ui.noDocs.error} | nothing: card=${ui.nothing.card}`);
+  console.log(`  question: cards=${ui.question.cards} text=${ui.question.text.join(' / ')}`);
+  console.log(`  obligations: buttons=${ui.obButtons.join('+')} prefilled=${JSON.stringify(ui.obPrefill)} saved=${JSON.stringify(ui.obSaved)}`);
+  console.log(`  mic: double-press recorders=${ui.micDouble} | recording=${ui.micRecording.cls} | run started: recording=${ui.micAfterStart.cls} status="${ui.micAfterStart.status}" transcribed=${ui.micAfterStart.transcribed} composer="${ui.micAfterStart.composer}" | run finished: status="${ui.micAfterFinish}" | during a run: recording=${ui.micDuringRun.cls} | stopped: composer="${ui.micStopped.composer}"`);
+  console.log(`  start task: while running composer="${ui.startWhileRunning.composer}" | with a question pending sent=${ui.startWithQuestion.sent.join(',')} composer="${ui.startWithQuestion.composer}" armed=${ui.startWithQuestion.armed}`);
+  const uiEq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  if (!uiEq(ui.steps, { gmail: ['Open in Gmail'], invoice: ['Open in QuickBooks'], proposal: ['Open', 'Open'], deck: ['Open in Slides'] })) allProblems.push('ui: step actions were ' + JSON.stringify(ui.steps));
+  if (!ui.gmailHref.startsWith('https://mail.google.com/')) allProblems.push('ui: Open in Gmail does not open the draft');
+  if (!uiEq(ui.reply, ['Open in Gmail'])) allProblems.push('ui: the reply does not end with Open in Gmail: ' + JSON.stringify(ui.reply));
+  if (!ui.files.shown || ui.files.title !== 'Files' || !uiEq(ui.files.names, ['proposal.docx', 'proposal.md'])) allProblems.push('ui: Files were ' + JSON.stringify(ui.files));
+  if (ui.noDocs.files || !ui.noDocs.card || !ui.noDocs.error) allProblems.push('ui: a run with no documents showed Files or hid its error: ' + JSON.stringify(ui.noDocs));
+  if (ui.nothing.card) allProblems.push('ui: an empty outputs card was shown');
+  if (ui.question.cards !== 1 || !uiEq(ui.question.text, ["How many of 'WRN Monthly Support Retainer' should I invoice?"])) allProblems.push('ui: the question rendered as ' + JSON.stringify(ui.question));
+  if (!uiEq(ui.obButtons, ['Edit', 'Delete'])) allProblems.push('ui: obligation buttons were ' + JSON.stringify(ui.obButtons));
+  if (!uiEq(ui.obPrefill, { name: 'WRN retainer — Greg', task: 'Invoice Greg Alexander $1,000', kind: 'monthly_day', day: '1', dayShown: true })) allProblems.push('ui: the edit form was not prefilled: ' + JSON.stringify(ui.obPrefill));
+  if (!uiEq(ui.obSaved, { name: 'WRN Monthly Support Retainer — Greg Alexander', task: 'Invoice Greg Alexander $1,000', cadence: { kind: 'weekly', weekday: 4 } })) allProblems.push('ui: the edit saved ' + JSON.stringify(ui.obSaved));
+  if (ui.micDouble !== 1 || !ui.micRecording.cls || !ui.micRecording.status.startsWith('Recording')) allProblems.push('ui: the mic did not record once: ' + JSON.stringify({ n: ui.micDouble, r: ui.micRecording }));
+  if (ui.micAfterStart.cls || ui.micAfterStart.status.startsWith('Recording') || ui.micAfterStart.transcribed !== 0 || ui.micAfterStart.composer !== '' || ui.micAfterStart.tracksStopped < 1) allProblems.push('ui: a run starting left the mic behind: ' + JSON.stringify(ui.micAfterStart));
+  if (ui.micAfterFinish.startsWith('Recording')) allProblems.push('ui: a finished run left "Recording…"');
+  if (!ui.micDuringRun.cls || !ui.micDuringRun.status.startsWith('Recording')) allProblems.push('ui: a dictation in progress lost its indicator when a run finished');
+  if (ui.micStopped.composer !== 'dictated words' || ui.micStopped.cls) allProblems.push('ui: the next command was not dictated: ' + JSON.stringify(ui.micStopped));
+  if (ui.startWhileRunning.composer !== 'my own draft' || !ui.startWhileRunning.status.includes('still working')) allProblems.push('ui: Start task during a run touched the composer: ' + JSON.stringify(ui.startWhileRunning));
+  if (!uiEq(ui.startWithQuestion.sent, ['run:Invoice Greg Alexander $1,000 for the WRN Monthly Support Retainer']) || ui.startWithQuestion.composer !== '' || ui.startWithQuestion.armed) allProblems.push('ui: Start task with a question pending: ' + JSON.stringify(ui.startWithQuestion));
+  if (!allProblems.some((p) => p.startsWith('ui:'))) console.log('  ui cleanup: actions on their steps, Files for documents only, one card per question, obligations editable, the mic and Start task leave nothing stale');
 
   // --- v7.6: the sidebar at every width, and at 1024x700.
   console.log('');

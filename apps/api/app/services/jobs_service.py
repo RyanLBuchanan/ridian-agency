@@ -302,6 +302,29 @@ def note_run_expired(op: dict) -> None:
                 artifact_folder=str(op.get("artifact_folder") or ""))
 
 
+def note_run_resumed(op: dict) -> None:
+    """v7.8: a run checkpointed when the app closed is continuing after the
+    restart — one notice, so the window says so and can follow it."""
+    operation_id = str(op.get("id") or "")
+    _add_notice(f"resumed:{operation_id}", kind="resumed", job_id=str(op.get("job_id") or ""),
+                operation_id=operation_id, command=_first_line(op.get("command"), NOTICE_COMMAND_CHARS),
+                artifact_folder=str(op.get("artifact_folder") or ""))
+
+
+def event_sink(operation_id: str):
+    """v7.8: an emit that records a resumed run's events for the window, in
+    the same shape as a job run's (only the current run's are kept)."""
+    _events.clear()
+    _events[operation_id] = []
+
+    async def emit(event: dict) -> None:
+        log_ = _events.setdefault(operation_id, [])
+        if len(log_) < EVENTS_KEEP:
+            log_.append(json.loads(json.dumps({"event": event.get("event"), "data": event.get("data") or {}},
+                                              default=str)))
+    return emit
+
+
 def notices_after(after: int, epoch: str) -> dict:
     """The notices a window has not seen. A window holding another process's
     epoch gets everything this process has (its sequence numbers restart)."""
@@ -509,8 +532,14 @@ class JobsEngine:
                        if isinstance(o, dict) and (o.get("job_id") == current.get("job_id")
                                                    or (current.get("operation_id") and o.get("id") == current.get("operation_id")))),
                       None)
+            live = operator_service.is_live(current.get("operation_id") or "")
             if op is not None and op.get("status") in TERMINAL_OPERATION:
                 self._observe_locked(data, current, op)
+            elif live:
+                # v7.8: checkpointed when the app closed and continuing now —
+                # the only runs in memory at startup (a stored awaiting_input
+                # is from before the answer that resumed it).
+                _enqueue_status(current, "running")
             elif op is not None and op.get("status") == "awaiting_input":
                 current["operation_id"] = str(op.get("id") or "")
                 _enqueue_status(current, _park_status(park_kind(current["operation_id"])))
@@ -701,6 +730,9 @@ class JobsEngine:
             return await self._flush(conn, token)
         if current:
             return "busy"
+        # v7.8: the app is closing — nothing new is claimed.
+        if operator_service.is_draining():
+            return "draining"
         if now < self._next_poll:
             return "waiting"
         return await self._claim(conn, token)

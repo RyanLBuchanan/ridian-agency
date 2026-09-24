@@ -128,13 +128,17 @@ async def _lifespan(_app):
     v7.6: parked runs are swept first: each either stays resumable from its
     parked file or expires (failed, reported to the site once the jobs
     engine starts). Boot never fails on the sweep."""
+    recovered: dict = {}
     try:
-        operator_service.recover_parked_runs()
+        recovered = operator_service.recover_parked_runs()
     except Exception:  # noqa: BLE001
         log.exception("parked_runs.recover_failed")
     push_service.startup_catch_up()
     sync_service.start_engine()
     jobs_service.start_engine()
+    # v7.8: runs checkpointed when the app closed continue from there.
+    for operation_id in recovered.get("resumed", []):
+        asyncio.get_running_loop().create_task(operator_service.resume_checkpointed(operation_id))
     try:
         yield
     finally:
@@ -1903,6 +1907,16 @@ async def tts_report(payload: TTSReportRequest) -> dict:
 # FastAPI's first-match ordering will swallow them as if "load"/"audio" were
 # operation IDs.
 
+@app.post("/app/drain")
+async def app_drain(request: Request) -> dict:
+    """v7.8 (PC only): the desktop app is closing. Every run in flight
+    finishes its current step and is checkpointed there (it resumes after
+    the restart); a run still mid-step when the grace ends expires honestly
+    after the restart. Nothing new starts. Answers when drained."""
+    _require_loopback(request)
+    return await operator_service.drain()
+
+
 @app.get("/operations/live")
 async def operations_live(request: Request, operation_id: str = "", artifact_folder: str = "") -> dict:
     """v7.7 (PC only): what a run is right now — running, waiting on the
@@ -1969,7 +1983,8 @@ async def operations_load(artifact_folder: str) -> dict:
     #   - every other kind is a local file: verified by existence in the run
     #     folder (by declared name, falling back to the recorded path);
     #   - operation_log.json is expected for every operation.
-    external_kinds = {"gmail_draft", "drive_folder", "spreadsheet", "slides", "browser"}
+    external_kinds = {"gmail_draft", "drive_folder", "spreadsheet", "slides", "browser",
+                      "quickbooks_invoice"}   # v7.8: a QuickBooks link, never a local file
     missing: list[str] = []
     if not log_path.is_file():
         missing.append("operation_log.json — expected but not found in the run folder")

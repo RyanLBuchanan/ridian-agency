@@ -553,7 +553,7 @@
                      live. Nothing here moves, copies, or re-files anything. -->
                 <section id="folder-artifacts-card" class="folder-artifacts hidden" aria-label="Folder artifacts">
                   <div class="folder-artifacts-head">
-                    <h3 id="folder-artifacts-title" class="folder-artifacts-title">Artifacts</h3>
+                    <h3 id="folder-artifacts-title" class="folder-artifacts-title">Files</h3>
                   </div>
                   <div id="folder-artifacts-body" class="folder-artifacts-body"></div>
                 </section>
@@ -612,15 +612,21 @@
                 </div>
               </div>
 
-              <!-- Artifacts panel (live as artifacts land) -->
+              <!-- The run's outputs card. v7.8: it shows whenever something in
+                   it has content (files, audio, memory proposals, errors, a
+                   status line). "Files" — documents, spreadsheets and PDFs
+                   only — shows only when the run produced one; every other
+                   output's action lives on the step that produced it. -->
               <div id="operator-artifacts-card" class="operator-artifacts-card hidden">
+                <div id="operator-files" class="operator-files hidden">
                 <div class="operator-artifacts-head">
-                  <h3 class="operator-artifacts-title">Artifacts</h3>
+                  <h3 class="operator-artifacts-title">Files</h3>
                   <div class="operator-artifacts-actions">
                     <button id="operator-open-folder" type="button" class="btn btn-ghost btn-compact">Open output folder</button>
                   </div>
                 </div>
                 <ul id="operator-artifacts-list" class="operator-artifacts-list"></ul>
+                </div><!-- /operator-files -->
                 <div id="operator-audio-player" class="operator-audio-player hidden">
                   <audio id="operator-audio" controls preload="metadata"></audio>
                   <div class="operator-audio-meta">
@@ -1835,7 +1841,7 @@
           <ol class="tips-list">
             <li><strong>State the outcome.</strong> Tell Ridian what you need in the Operator composer; do not choose an agent or workflow.</li>
             <li><strong>Follow the operation.</strong> The timeline shows tools, progress, questions, approvals, and results.</li>
-            <li><strong>Open the artifacts.</strong> Files and cloud deliverables appear in the operation's Artifacts panel.</li>
+            <li><strong>Open what it made.</strong> Each output's action sits on the step that made it ("Open in Gmail", "Open"); documents, spreadsheets and PDFs are also listed under Files.</li>
             <li><strong>Approve consequential work.</strong> Ridian pauses when a protected action requires your decision.</li>
             <li><strong>Return to prior work.</strong> Operations in the left rail preserve completed and awaiting work.</li>
           </ol>

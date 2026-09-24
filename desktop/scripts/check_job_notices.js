@@ -55,6 +55,10 @@ assert.equal(jn.badge(claimed), '');
 const expired = { seq: 4, kind: 'expired', operation_id: OP, command: claimed.command };
 assert.equal(jn.text(expired), "Ridian couldn't continue: Draft a follow-up to Greg about the Navigator pilot");
 assert.equal(jn.badge(expired), '');
+// v7.8: a run checkpointed when the app closed, continuing after the restart.
+const resumed = { seq: 5, kind: 'resumed', operation_id: OP, command: claimed.command };
+assert.equal(jn.text(resumed), 'Ridian is continuing: Draft a follow-up to Greg about the Navigator pilot');
+assert.equal(jn.badge(resumed), '');
 const long = jn.text({ kind: 'claimed', command: 'x'.repeat(300) + '\nsecond line' });
 assert.ok(long.length <= 'Ridian is working on: '.length + 90 && long.endsWith('…'), long);
 

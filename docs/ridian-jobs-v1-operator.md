@@ -371,6 +371,23 @@ ended it.
 - Answering it, or any run that already ended, never shows a bare error.
   The thread says it expired (or already ended) and offers "Send again",
   which sends the original command as a new run.
+- **Closing the app (v7.8, 0.9.18).** Closing used to kill the backend at
+  once, with runs in flight. Now:
+  - Before the backend is killed, it is asked to drain (`POST /app/drain`,
+    PC only). Nothing new starts or is claimed.
+  - Each run in flight finishes its current step (the model turn and the
+    tools it called) and is checkpointed at that boundary
+    (`state/parked/<id>.json`, state `checkpoint`).
+  - The backend gets 20 seconds; the app waits up to 25.
+  - After the restart, the run resumes from exactly that boundary: the same
+    conversation, record and context, with no new message. The window gets
+    a "Ridian is continuing: <command>" notice, and a job run keeps its job,
+    so the site hears the result as usual.
+  - Every run is marked `running` on disk when it starts. A run still inside
+    a step when the time runs out, or when the app is killed, expires after
+    the restart as parked runs that cannot continue do: failed, reason
+    `mid_step`, reported to the site, notified once. It never replays a
+    step whose outcome is unknown.
 - **When the connection ends while a job is in progress** (Disconnect, or a
   401), the job is abandoned here and nothing more is reported.
   - The operation itself keeps running on this PC like any other.

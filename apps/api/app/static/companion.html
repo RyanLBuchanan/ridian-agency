@@ -596,6 +596,9 @@ async function loadBrief() {
       if (sec.unavailable) body = `<p class="err">${esc(sec.note)}</p>`;
       else if (sec.empty) body = `<p class="note">${esc(sec.note)}</p>`;
       else body = sec.items.map((i) => `<div class="card">${esc(fmt(i))}</div>`).join("");
+      // v7.8: bulk mail is never a reply owed — a count, not rows.
+      const also = key === "needs_reply" && !sec.unavailable && sec.also_in_inbox ? Number(sec.also_in_inbox.count) || 0 : 0;
+      if (also) body += `<p class="note">Also in the inbox: ${also} (newsletters, marketing, no-reply)</p>`;
       return `<h2>${esc(title)}</h2>${body}`;
     }).join("");
   } catch (e) {

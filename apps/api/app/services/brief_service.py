@@ -130,6 +130,10 @@ def build_brief(today: Optional[_dt.date] = None) -> dict:
         needs = triaged["needs_reply"]
         watch_needs = needs
         inbox = _section(needs, "No inbox threads are waiting on your reply.")
+        # v7.8: bulk mail (no-reply, marketing, mailing lists) is never a
+        # reply owed; it is counted under "Also in the inbox" instead.
+        also = list(triaged.get("also_in_inbox") or [])
+        inbox["also_in_inbox"] = {"count": len(also), "items": also[:10]}
     except Exception as exc:  # noqa: BLE001 — the note carries the reason
         log.info("brief.inbox_unavailable %s", type(exc).__name__)
         detail = getattr(exc, "detail", None) or str(exc)

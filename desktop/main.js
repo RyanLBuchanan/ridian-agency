@@ -468,6 +468,32 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// v7.8 (0.9.18): closing checkpoints runs in flight. Before the backend is
+// killed, it is asked to drain: each run finishes its current step and is
+// checkpointed there (it resumes when the app starts again); nothing new
+// starts. The windows hide at once; the backend gets its grace (20 s) plus
+// a margin, then dies with the app as before. A run still mid-step when
+// the time runs out expires honestly after the restart.
+const DRAIN_TIMEOUT_MS = 25000;
+let _drained = false;
+
+async function drainBackend() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), DRAIN_TIMEOUT_MS);
+  try {
+    await fetch(`${BACKEND_ORIGIN}/app/drain`, { method: 'POST', signal: ctl.signal });
+  } catch (_) { /* unreachable or timed out: the restart handles what is left */ }
+  finally { clearTimeout(timer); }
+}
+
+app.on('before-quit', (e) => {
+  if (_drained || !_backendChild) return;
+  e.preventDefault();
+  _drained = true;
+  for (const w of BrowserWindow.getAllWindows()) { try { w.hide(); } catch (_) {} }
+  drainBackend().finally(() => app.quit());
+});
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();   // never leave the combination held
   stopBackend();                    // the hidden backend dies with the app

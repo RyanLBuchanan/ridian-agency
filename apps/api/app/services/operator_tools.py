@@ -73,6 +73,7 @@ from .anthropic_runtime import (
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
+    PLANNER_ITEM,
     OperatorContext,
     current_operator,
 )
@@ -215,6 +216,7 @@ async def _grounding_gate(operator: OperatorContext) -> dict | None:
                 "sources without your say-so. How should I proceed?"
             ),
             context_hint=f"grounding failed for {locked}",
+            item="grounding",
             options=[
                 {"label": "Do general web research",
                  "value": "Do general web research instead", "action": "submit"},
@@ -398,6 +400,7 @@ async def _require_known_recipient(operator: OperatorContext, to: str) -> dict |
                 "(or which contact on file should I use)?"
             ),
             context_hint="unverified email recipient",
+            item=f"recipient:{str(addr).strip().lower()}",
         )
         await operator.emit_step(
             name="gmail_draft", status="skipped",
@@ -629,6 +632,7 @@ async def _research_plan_gate(
                 f"{ceiling_note} Proceed?"
             ),
             context_hint="research plan approval — no spend until you answer",
+            item="research_plan",
             options=[
                 {"label": "Proceed", "action": "submit", "value": RESEARCH_PLAN_PROCEED},
                 {"label": "Cancel", "action": "submit", "value": RESEARCH_PLAN_CANCEL},
@@ -1714,10 +1718,17 @@ async def request_missing_info(
     """
     operator = current_operator()
     operator.note_tool("request_missing_info")
-    entry = await operator.emit_needs_input(question=question, context_hint=context_hint)
+    entry = await operator.emit_needs_input(question=question, context_hint=context_hint,
+                                            item=PLANNER_ITEM)
+    if entry.get("folded"):
+        # v7.8: a gate is already asking the operator; its question is the
+        # one on screen. Nothing new is shown.
+        return {"status": "already_asked", "id": entry["id"], "question": entry["question"],
+                "note": ("The operator is already being asked this exact question "
+                         "(shown above). Do not ask again — wait for their answer.")}
     await operator.emit_step(
         name="needs_input", status="completed",
-        detail=f"Waiting on you: {question}",
+        detail=f"Waiting on you: {entry['question']}",
     )
     return {"status": "awaiting_user", "id": entry["id"]}
 
@@ -2071,6 +2082,7 @@ async def _invoice_approval_gate(operator, customer_id, customer_name, lines, to
                   f"{customer_name}. Lines: {line_txt}. Total: ${total:.2f}. "
                   f"Create it?"),
         context_hint="QuickBooks invoice approval — nothing created until you answer",
+        item=f"invoice:{str(customer_name).strip().lower()}",
         options=[{"label": "Create it", "action": "submit", "value": INVOICE_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": INVOICE_CANCEL}],
         buttons_only=True,   # signature-matched: only the buttons can answer
@@ -2162,6 +2174,7 @@ async def create_quickbooks_invoice(
             question=(f'Which QuickBooks customer is "{customer}"? I only invoice '
                       "customers that exist in QuickBooks — tell me the exact name."),
             context_hint="QuickBooks customer not uniquely matched",
+            item=f"invoice:{customer.strip().lower()}",
         )
         return {"error": (f"BLOCKED: '{customer}' matched {len(matches)} QuickBooks "
                           "customers. A needs-input question was raised; wait."),
@@ -2172,7 +2185,8 @@ async def create_quickbooks_invoice(
         await operator.emit_needs_input(
             question=question,
             context_hint="QuickBooks invoice — value needed from you",
-            task_summary=summary or f"Invoice for {cust['name']} — waiting on your answer")
+            task_summary=summary or f"Invoice for {cust['name']} — waiting on your answer",
+            item=f"invoice:{cust['name'].strip().lower()}")
         return {"error": f"BLOCKED: {question} A needs-input question was raised; "
                          "WAIT for the operator. Never invent a value.",
                 "reason": reason}
@@ -2240,6 +2254,7 @@ async def create_quickbooks_invoice(
                               "Pick one below (then type the quantity), or "
                               "describe it in your own words."),
                     context_hint="QuickBooks invoice — pick the catalog item",
+                    item=f"invoice:{cust['name'].strip().lower()}",
                     options=[{"label": f"{i['name']} — ${i['unit_price']}",
                               "action": "compose",
                               "prefill": f"[[qbo-item:{i['id']}]] {i['name']} × "}
@@ -2529,6 +2544,7 @@ async def _contact_admin_gate(operator, action: str, payload: dict,
     await operator.emit_needs_input(
         question=question,
         context_hint=f"contact {action} — nothing changes until you answer",
+        item="contact_admin",
         options=[{"label": "Apply it", "action": "submit", "value": CONTACT_ADMIN_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": CONTACT_ADMIN_CANCEL}],
         buttons_only=True,   # signature-matched: only the buttons can answer
@@ -3025,6 +3041,7 @@ async def _proposal_approval_gate(operator, deal: dict, price: float,
                   + (f" Timeline: {timeline}." if timeline else "")
                   + " Write it?"),
         context_hint="proposal approval — nothing written until you answer",
+        item="proposal",
         options=[{"label": "Write it", "action": "submit", "value": PROPOSAL_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": PROPOSAL_CANCEL}],
         buttons_only=True,   # signature-matched: only the buttons can answer
@@ -3070,7 +3087,8 @@ async def draft_proposal(deal: str, price: str = "", timeline: str = "",
 
     async def _park_proposal(question: str, reason: str) -> dict:
         await operator.emit_needs_input(
-            question=question, context_hint="proposal — value needed from you")
+            question=question, context_hint="proposal — value needed from you",
+            item="proposal")
         return {"error": f"BLOCKED: {question} A needs-input question was raised; "
                          "WAIT for the operator. Never invent a value.",
                 "reason": reason}
@@ -3295,6 +3313,7 @@ async def _restore_gate(operator, snap_id: str, question: str) -> dict | None:
     await operator.emit_needs_input(
         question=question,
         context_hint="backup restore — nothing changes until you answer",
+        item="restore",
         options=[{"label": "Restore it", "action": "submit", "value": RESTORE_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": RESTORE_CANCEL}],
         buttons_only=True,   # signature-matched: only the buttons can answer
@@ -3655,7 +3674,9 @@ async def triage_inbox(days_quiet: int = 7, max_threads: int = 25) -> dict:
         name="inbox_triage", status="completed",
         detail=(f"{result['checked']} threads: {len(result['needs_reply'])} need "
                 f"a reply, {len(result['waiting_on'])} waiting on others, "
-                f"{len(result['gone_quiet'])} gone quiet."))
+                f"{len(result['gone_quiet'])} gone quiet, "
+                f"{len(result.get('also_in_inbox') or [])} also in the inbox "
+                f"(newsletters, marketing, no-reply — no reply owed)."))
     return result
 
 
@@ -3718,7 +3739,8 @@ async def invoice_deal(deal: str, description: str = "") -> dict:
             question=(f"What should the invoice for {match.get('contact_name')} "
                       "charge? The deal has no recorded value — set one with "
                       "update_deal or state the amount."),
-            context_hint="invoice from deal — value needed from you")
+            context_hint="invoice from deal — value needed from you",
+            item=f"invoice:{str(match.get('contact_name') or '').strip().lower()}")
         return {"error": "BLOCKED: the deal has no recorded value. A needs-input "
                          "question was raised; WAIT for the operator.",
                 "reason": "deal_value_missing"}
@@ -3800,6 +3822,7 @@ async def _sms_approval_gate(operator: OperatorContext, label: str, e164: str,
                   f"To: {label} ({e164}). Message ({len(body)} chars): “{body}” "
                   f"Send it?"),
         context_hint="Text message approval — nothing is sent until you answer",
+        item="sms",
         options=[{"label": "Send it", "action": "submit", "value": SMS_PROCEED},
                  {"label": "Cancel", "action": "submit", "value": SMS_CANCEL}],
         buttons_only=True,

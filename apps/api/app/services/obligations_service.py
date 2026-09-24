@@ -272,7 +272,14 @@ def add_obligation(data: dict, *, written_by: str, source_op: str = "",
     return entry
 
 
-def update_obligation(obligation_id: str, data: dict) -> Optional[dict]:
+def update_obligation(obligation_id: str, data: dict,
+                      today: Optional[_dt.date] = None) -> Optional[dict]:
+    """Edit name, task text and/or cadence. v7.8: a CHANGED cadence re-bases
+    the schedule exactly as creation does — caught up to today (a "once"
+    stays owed) with nothing dismissed — so an edit never makes a
+    recurring obligation instantly overdue for periods under the old
+    schedule. An unchanged cadence keeps its due state."""
+    today = today or _dt.date.today()
     items = list_obligations()
     for i, ob in enumerate(items):
         if ob.get("id") == obligation_id:
@@ -281,9 +288,19 @@ def update_obligation(obligation_id: str, data: dict) -> Optional[dict]:
             if "task" in data:
                 ob["task"] = str(data["task"] or "").strip() or ob["task"]
             if "cadence" in data:
-                ob["cadence"] = _validate_cadence(data["cadence"])
+                cadence = _validate_cadence(data["cadence"])
+                if cadence != ob.get("cadence"):
+                    ob["cadence"] = cadence
+                    ob["last_completed_period"] = ""
+                    ob["dismissed_period"] = ""
+                    if cadence["kind"] != "once":
+                        prior = occurrences_up_to(cadence, None, today)
+                        if prior:
+                            ob["last_completed_period"] = prior[-1].isoformat()
+            ob["updated_iso"] = _dt.datetime.now().isoformat(timespec="seconds")
             items[i] = ob
             state_store.save(_STORE, items)
+            log.info("obligation.updated id=%s", obligation_id)
             return ob
     return None
 

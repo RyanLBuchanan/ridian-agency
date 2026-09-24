@@ -2136,6 +2136,35 @@ body {
   margin-top: 2px;
 }
 
+/* v7.8: an output's action on the step that produced it, and Gmail's at
+   the end of the reply. */
+.operator-step-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.operator-step-actions:empty { display: none; }
+.operator-step-action,
+.operator-receipt-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--color-accent-deep);
+  background: var(--color-accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  text-decoration: none;
+  cursor: pointer;
+}
+.operator-step-action:hover,
+.operator-receipt-action:hover { border-color: var(--color-accent); }
+.operator-step-action:focus-visible,
+.operator-receipt-action:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-accent); }
+.operator-receipt-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-1); }
+
+/* v7.8: bulk mail under the replies — counted, listed on request. */
+.brief-also { margin-top: var(--space-1); }
+.brief-also > summary { cursor: pointer; font-size: var(--fs-xs); color: var(--color-muted); }
+
 /* v7.6: a parked run that could not continue — said plainly, with the
    original command one click from being sent again as a new run. */
 .operator-expired { border-left-color: var(--color-error-text); }
