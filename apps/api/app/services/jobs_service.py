@@ -40,8 +40,10 @@ THE RULES, each pinned by tests/test_owner_jobs.py:
      store (the operation record keeps it, as for any typed command).
   7. Nothing about jobs is reachable from the phone companion: every jobs
      route is loopback-only and off the companion allowlist.
-  8. A job run is visible on the PC (v7.5): a notice feed (claimed, parked)
-     for the window's notifications and badges, the run's live events so the
+  8. A job run is visible on the PC (v7.5): a notice feed (claimed, parked;
+     v7.6 adds expired, for a parked run that could not continue — reported
+     to the site as failed, result status "expired") for the window's
+     notifications and badges, the run's live events so the
      window can show it while it runs, and the parked questions for the
      Approvals page. A park on a gate approval (a staged approval exists) is
      reported awaiting_approval; a park on a question is reported
@@ -214,6 +216,12 @@ def build_result(op: dict) -> dict:
     text = op.get("receipt") or ""
     if not str(text).strip() and final == "failed" and errors:
         text = errors[-1]
+    # v7.6: a parked run that could not continue says so, whatever it said
+    # before it parked.
+    expired = op.get("expired") if isinstance(op.get("expired"), dict) else None
+    if expired and final == "failed":
+        result["status"] = "expired"
+        text = expired.get("message") or text
     reply = reply_text(text)
     if reply:
         result["replyText"] = reply
@@ -281,6 +289,17 @@ def _add_notice(key: str, **fields: Any) -> bool:
         _notice_seq += 1
         _notices.append({"seq": _notice_seq, "at": _iso(_utcnow()), **fields})
         return True
+
+
+def note_run_expired(op: dict) -> None:
+    """v7.6: a parked run (a job's or one typed here) could not continue and
+    was marked failed. One notice, so the window notifies once and refreshes
+    its waiting badges."""
+    operation_id = str(op.get("id") or "")
+    _add_notice(f"expired:{operation_id}", kind="expired", job_id=str(op.get("job_id") or ""),
+                operation_id=operation_id, command=_first_line(op.get("command"), NOTICE_COMMAND_CHARS),
+                message=str((op.get("expired") or {}).get("message") or ""),
+                artifact_folder=str(op.get("artifact_folder") or ""))
 
 
 def notices_after(after: int, epoch: str) -> dict:

@@ -348,7 +348,7 @@ async function jobVisibilityProbe() {
     await _jobsNoticesTick();
     await settle(400);
     const question = document.querySelector('.operator-question');
-    const waitingBtn = document.getElementById('rail-waiting-btn');
+    const waitingBadge = document.getElementById('rail-waiting-count');
     const waitingCount = (document.getElementById('rail-waiting-count') || {}).textContent || '';
     openApprovals();
     await settle(400);
@@ -361,7 +361,7 @@ async function jobVisibilityProbe() {
       echoLabel,
       questionShown: !!question && question.textContent.includes('Navigator pilot'),
       answerArmed: !!operatorState.answerMode,
-      waitingVisible: !!waitingBtn && !waitingBtn.classList.contains('hidden'),
+      waitingVisible: !!waitingBadge && !waitingBadge.classList.contains('hidden'),
       waitingCount,
       section: section ? section.textContent : '',
       itemText: item ? item.textContent : '',
@@ -373,6 +373,198 @@ async function jobVisibilityProbe() {
     window.fetch = realFetch;
     window.Notification = realNotification;
   }
+}
+
+// v7.6: runs INSIDE the renderer page. A run parked on a question that can
+// no longer continue: answering it comes back 'expired' (never a bare error),
+// the card offers "Send again", which sends the ORIGINAL command as a new
+// run; the startup sweep's 'expired' notice notifies once and clears the
+// waiting badge.
+async function expiredRunProbe() {
+  const OP = 'op_harness0002';
+  const COMMAND = 'Draft a follow-up to Greg about the Navigator pilot';
+  const QUESTION = 'Which Greg: Greg Ortiz or Greg Lane?';
+  const FOLDER = 'C:/harness/run2';
+  const NL = String.fromCharCode(10);
+  const MESSAGE = "This run expired and cannot continue. Ridian Operator restarted and this run's saved state was not found. Send the command again if it is still needed.";
+  const expiredNotice = { seq: 1, kind: 'expired', job_id: 'j2', operation_id: OP, command: COMMAND, message: MESSAGE, artifact_folder: FOLDER };
+  let questions = [{ operation_id: OP, job_id: 'j2', command: COMMAND, question: QUESTION, artifact_folder: FOLDER, parked_at: '2026-09-24T10:34:51' }];
+  let feed = [];
+  const shown = [];
+  const posted = [];
+  const realFetch = window.fetch;
+  const realNotification = window.Notification;
+  function FakeNotification(title, opts) { shown.push((opts && opts.body) || title); this.onclick = null; }
+  FakeNotification.permission = 'granted';
+  FakeNotification.requestPermission = () => Promise.resolve('granted');
+  window.Notification = FakeNotification;
+  const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { 'content-type': 'application/json' } });
+  const sse = (events) => new Response(events.map((e) => 'event: ' + e.event + NL + 'data: ' + JSON.stringify(e.data) + NL + NL).join(''),
+    { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  window.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/owner-workspace/jobs/notices')) return json({ epoch: 'harness-expired', latest: feed.length, notices: feed });
+    if (u.includes('/continue')) {
+      questions = [];
+      return sse([{ event: 'expired', data: { id: OP, command: COMMAND, status: 'failed', reason: 'state_missing', expired: true, message: MESSAGE } },
+                  { event: 'end', data: {} }]);
+    }
+    if (u.includes('/operations/run')) {
+      posted.push(JSON.parse((opts && opts.body) || '{}').command || '');
+      return sse([{ event: 'end', data: {} }]);
+    }
+    if (u.includes('/approvals/questions')) return json({ count: questions.length, questions });
+    if (u.endsWith('/approvals')) return json({ approvals: [], count: 0 });
+    if (u.includes('/operations/recent')) return json({ operations: [] });
+    return new Response('{}', { status: 404 });
+  };
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    // A thread parked on a question with answer mode armed — as it is after
+    // a restart, when the owner reopens the run and answers.
+    _showWorkspaceView(null);
+    setWorkspaceView('welcome');
+    _opResetUI();
+    _opResetComposer();
+    if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+    operatorState.active = { id: OP, command: COMMAND, artifact_folder: FOLDER };
+    _opHandleEvent({ event: 'needs_input', data: { id: 'need_expired', question: QUESTION, options: [] } });
+    await refreshApprovalsBadge();
+    const badge = document.getElementById('rail-waiting-count');
+    const out = { waitingBefore: !badge.classList.contains('hidden'), armedBefore: !!operatorState.answerMode };
+    OPERATOR.command.value = 'Greg Ortiz';
+    await _opSubmit();
+    await settle(300);
+    const card = document.querySelector('.operator-expired');
+    const again = card ? card.querySelector('.operator-send-again-btn') : null;
+    const errors = OPERATOR.errors && !OPERATOR.errors.classList.contains('hidden') ? OPERATOR.errors.textContent.trim() : '';
+    out.card = card ? card.textContent.replace(/ +/g, ' ').trim() : '';
+    out.sendAgain = again ? again.textContent : '';
+    out.armedAfter = !!operatorState.answerMode;
+    out.bareError = errors;
+    out.waitingAfter = !badge.classList.contains('hidden');
+    if (again) again.click();
+    await settle(300);
+    out.posted = posted;
+    // The startup sweep's notice: one notification however often it is polled.
+    try { localStorage.removeItem('ridian.jobNotices'); } catch (_) {}
+    _jobNoticeState = RidianJobNotices.initialState();
+    feed = [expiredNotice];
+    await _jobsNoticesTick();
+    await _jobsNoticesTick();
+    await _jobsNoticesTick();
+    await settle(300);
+    out.shown = shown;
+    return out;
+  } finally {
+    window.fetch = realFetch;
+    window.Notification = realNotification;
+  }
+}
+
+// v7.6: fills the rail like a busy day — 40 operations (two needing the
+// owner, deep in the list), six projects, every badge, the longest Owner
+// Workspace line — through the app's own fill functions.
+async function sidebarFill() {
+  const ops = [];
+  for (let i = 0; i < 40; i += 1) {
+    ops.push({ id: 'op_rail' + String(i).padStart(4, '0'), command: 'Recap the Tuesday call with client number ' + i + ' and draft the notes',
+               status: i % 9 === 4 ? 'failed' : 'completed', artifact_folder: 'C:/harness/rail/' + i,
+               completed_at: new Date(Date.now() - (i + 1) * 3600e3).toISOString(), project_id: i % 3 ? '' : 'proj_a' });
+  }
+  ops[17] = { ...ops[17], id: 'op_railattn17', status: 'awaiting_input', command: 'Invoice Sandy Alvarez $250 for the workshop' };
+  ops[31] = { ...ops[31], id: 'op_railattn31', status: 'awaiting_input', source: 'owner-workspace', job_id: 'j31',
+              command: 'Draft a follow-up to Greg about the Navigator pilot' };
+  const projects = ['Gulf Coast Dental', 'Navigator pilot', 'WRN retainer', 'Internal ops', 'Marketing site', 'Bookkeeping'].map((name, i) => ({
+    id: i === 0 ? 'proj_a' : 'proj_' + i, name, parent_id: '' }));
+  const realFetch = window.fetch;
+  const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { 'content-type': 'application/json' } });
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/operations/recent')) return json({ operations: ops });
+    if (u.includes('/operator/projects')) return json({ projects });
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    try { localStorage.removeItem('ridian.activeProject'); } catch (_) {}
+    _activeProjectId = '';
+    _showWorkspaceView(null);
+    await _railProjectsFill();
+    await _railThreadsFill();
+  } finally {
+    window.fetch = realFetch;
+  }
+  _updateApprovalsBadge(3);
+  _updateWaitingBadge(1);
+  const obl = document.getElementById('rail-obligations-count');
+  if (obl) { obl.textContent = '2'; obl.classList.remove('hidden'); }
+  const ows = document.getElementById('rail-ows-status');
+  if (ows) ows.textContent = 'Owner Workspace · Connected as RYAN-DESKTOP · last sync 12 min ago · up to date';
+  const list = document.getElementById('rail-threads');
+  if (list) list.scrollTop = 0;
+  return { rows: document.querySelectorAll('#rail-threads .rail-thread').length };
+}
+
+// v7.6: what the sidebar looks like at the current window size.
+function sidebarMeasure() {
+  const read = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height, width: r.width }; };
+  const rail = document.querySelector('.operator-rail');
+  const list = document.getElementById('rail-threads');
+  const ids = ['rail-new-chat', 'rail-search', 'rail-operations-btn', 'rail-approvals-btn', 'rail-obligations-btn',
+               'rail-brief-btn', 'rail-projects-panel', 'rail-threads', 'operator-context-memory',
+               'rail-audit-btn', 'rail-settings-btn', 'rail-ows-status'];
+  const rects = {};
+  ids.forEach((id) => { rects[id] = read(document.getElementById(id)); });
+  const rows = [...list.querySelectorAll('.rail-thread')];
+  const listBox = read(list);
+  const visibleRows = rows.filter((li) => { const r = li.getBoundingClientRect();
+    return r.top >= listBox.top - 0.5 && r.bottom <= listBox.bottom + 0.5; }).length;
+  return {
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+    rail: read(rail), railScroll: rail.scrollHeight, railClient: rail.clientHeight,
+    railScrollW: rail.scrollWidth, railClientW: rail.clientWidth,
+    listScroll: list.scrollHeight, listClient: list.clientHeight, visibleRows,
+    rects,
+    firstRows: rows.slice(0, 2).map((li) => li.getAttribute('data-op-id')),
+    current: [...document.querySelectorAll('.rail-nav-btn.is-current, .rail-utility-link.is-current')].map((b) => b.id),
+    approvalsBadges: ['rail-approvals-count', 'rail-waiting-count'].map((id) => {
+      const el = document.getElementById(id); return el && !el.classList.contains('hidden') ? el.textContent : ''; }),
+  };
+}
+
+const SIDEBAR_ORDER = ['rail-new-chat', 'rail-search', 'rail-operations-btn', 'rail-approvals-btn',
+  'rail-obligations-btn', 'rail-brief-btn', 'rail-projects-panel', 'rail-threads', 'rail-settings-btn', 'rail-ows-status'];
+
+function checkSidebar(label, m) {
+  const problems = [];
+  const EPS = 0.5;
+  if (m.railScroll > m.railClient + 1) problems.push(`[${label}] the sidebar scrolls (${m.railScroll} > ${m.railClient})`);
+  if (m.railScrollW > m.railClientW + 1) problems.push(`[${label}] the sidebar overflows sideways (${m.railScrollW} > ${m.railClientW})`);
+  for (const [id, r] of Object.entries(m.rects)) {
+    if (!r || r.width < 1 || r.height < 1) { problems.push(`[${label}] ${id} is not on screen`); continue; }
+    if (r.top < m.rail.top - EPS || r.bottom > m.rail.bottom + EPS || r.bottom > m.viewport.h + EPS) {
+      problems.push(`[${label}] ${id} is cut off (top ${r.top.toFixed(0)}, bottom ${r.bottom.toFixed(0)}, rail ${m.rail.top.toFixed(0)}-${m.rail.bottom.toFixed(0)})`);
+    }
+    if (r.right > m.rail.right + EPS) problems.push(`[${label}] ${id} runs past the sidebar's right edge`);
+  }
+  for (let i = 0; i + 1 < SIDEBAR_ORDER.length; i += 1) {
+    const a = m.rects[SIDEBAR_ORDER[i]], b = m.rects[SIDEBAR_ORDER[i + 1]];
+    if (a && b && a.bottom > b.top + EPS) problems.push(`[${label}] ${SIDEBAR_ORDER[i]} overlaps or follows ${SIDEBAR_ORDER[i + 1]}`);
+  }
+  const util = ['operator-context-memory', 'rail-audit-btn', 'rail-settings-btn'].map((id) => m.rects[id]);
+  if (util.every(Boolean) && Math.max(...util.map((r) => r.top)) - Math.min(...util.map((r) => r.top)) > 1) {
+    problems.push(`[${label}] the utility links are not one compact row`);
+  }
+  const list = m.rects['rail-threads'];
+  const foot = m.rects['operator-context-memory'];
+  if (list && foot && foot.top - list.bottom > 24) problems.push(`[${label}] the Operations list does not take the remaining height (gap ${(foot.top - list.bottom).toFixed(0)}px)`);
+  if (m.visibleRows < 3) problems.push(`[${label}] only ${m.visibleRows} operations are visible`);
+  if (m.listScroll <= m.listClient) problems.push(`[${label}] the Operations list does not scroll on its own`);
+  if (m.firstRows.join() !== 'op_railattn17,op_railattn31') problems.push(`[${label}] needs-attention rows are not first: ${m.firstRows}`);
+  if (m.current.join() !== 'rail-operations-btn') problems.push(`[${label}] current nav item is ${m.current}`);
+  if (m.approvalsBadges.join() !== '3,1') problems.push(`[${label}] Approvals badges are ${m.approvalsBadges}`);
+  return problems;
 }
 
 app.whenReady().then(async () => {
@@ -582,6 +774,89 @@ app.whenReady().then(async () => {
     allProblems.push('jobs: the Approvals page did not list the parked question with an Open-the-run button');
   }
   if (!allProblems.some((p) => p.startsWith('jobs:'))) console.log('  job runs visible: notified once each, pinned, opened live, badged, listed under Waiting for your answer');
+
+  // --- v7.6: a parked run that cannot continue, in the REAL renderer.
+  console.log('');
+  console.log('--- Expired run (real DOM) ---');
+  const exp = await win.webContents.executeJavaScript('(' + expiredRunProbe.toString() + ')()', true);
+  console.log(`  armed=${exp.armedBefore}->${exp.armedAfter} waiting=${exp.waitingBefore}->${exp.waitingAfter} card=${exp.card.startsWith('This run expired')} sendAgain=${exp.sendAgain} bareError=${exp.bareError ? 'yes' : 'no'} posted=${exp.posted.length} notifications=${exp.shown.length}`);
+  const expCommand = 'Draft a follow-up to Greg about the Navigator pilot';
+  if (!exp.armedBefore || exp.armedAfter) allProblems.push('expired: answer mode did not disarm');
+  if (!exp.card.startsWith('This run expired') || !exp.card.includes('saved state was not found') || exp.sendAgain !== 'Send again') {
+    allProblems.push('expired: no expired card with Send again: ' + exp.card);
+  }
+  if (exp.bareError) allProblems.push('expired: a bare error was shown: ' + exp.bareError);
+  if (!exp.waitingBefore || exp.waitingAfter) allProblems.push('expired: the waiting badge did not clear');
+  if (JSON.stringify(exp.posted) !== JSON.stringify([expCommand])) allProblems.push('expired: Send again posted ' + JSON.stringify(exp.posted));
+  if (JSON.stringify(exp.shown) !== JSON.stringify(["Ridian couldn't continue: " + expCommand])) allProblems.push('expired: notifications were ' + JSON.stringify(exp.shown));
+  if (!allProblems.some((p) => p.startsWith('expired:'))) console.log('  expired run: said so, Send again re-sent the command, notified once, badge cleared');
+
+  // --- v7.6: the sidebar at every width, and at 1024x700.
+  console.log('');
+  console.log('--- Sidebar ---');
+  const filled = await win.webContents.executeJavaScript('(' + sidebarFill.toString() + ')()', true);
+  const sizes = WIDTHS.map((w) => ({ label: `${w}px`, set: () => win.setContentSize(w, HEIGHT) }));
+  sizes.push({ label: '1024x700 content', set: () => win.setContentSize(1024, 700) });
+  sizes.push({ label: '1024x700 window', set: () => win.setSize(1024, 700) });
+  for (const size of sizes) {
+    size.set();
+    // A healthy app: no "Backend is not running" banner (there is no backend
+    // here), and the app's own 60 s badge refresh must not race the check.
+    await win.webContents.executeJavaScript(`(() => { _updateApprovalsBadge(3); _updateWaitingBadge(1);
+      const o = document.getElementById('rail-obligations-count'); o.textContent = '2'; o.classList.remove('hidden');
+      document.getElementById('backend-down-banner').classList.add('hidden'); })()`, true);
+    await new Promise((r) => setTimeout(r, 250));
+    const m = await win.webContents.executeJavaScript('(' + sidebarMeasure.toString() + ')()', true);
+    const problems = checkSidebar(size.label, m);
+    console.log(`${size.label}: viewport ${m.viewport.w}x${m.viewport.h} | rail ${m.rail.width.toFixed(0)}x${m.rail.height.toFixed(0)} `
+      + `scrolls=${m.railScroll > m.railClient + 1 ? 'yes' : 'no'} | list ${m.listClient}px, ${m.visibleRows} rows visible of ${filled.rows} `
+      + `| attention first=${m.firstRows.join() === 'op_railattn17,op_railattn31' ? 'yes' : 'no'} | ${problems.length ? 'PROBLEMS' : 'ok'}`);
+    allProblems.push(...problems);
+  }
+  // Degraded: the backend-down banner takes ~110px above the rail at the
+  // smallest size. The list gives way; the sidebar itself still never scrolls.
+  const degraded = await win.webContents.executeJavaScript(`(async () => {
+    document.getElementById('backend-down-banner').classList.remove('hidden');
+    await new Promise((r) => setTimeout(r, 150));
+    const rail = document.querySelector('.operator-rail');
+    const box = rail.getBoundingClientRect();
+    const visible = ['rail-new-chat', 'rail-brief-btn', 'rail-settings-btn', 'rail-ows-status'].every((id) => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      return r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5; });
+    const out = { h: Math.round(box.height), scrolls: rail.scrollHeight > rail.clientHeight + 1, visible };
+    document.getElementById('backend-down-banner').classList.add('hidden');
+    return out;
+  })()`, true);
+  console.log(`  backend-down banner at 1024x700 window: rail ${degraded.h}px, scrolls=${degraded.scrolls ? 'yes' : 'no'}, nav and footer visible=${degraded.visible}`);
+  if (degraded.scrolls || !degraded.visible) allProblems.push('sidebar: with the backend-down banner the sidebar scrolls or loses its nav/footer');
+  // Still true with the project filter open, at the smallest size.
+  const panelOpen = await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('rail-projects-panel').open = true;
+    const rail = document.querySelector('.operator-rail');
+    const foot = document.getElementById('rail-ows-status').getBoundingClientRect();
+    const rows = document.querySelectorAll('#rail-projects .rail-thread').length;
+    const toggle = document.getElementById('rail-hide-terminal').getBoundingClientRect();
+    const out = { scrolls: rail.scrollHeight > rail.clientHeight + 1, footVisible: foot.bottom <= rail.getBoundingClientRect().bottom + 0.5, rows,
+                  toggle: toggle.height > 0 };
+    document.getElementById('rail-projects-panel').open = false;
+    return out;
+  })()`, true);
+  console.log(`  project filter open at 1024x700 window: ${panelOpen.rows} project rows, hide-failed toggle=${panelOpen.toggle}, sidebar scrolls=${panelOpen.scrolls ? 'yes' : 'no'}, footer visible=${panelOpen.footVisible}`);
+  if (panelOpen.scrolls || !panelOpen.footVisible || panelOpen.rows !== 7 || !panelOpen.toggle) allProblems.push('sidebar: the open project filter pushed the sidebar: ' + JSON.stringify(panelOpen));
+  // The Operations nav item brings the chat pane back from any view.
+  const back = await win.webContents.executeJavaScript(`(async () => {
+    const wait = () => new Promise((r) => setTimeout(r, 150));
+    document.getElementById('rail-approvals-btn').click(); await wait();
+    const inView = [...document.querySelectorAll('.rail-nav-btn.is-current')].map((b) => b.id).join();
+    document.getElementById('rail-operations-btn').click(); await wait();
+    return { inView, main: getComputedStyle(document.querySelector('.operator-main')).display,
+             current: [...document.querySelectorAll('.rail-nav-btn.is-current')].map((b) => b.id).join() };
+  })()`, true);
+  console.log(`  nav: approvals current=${back.inView}; Operations -> main=${back.main} current=${back.current}`);
+  if (back.inView !== 'rail-approvals-btn' || back.main === 'none' || back.current !== 'rail-operations-btn') {
+    allProblems.push('sidebar: the Operations nav item did not return to the chat pane: ' + JSON.stringify(back));
+  }
+  win.setContentSize(WIDTHS[0], HEIGHT);
 
   if (allProblems.length) {
     console.log('\nLAYOUT PROBLEMS:');

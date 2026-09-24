@@ -219,9 +219,15 @@
                    Claude/ChatGPT-style. Chip ids are unchanged so the existing
                    JS wiring (counts, click-through to Memory) keeps working. -->
               <aside class="operator-rail" aria-label="Workspace navigation">
-                <!-- Flexible middle: everything above the Workspace footer
-                     scrolls in one region; the footer below never moves. -->
-                <div class="rail-scroll">
+                <!-- v7.6 (0.9.16) sidebar. Top: New operation, search, the
+                     primary nav. Middle: the Operations list takes every
+                     remaining pixel — the ONLY part that scrolls — with the
+                     project filter above it and what needs attention sorted
+                     first. Bottom: compact utility links and the Owner
+                     Workspace line, always on screen (the first-run banner's
+                     "Open Settings (bottom left)" points here). Fits 1024x700
+                     without the rail scrolling: check_settings_layout.js. -->
+                <div class="rail-top">
                 <button id="rail-new-chat" type="button" class="rail-new-chat">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                     <path d="M12 5v14M5 12h14"/>
@@ -237,118 +243,106 @@
                   autocomplete="off"
                   spellcheck="false"
                 />
-                <label class="rail-terminal-toggle" title="Hide operations that ended failed or cancelled. Awaiting and completed operations always stay.">
-                  <input type="checkbox" id="rail-hide-terminal" />
-                  <span id="rail-hide-terminal-label">Hide failed &amp; cancelled</span>
-                </label>
-                <div class="operator-rail-title rail-projects-head">
-                  <span>Projects</span>
-                  <button
-                    id="rail-new-project"
-                    type="button"
-                    class="rail-title-action"
-                    title="New project"
-                    aria-label="New project"
-                  >
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                      <path d="M12 5v14M5 12h14"/>
+                <nav class="rail-nav" aria-label="Primary">
+                  <button id="rail-operations-btn" type="button" class="rail-nav-btn is-current" aria-current="page">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
                     </svg>
+                    <span>Operations</span>
                   </button>
-                </div>
-                <label class="sr-only" for="rail-project-name">New project name</label>
-                <input
-                  id="rail-project-name"
-                  class="rail-search hidden"
-                  type="text"
-                  placeholder="Project name… (Enter)"
-                  maxlength="60"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-                <ul id="rail-projects" class="rail-projects">
-                  <!-- v6.1: the rail NEVER opens by asserting emptiness. It
-                       starts neutral and only claims "none" once the backend
-                       has actually answered. -->
-                  <li class="rail-threads-loading">Loading…</li>
-                </ul>
-                <div class="operator-rail-title">Operations</div>
-                <ul id="rail-threads" class="rail-threads">
-                  <li class="rail-threads-loading">Loading…</li>
-                </ul>
-                </div><!-- /rail-scroll -->
-                <!-- Pinned footer: always on screen — the first-run banner's
-                     "Open Settings (bottom left)" points here, so no amount of
-                     banner/list growth may displace it. -->
-                <div class="rail-footer">
-                <div class="operator-rail-title">Workspace</div>
-                <div id="operator-context-strip" class="operator-context-strip hidden" aria-label="Operator context">
-                  <button
-                    type="button"
-                    id="operator-context-memory"
-                    class="operator-context-chip"
-                    title="Edit memory"
-                  >
-                    <span class="operator-context-chip-label">Memory</span>
-                    <span class="operator-context-chip-value" id="operator-context-memory-value">Loading…</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="operator-context-last"
-                    class="operator-context-chip hidden"
-                    title="Open the last operation"
-                  >
-                    <span class="operator-context-chip-label">Last operation</span>
-                    <span class="operator-context-chip-value" id="operator-context-last-value">—</span>
-                  </button>
-                </div>
-                <button id="rail-obligations-btn" type="button" class="rail-settings">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="3" y="4" width="18" height="18" rx="2"/>
-                    <path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/>
-                  </svg>
-                  <span>Obligations</span>
-                  <span id="rail-obligations-count" class="rail-approvals-count hidden">0</span>
-                </button>
-                <button id="rail-audit-btn" type="button" class="rail-settings">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <path d="M14 2v6h6M9 15l2 2 4-4"/>
-                  </svg>
-                  <span>Audit log</span>
-                </button>
-                <button id="rail-approvals-btn" type="button" class="rail-settings">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <button id="rail-approvals-btn" type="button" class="rail-nav-btn">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                     <path d="M22 4L12 14.01l-3-3"/>
                   </svg>
-                  <span>Approvals</span>
-                  <span id="rail-approvals-count" class="rail-approvals-count hidden">0</span>
-                </button>
-                <!-- v7.5: job runs parked on a QUESTION (gate approvals count above). -->
-                <button id="rail-waiting-btn" type="button" class="rail-settings rail-waiting hidden" title="Owner Workspace commands waiting for your answer">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>
+                    <span>Approvals</span>
+                    <span id="rail-approvals-count" class="rail-approvals-count hidden">0</span>
+                    <!-- v7.5: job runs parked on a QUESTION — answered from the
+                         Approvals page's "Waiting for your answer". -->
+                    <span id="rail-waiting-count" class="rail-waiting-count hidden" title="Owner Workspace commands waiting for your answer">0</span>
+                  </button>
+                  <button id="rail-obligations-btn" type="button" class="rail-nav-btn">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/>
+                    <path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/>
                   </svg>
-                  <span>Waiting on you</span>
-                  <span id="rail-waiting-count" class="rail-waiting-count">0</span>
-                </button>
-                <button id="rail-brief-btn" type="button" class="rail-settings">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <span>Obligations</span>
+                    <span id="rail-obligations-count" class="rail-approvals-count hidden">0</span>
+                  </button>
+                  <button id="rail-brief-btn" type="button" class="rail-nav-btn">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="4"/>
                     <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
                   </svg>
-                  <span>Morning brief</span>
-                </button>
-                <button id="rail-settings-btn" type="button" class="rail-settings">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>
-                  </svg>
-                  <span>Settings</span>
-                </button>
-                <!-- v7.1: Owner Workspace sync state, one quiet line. -->
-                <p id="rail-ows-status" class="rail-sync-line" title="Owner Workspace sync — details in Settings">Owner Workspace · not connected</p>
+                    <span>Morning brief</span>
+                  </button>
+                </nav>
+                </div><!-- /rail-top -->
+                <section class="rail-ops" aria-label="Operations">
+                  <details id="rail-projects-panel" class="rail-projects-panel">
+                    <summary class="rail-projects-summary" title="Filter operations by project (new runs are filed under it too), or hide failed and cancelled ones">
+                      <span class="rail-projects-summary-label">Project</span>
+                      <span id="rail-project-current" class="rail-project-current">All operations</span>
+                      <span id="rail-filter-note" class="rail-filter-note"></span>
+                    </summary>
+                    <div class="rail-projects-body">
+                      <label class="rail-terminal-toggle" title="Hide operations that ended failed or cancelled. Awaiting and completed operations always stay.">
+                        <input type="checkbox" id="rail-hide-terminal" />
+                        <span id="rail-hide-terminal-label">Hide failed &amp; cancelled</span>
+                      </label>
+                      <div class="operator-rail-title rail-projects-head">
+                        <span>Projects</span>
+                        <button
+                          id="rail-new-project"
+                          type="button"
+                          class="rail-title-action"
+                          title="New project"
+                          aria-label="New project"
+                        >
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                        </button>
+                      </div>
+                      <label class="sr-only" for="rail-project-name">New project name</label>
+                      <input
+                        id="rail-project-name"
+                        class="rail-search hidden"
+                        type="text"
+                        placeholder="Project name… (Enter)"
+                        maxlength="60"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                      <ul id="rail-projects" class="rail-projects">
+                        <!-- v6.1: the rail NEVER opens by asserting emptiness. It
+                             starts neutral and only claims "none" once the backend
+                             has actually answered. -->
+                        <li class="rail-threads-loading">Loading…</li>
+                      </ul>
+                    </div>
+                  </details>
+                  <ul id="rail-threads" class="rail-threads">
+                    <li class="rail-threads-loading">Loading…</li>
+                  </ul>
+                </section>
+                <div class="rail-footer">
+                  <div class="rail-utility">
+                    <!-- Memory keeps its doorway here (the only one in
+                         single-pane mode); the counts ride its tooltip. -->
+                    <button type="button" id="operator-context-memory" class="rail-utility-link" title="Memory">
+                      <span>Memory</span>
+                      <span class="sr-only" id="operator-context-memory-value">Loading…</span>
+                    </button>
+                    <button id="rail-audit-btn" type="button" class="rail-utility-link">
+                      <span>Audit log</span>
+                    </button>
+                    <button id="rail-settings-btn" type="button" class="rail-utility-link">
+                      <span>Settings</span>
+                    </button>
+                  </div>
+                  <!-- v7.1: Owner Workspace sync state, one quiet line. -->
+                  <p id="rail-ows-status" class="rail-sync-line" title="Owner Workspace sync — details in Settings">Owner Workspace · not connected</p>
                 </div><!-- /rail-footer -->
               </aside>
 

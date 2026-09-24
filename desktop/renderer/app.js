@@ -3235,11 +3235,29 @@ function _showWorkspaceView(id) {
   }
   if (main) main.classList.toggle('hidden', id !== null);
   _activeWorkspaceView = id;
+  _railMarkCurrent(id);
   // One Escape handler for all four views — no per-view listener can leak
   // and close a view that is no longer the one on screen.
   document.removeEventListener('keydown', _workspaceViewKeydown);
   if (id) document.addEventListener('keydown', _workspaceViewKeydown);
   return true;
+}
+
+// v7.6: the rail marks where you are — Operations when the chat pane shows.
+// The map is local: this runs during initial load, before later consts exist.
+function _railMarkCurrent(viewId) {
+  const byView = {
+    'approvals-view': 'rail-approvals-btn', 'obligations-view': 'rail-obligations-btn',
+    'brief-view': 'rail-brief-btn', 'audit-view': 'rail-audit-btn', 'settings-view': 'rail-settings-btn',
+  };
+  const current = viewId ? byView[viewId] : 'rail-operations-btn';
+  ['rail-operations-btn', ...Object.values(byView)].forEach((btnId) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.classList.toggle('is-current', btnId === current);
+    if (btnId === current) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
+  });
 }
 
 function _workspaceViewKeydown(e) {
@@ -5204,6 +5222,43 @@ function _opRenderNeedsInput(need, interactive = true) {
   if (interactive) _opRenderOptionsRow(need);
 }
 
+// v7.6: a parked run that could not continue (the app restarted without its
+// saved state, or closed while it was continuing). Never a bare error: say
+// so, and offer the original command again as a NEW run.
+function _opRenderExpired(data) {
+  const host = OPERATOR.live || OPERATOR.active;
+  if (!host || host.querySelector('.operator-expired')) return;
+  const info = data || {};
+  const block = document.createElement('div');
+  block.className = 'operator-question operator-expired';
+  const label = document.createElement('span');
+  label.className = 'operator-question-label';
+  label.textContent = info.expired === false ? 'This run has ended' : 'This run expired';
+  block.appendChild(label);
+  const q = document.createElement('div');
+  q.className = 'operator-question-q';
+  q.textContent = info.message || 'This run expired and cannot continue. Send the command again if it is still needed.';
+  block.appendChild(q);
+  const command = String(info.command || '').trim();
+  if (command) {
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'btn btn-compact operator-send-again-btn';
+    again.textContent = 'Send again';
+    again.addEventListener('click', () => _opSendAgain(command));
+    block.appendChild(again);
+  }
+  host.appendChild(block);
+  _opScrollToBottom();
+}
+
+function _opSendAgain(command) {
+  if (operatorState.running || !OPERATOR.command) return;
+  _opSetAnswerMode(null);
+  OPERATOR.command.value = command;
+  _opSubmit();
+}
+
 // Structured question → tappable choice buttons (the tool declared them),
 // rendered in the composer zone like suggested replies. Hidden whenever
 // answer mode disarms (dispatch, ✕ on the chip, navigation).
@@ -5714,6 +5769,15 @@ function _opHandleEvent(evt) {
     }
     case 'error':
       _opRenderError((evt.data && evt.data.message) || 'Unknown error');
+      break;
+    case 'expired':
+      // v7.6: the answer reached a run that cannot continue.
+      _opSetAnswerMode(null);
+      operatorState.finalRecord = { ...(evt.data || {}), status: 'failed' };
+      _opSetStatusDot('failed');
+      _opRenderExpired(evt.data);
+      refreshApprovalsBadge();
+      _railThreadsFill();
       break;
     case 'complete':
       operatorState.finalRecord = evt.data || null;
@@ -6336,8 +6400,10 @@ async function loadOperatorRun(run) {
     _opRenderRehydrateWarnings(data.missing);
   }
 
-  // Replay any errors logged at run time.
-  (log.errors || []).forEach((m) => _opRenderError(m));
+  // Replay any errors logged at run time. v7.6: an expired run's reason is
+  // shown once, on its own card with "Send again", not also as an error.
+  const expired = log.expired && typeof log.expired === 'object' ? log.expired : null;
+  (log.errors || []).forEach((m) => { if (!expired || m !== expired.message) _opRenderError(m); });
 
   // v1.2: replay memory proposals. Render ALL of them (proposed + committed
   // + dismissed) so the user can see what happened on prior reviews; only
@@ -6371,6 +6437,7 @@ async function loadOperatorRun(run) {
       });
     }
   });
+  if (expired) _opRenderExpired({ command: log.command || '', message: expired.message || '' });
 
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
@@ -7477,7 +7544,7 @@ document.querySelectorAll('[data-operator-example]').forEach((btn) => {
 /*                   v1.5 — single-pane extras                  */
 /* ============================================================ */
 /* Three pieces of glue, all surgical:
- *   1. Operator context strip below the command box (memory + last run)
+ *   1. The Memory link at the foot of the rail (v7.6: was the context strip)
  *   2. History slide-in panel triggered by the top-bar icon
  *   3. Command-history shell behavior (↑/↓) in the command box
  *   plus: top-bar Settings + History buttons wiring, status-pill
@@ -7485,23 +7552,19 @@ document.querySelectorAll('[data-operator-example]').forEach((btn) => {
  *   .is-up class when degraded so the pill reappears.
  */
 
-/* ----- 1. Operator context strip ----- */
+/* ----- 1. The Memory link (v7.6: the rail's utility links) ----- */
 
 // v1.7 fix: look elements up at call time instead of at module-eval time.
 // setWorkspaceView('welcome') runs during INITIAL LOAD — *before* this part
 // of the file has evaluated — so a module-level const here was in its
 // temporal dead zone on the first call, threw, got swallowed by the
-// try/catch, and the strip never appeared until after the first run.
+// try/catch, and the Memory counts never appeared until after the first run.
 function _ctxGetEls() {
   return {
-    strip:        document.getElementById('operator-context-strip'),
     memoryBtn:    document.getElementById('operator-context-memory'),
     memoryValue:  document.getElementById('operator-context-memory-value'),
-    lastBtn:      document.getElementById('operator-context-last'),
-    lastValue:    document.getElementById('operator-context-last-value'),
   };
 }
-let _ctxLastOp = null;  // {artifact_folder, command, completed_at, ...}
 
 function _fmtRelativeShort(iso) {
   if (!iso) return '';
@@ -7517,48 +7580,22 @@ function _fmtRelativeShort(iso) {
 
 async function loadOperatorContextStrip() {
   const els2 = _ctxGetEls();
-  if (!els2.strip) return;
-  let anyContent = false;
-
-  // Memory chip: one fetch hits the existing /memory/summary endpoint.
+  if (!els2.memoryBtn) return;
+  // Memory counts: one fetch hits the existing /memory/summary endpoint.
   // v6.1: retried until the backend answers. "empty — click to add" is a
   // CLAIM about the store, so it is only ever shown once the backend has
   // actually reported zeros; an unreachable backend says so instead.
   const m = await _railFetchWithRetry(`${BACKEND}/memory/summary`);
-  if (m === null) {
-    if (els2.memoryValue) els2.memoryValue.textContent = 'unavailable';
-  } else {
+  let text = 'unavailable';
+  if (m !== null) {
     const parts = [];
     if (m.contacts) parts.push(`${m.contacts} contacts`);
     if (m.facts) parts.push(`${m.facts} facts`);
     if (m.open_follow_ups) parts.push(`${m.open_follow_ups} follow-ups`);
-    const text = parts.length ? parts.join(' · ') : 'empty — click to add';
-    if (els2.memoryValue) els2.memoryValue.textContent = text;
-    anyContent = true;
+    text = parts.length ? parts.join(' · ') : 'empty — click to add';
   }
-
-  // Last-run chip: read the operations log, show the most recent operator run.
-  try {
-    const res = await fetch(`${BACKEND}/operations/recent?limit=1`);
-    if (res.ok) {
-      const data = await res.json();
-      const ops = (data && data.operations) || [];
-      if (ops.length) {
-        const op = ops[0];
-        _ctxLastOp = op;
-        const cmd = (op.command || '').split(/\r?\n/)[0].slice(0, 60);
-        const rel = _fmtRelativeShort(op.completed_at);
-        if (els2.lastValue) els2.lastValue.textContent = `${cmd} · ${rel}`;
-        if (els2.lastBtn) els2.lastBtn.classList.remove('hidden');
-        anyContent = true;
-      } else {
-        if (els2.lastBtn) els2.lastBtn.classList.add('hidden');
-      }
-    }
-  } catch (_) { /* offline */ }
-
-  if (anyContent) els2.strip.classList.remove('hidden');
-  else els2.strip.classList.add('hidden');
+  if (els2.memoryValue) els2.memoryValue.textContent = text;
+  els2.memoryBtn.title = `Memory — ${text}`;
 }
 
 {
@@ -7566,17 +7603,10 @@ async function loadOperatorContextStrip() {
   if (els2.memoryBtn) {
     els2.memoryBtn.addEventListener('click', () => openMemoryModal('contacts'));
   }
-  if (els2.lastBtn) {
-    els2.lastBtn.addEventListener('click', () => {
-      if (_ctxLastOp && _ctxLastOp.artifact_folder) {
-        loadOperatorRun({ artifact_folder: _ctxLastOp.artifact_folder, name: _ctxLastOp.command || '' });
-      }
-    });
-  }
 }
 
-// v1.7: the strip is the only doorway into Memory in single-pane mode, so it
-// must be present from the first paint — not only after the first run. The
+// v1.7: this is the only doorway into Memory in single-pane mode, so its
+// counts must be present from the first paint — not only after the first run. The
 // initial setWorkspaceView('welcome') call ran before this section evaluated
 // (and was no-op'd by its try/catch), so kick it once now that everything is
 // defined.
@@ -7769,6 +7799,12 @@ async function _opContinueInBackground() {
   _opSetStatus("Running in background — you'll be notified when it finishes or needs you.", 'ok');
 }
 
+// v7.6: a run parked on a question or an approval, or a background run whose
+// unseen outcome needs a look (the amber badge).
+function _railNeedsAttention(op) {
+  return !!op && (op.status === 'awaiting_input' || _bgRuns[op.id] === 'attn');
+}
+
 function _railRenderThreads() {
   const list = document.getElementById('rail-threads');
   if (!list) return;
@@ -7793,9 +7829,14 @@ function _railRenderThreads() {
   const terminal = ops.filter((op) => op.status === 'failed' || op.status === 'cancelled');
   const lbl = document.getElementById('rail-hide-terminal-label');
   if (lbl) lbl.textContent = 'Hide failed & cancelled' + (terminal.length ? ` (${terminal.length})` : '');
+  // v7.6: the toggle lives in the closed filter panel; its effect shows on the filter line.
+  const note = document.getElementById('rail-filter-note');
+  if (note) note.textContent = _railHideTerminal && terminal.length ? `· ${terminal.length} hidden` : '';
   if (_railHideTerminal && terminal.length) {
     ops = ops.filter((op) => op.status !== 'failed' && op.status !== 'cancelled');
   }
+  // v7.6: what needs the owner comes first; recency order otherwise.
+  ops = [...ops.filter(_railNeedsAttention), ...ops.filter((op) => !_railNeedsAttention(op))];
   list.innerHTML = '';
   // v6.1: only a backend that has ANSWERED may produce an empty state.
   if (_railThreadsState !== RAIL_STATE.READY) {
@@ -8196,8 +8237,8 @@ function _opNewChat() {
 function _opProjectChipUpdate() {
   const chip = document.getElementById('operator-project-chip');
   const label = document.getElementById('operator-project-chip-text');
-  if (!chip || !label) return;
   const active = _railProjects.find((p) => p.id === _activeProjectId);
+  if (!chip || !label) { _railProjectCurrentUpdate(active); return; }
   if (active) {
     // v3.4: a sub-folder shows its full path — "Parent / Sub-folder".
     const parent = (active.parent_id || '')
@@ -8208,6 +8249,16 @@ function _opProjectChipUpdate() {
   } else {
     chip.classList.add('hidden');
   }
+  _railProjectCurrentUpdate(active);
+}
+
+// v7.6: the rail's project filter line names the selection.
+function _railProjectCurrentUpdate(active) {
+  const current = document.getElementById('rail-project-current');
+  if (!current) return;
+  const parent = active && (active.parent_id || '')
+    ? _railProjects.find((p) => p.id === active.parent_id) : null;
+  current.textContent = active ? (parent ? `${parent.name} / ${active.name}` : active.name) : 'All operations';
 }
 
 function _railSelectProject(projectId) {
@@ -8218,6 +8269,9 @@ function _railSelectProject(projectId) {
   // Clicking the active project again deselects (back to All chats).
   _activeProjectId = projectId === _activeProjectId ? '' : (projectId || '');
   try { window.localStorage.setItem(_ACTIVE_PROJECT_KEY, _activeProjectId); } catch (_) {}
+  // v7.6: a filter choice gives the list its height back.
+  const panel = document.getElementById('rail-projects-panel');
+  if (panel) panel.open = false;
   _railRenderProjects();
   _railRenderThreads();
   _opProjectChipUpdate();
@@ -8382,6 +8436,17 @@ const _railSearch = document.getElementById('rail-search');
 if (_railSearch) _railSearch.addEventListener('input', _railRenderThreads);
 const _railSettingsBtn = document.getElementById('rail-settings-btn');
 if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
+// v7.6: the Operations nav item closes whatever view is up (the unsaved-
+// settings guard still applies) and shows the list from its top — where
+// what needs attention is.
+const _railOperationsBtn = document.getElementById('rail-operations-btn');
+if (_railOperationsBtn) {
+  _railOperationsBtn.addEventListener('click', () => {
+    if (!_showWorkspaceView(null)) return;
+    const list = document.getElementById('rail-threads');
+    if (list) list.scrollTop = 0;
+  });
+}
 
 /* ============================================================ */
 /*            MORNING BRIEF VIEW (v6.0 Phase 2, read-only)       */
@@ -8559,10 +8624,12 @@ async function _fetchWaitingQuestions() {
 }
 
 function _updateWaitingBadge(count) {
-  const btn = document.getElementById('rail-waiting-btn');
   const badge = document.getElementById('rail-waiting-count');
-  if (badge) badge.textContent = String(count || 0);
-  if (btn) btn.classList.toggle('hidden', !count);
+  if (!badge) return;
+  badge.textContent = String(count || 0);
+  badge.classList.toggle('hidden', !count);
+  badge.title = count === 1 ? 'An Owner Workspace command is waiting for your answer'
+    : `${count} Owner Workspace commands are waiting for your answer`;
 }
 
 async function _answerApproval(btn) {
@@ -9049,7 +9116,10 @@ if (_menuSettingsBtn) {
 //     live, replayed through the same event handler as a typed run;
 //   - parked: "Ridian needs you: <command>", the Approvals badge (a gate
 //     approval) or the "Waiting on you" badge (a question). The phone push
-//     is sent by the backend, as for every parked run.
+//     is sent by the backend, as for every parked run;
+//   - expired (v7.6): "Ridian couldn't continue: <command>" — a parked run
+//     that could not be resumed was marked failed; the badges refresh, and
+//     if the run is open in the pane it stops waiting for an answer.
 // Clicking a notification raises the window and opens the run.
 
 const _JOB_NOTICE_KEY = 'ridian.jobNotices';
@@ -9094,11 +9164,17 @@ function _jobsHandleNotice(notice) {
     _jobsActiveRun = null;
     refreshApprovalsBadge();
   }
+  // v7.6: an expired run open in the pane stops waiting for an answer there.
+  if (notice.kind === 'expired' && operatorState.active && operatorState.active.id === notice.operation_id) {
+    _opSetAnswerMode(null);
+    _opSetStatusDot('failed');
+    _opRenderExpired({ command: notice.command || '', message: notice.message || '' });
+  }
   Promise.resolve(_railThreadsFill()).then(() => _jobsRevealInRail(notice.operation_id));
 }
 
 function _jobsNotify(text, notice) {
-  _opSetStatus(text, notice.kind === 'parked' ? 'err' : 'ok');
+  _opSetStatus(text, notice.kind === 'claimed' ? 'ok' : 'err');
   try {
     if (typeof Notification === 'undefined') return;
     const show = () => {
@@ -9128,8 +9204,6 @@ function _jobsRevealInRail(opId) {
   if (!list || !opId) return;
   const row = [...list.querySelectorAll('.rail-thread')].find((li) => li.getAttribute('data-op-id') === opId);
   if (!row) return;
-  const title = list.previousElementSibling;
-  if (title && title.scrollIntoView) title.scrollIntoView({ block: 'nearest' });
   if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
   row.classList.add('rail-thread-flash');
   setTimeout(() => row.classList.remove('rail-thread-flash'), 4000);
@@ -9178,8 +9252,6 @@ async function _jobsLiveTick() {
   setTimeout(_jobsLiveTick, 1500);
 }
 
-const _railWaitingBtn = document.getElementById('rail-waiting-btn');
-if (_railWaitingBtn) _railWaitingBtn.addEventListener('click', openApprovals);
 _jobsNoticesTick();
 setInterval(_jobsNoticesTick, 3000);
 setInterval(refreshApprovalsBadge, 60000);

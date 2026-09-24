@@ -50,6 +50,11 @@ assert.equal(jn.text({ kind: 'mystery' }), '');
 assert.equal(jn.badge(parked), 'waiting', 'a question raises "Waiting on you"');
 assert.equal(jn.badge(gate), 'approvals', 'a gate approval raises the Approvals badge');
 assert.equal(jn.badge(claimed), '');
+// v7.6: a parked run that could not continue — its own words, no new badge
+// (the window refreshes the badges, which drops it from them).
+const expired = { seq: 4, kind: 'expired', operation_id: OP, command: claimed.command };
+assert.equal(jn.text(expired), "Ridian couldn't continue: Draft a follow-up to Greg about the Navigator pilot");
+assert.equal(jn.badge(expired), '');
 const long = jn.text({ kind: 'claimed', command: 'x'.repeat(300) + '\nsecond line' });
 assert.ok(long.length <= 'Ridian is working on: '.length + 90 && long.endsWith('…'), long);
 

@@ -11,7 +11,9 @@ Here:
   - check_settings_layout.js "Job visibility (real DOM)" (Chromium, pinned in
     test_settings_layout.py): the window's own poll, two notifications over
     four polls, the run pinned and opened live, the question answerable, the
-    "Waiting on you" badge, and the Approvals page's "Waiting for your answer".
+    waiting badge on Approvals, and the Approvals page's "Waiting for your
+    answer". v7.6: "Expired run (real DOM)" — a run that can no longer
+    continue says so, offers "Send again", notifies once, clears the badge.
   - source pins below for the wiring a harness cannot click.
 """
 import shutil
@@ -36,8 +38,11 @@ def test_a_job_notice_notifies_once():
 def test_the_window_polls_notices_and_opens_job_runs():
     html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
     assert html.index('<script src="job_notices.js" defer></script>') < html.index('<script src="app.js" defer></script>')
-    footer = html.split('class="rail-footer"', 1)[1]
-    assert 'id="rail-waiting-btn"' in footer and ">Waiting on you<" in footer and 'id="rail-waiting-count"' in footer
+    # v7.6: the waiting count rides the Approvals nav item (whose page lists
+    # the questions), beside the approvals count.
+    approvals = html.split('id="rail-approvals-btn"', 1)[1].split("</button>", 1)[0]
+    assert 'id="rail-approvals-count"' in approvals and 'id="rail-waiting-count"' in approvals
+    assert 'id="rail-waiting-btn"' not in html
     app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
     controller = app_js.split("v7.5: OWNER WORKSPACE JOBS ARE VISIBLE ON THIS PC", 1)[1]
     assert "/owner-workspace/jobs/notices?" in controller and "RidianJobNotices.fresh(" in controller
@@ -58,3 +63,25 @@ def test_the_window_polls_notices_and_opens_job_runs():
     approvals = app_js.split("async function loadApprovals(", 1)[1].split("async function _answerApproval(", 1)[0]
     assert "Waiting for your answer" in approvals and "approval-open-run-btn" in approvals
     assert "_briefEsc(q.question" in approvals, "question text is escaped"
+
+
+def test_an_expired_run_is_said_and_offers_send_again():
+    """v7.6: the renderer half of durable parked runs — the 'expired' event
+    (an answer to a run that cannot continue), the rehydrated record of one,
+    and the 'expired' notice all end answer mode and show the card with
+    "Send again", which sends the ORIGINAL command as a new run."""
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    handler = app_js.split("function _opHandleEvent(", 1)[1].split("\n}", 1)[0]
+    case = handler.split("case 'expired':", 1)[1].split("break;", 1)[0]
+    for call in ("_opSetAnswerMode(null)", "_opRenderExpired(evt.data)", "refreshApprovalsBadge()", "_railThreadsFill()"):
+        assert call in case, call
+    card = app_js.split("function _opRenderExpired(", 1)[1].split("\nfunction ", 1)[0]
+    assert "'Send again'" in card and "_opSendAgain(command)" in card and "textContent" in card and "innerHTML" not in card
+    again = app_js.split("function _opSendAgain(", 1)[1].split("\n}", 1)[0]
+    assert "_opSetAnswerMode(null)" in again and "OPERATOR.command.value = command" in again and "_opSubmit()" in again
+    rehydrate = app_js.split("async function loadOperatorRun(", 1)[1].split("\nfunction ", 1)[0]
+    assert "if (expired) _opRenderExpired(" in rehydrate
+    assert "m !== expired.message" in rehydrate, "the reason is not shown twice"
+    notice = app_js.split("function _jobsHandleNotice(", 1)[1].split("\nfunction ", 1)[0]
+    assert "notice.kind === 'expired'" in notice and "_opRenderExpired(" in notice
+    assert "no longer active" not in app_js

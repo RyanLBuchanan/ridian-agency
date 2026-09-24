@@ -1106,59 +1106,6 @@ body {
 }
 .app-shell.single-pane .topbar-icon-btn { display: inline-flex; }
 
-/* Context strip — persistent state visible below the command box without
-   navigating anywhere. Chips are clickable to drill in. */
-/* v2.6: lives in the left rail — chips stack vertically, full width. */
-.operator-context-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.operator-context-strip .operator-context-chip {
-  width: 100%;
-  text-align: left;
-}
-.operator-context-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  background: var(--color-bg-soft);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  padding: 0.3rem 0.75rem;
-  font: inherit;
-  font-size: var(--fs-xs);
-  color: var(--color-muted);
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-  max-width: 480px;
-}
-.operator-context-chip:hover {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-  color: var(--color-accent-deep);
-}
-.operator-context-chip:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
-  border-color: var(--color-accent);
-}
-.operator-context-chip-label {
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-muted-soft);
-  font-size: 0.65rem;
-}
-.operator-context-chip-value {
-  color: var(--color-text-strong);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 380px;
-}
-
 /* History panel — slide-in drawer from the right edge. */
 .history-panel {
   position: fixed;
@@ -1276,37 +1223,183 @@ body {
 }
 
 /* Full-height flex column straight from the grid row — no sticky, no
-   viewport math. Middle scrolls, footer pins. */
+   viewport math. v7.6 (0.9.16): top (actions + primary nav) and footer
+   (utility links + Owner Workspace line) never shrink; the Operations list
+   between them takes every remaining pixel and is the ONLY part that
+   scrolls, so the rail itself never does. */
 .operator-rail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
   padding: var(--space-2) 0;
   min-height: 0;
   min-width: 0;
 }
 
-/* Flexible middle: new chat + search + Projects/Chats lists. This is the
-   ONLY part of the rail that scrolls. */
-.rail-scroll {
+.rail-top {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Primary nav: Operations, Approvals, Obligations, Morning brief. */
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rail-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.rail-nav-btn:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text-strong);
+}
+.rail-nav-btn.is-current {
+  background: var(--color-sidebar-active);
+  color: var(--color-accent-deep);
+  font-weight: 600;
+}
+.rail-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+.rail-nav-btn .rail-approvals-count,
+.rail-nav-btn .rail-waiting-count { margin-left: auto; }
+.rail-nav-btn .rail-approvals-count:not(.hidden) + .rail-waiting-count { margin-left: 4px; }
+
+/* The Operations list: the flexible middle. */
+.rail-ops {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-sidebar-border);
+}
+.rail-ops > * { flex-shrink: 0; }
+.rail-ops > .rail-threads {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
 }
-.rail-scroll > * { flex-shrink: 0; }
 
-/* Pinned footer: Workspace title + context chips + Settings. Never scrolls,
-   never shrinks — always on screen at any window size. */
+/* The project filter: one line, opening to the Projects list (capped, so it
+   can never push the Operations list off the rail). */
+.rail-projects-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 4px;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.rail-projects-summary::-webkit-details-marker { display: none; }
+.rail-projects-summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--color-muted-soft);
+}
+.rail-projects-panel[open] > .rail-projects-summary::after { content: '▴'; }
+.rail-projects-summary:hover { background: var(--color-sidebar-hover); }
+.rail-projects-summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+.rail-projects-summary-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-muted-soft);
+}
+.rail-project-current {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-strong);
+  font-weight: 600;
+}
+/* The hide-failed filter is on: say how many rows it is hiding. */
+.rail-filter-note {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--color-warn-text);
+}
+.rail-filter-note:empty { display: none; }
+.rail-projects-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0 2px;
+  scrollbar-width: thin;
+}
+
+/* Pinned footer: compact utility links + the Owner Workspace line. Never
+   scrolls, never shrinks — always on screen at any window size. */
 .rail-footer {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-sidebar-border);
+}
+/* Text-only, one row even in the 200px rail. */
+.rail-utility {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.rail-utility-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--color-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.rail-utility-link:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-text-strong);
+}
+.rail-utility-link.is-current {
+  color: var(--color-accent-deep);
+  font-weight: 600;
+}
+.rail-utility-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 
 .rail-new-chat {
@@ -1314,7 +1407,7 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 6px 12px;
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -1331,12 +1424,12 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
-/* v6.9.4: terminal-state clutter filter, under the chat search. */
+/* v6.9.4: terminal-state clutter filter — v7.6: in the filter panel. */
 .rail-terminal-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 2px 0;
+  margin: 0 4px;
   font-size: var(--fs-xs);
   color: var(--color-muted-soft);
   cursor: pointer;
@@ -1350,7 +1443,7 @@ body {
 
 .rail-search {
   width: 100%;
-  padding: 7px 10px;
+  padding: 4px 10px;
   font: inherit;
   font-size: var(--fs-sm);
   color: var(--color-text-strong);
@@ -1371,7 +1464,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Natural height — the surrounding .rail-scroll region does the scrolling. */
+  /* v7.6: inside .rail-ops this list flexes to the remaining height and
+     scrolls on its own. */
 }
 .rail-threads-empty {
   font-size: var(--fs-xs);
@@ -1445,31 +1539,6 @@ body {
 .settings-ows-jobs:empty { display: none; }
 .settings-ows-jobs.is-err { color: var(--color-error-text); font-weight: 600; }
 
-.rail-settings {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--color-muted);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.rail-settings:hover {
-  background: var(--color-bg-soft);
-  color: var(--color-text-strong);
-}
-.rail-settings:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
-  border-color: var(--color-accent);
-}
-
 /* v7.1 Owner Workspace sync: one quiet status line at the foot of the rail. */
 .rail-sync-line {
   margin: 0;
@@ -1482,8 +1551,8 @@ body {
 }
 .rail-sync-line.is-err { color: var(--color-error-text); }
 
-/* v2.8: Projects section — same item styling as chats; scrolls with the
-   shared .rail-scroll region. */
+/* v2.8: Projects section — same item styling as chats; v7.6: inside the
+   project filter's capped panel. */
 .rail-projects-head {
   display: flex;
   align-items: center;
@@ -2066,6 +2135,12 @@ body {
   color: var(--color-muted);
   margin-top: 2px;
 }
+
+/* v7.6: a parked run that could not continue — said plainly, with the
+   original command one click from being sent again as a new run. */
+.operator-expired { border-left-color: var(--color-error-text); }
+.operator-expired .operator-question-label { color: var(--color-error-text); }
+.operator-send-again-btn { margin-top: var(--space-1); }
 
 /* v2.2: tappable choice buttons for structured questions — riding the
    composer like suggested replies, hidden once answered or dismissed. */

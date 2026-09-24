@@ -2,7 +2,8 @@
  *
  * The backend keeps a numbered notice feed per process (jobs_service:
  * "claimed" when a job run starts, "parked" when it waits on a gate approval
- * or a question) and serves it at GET /owner-workspace/jobs/notices?after=&
+ * or a question, "expired" when a parked run could not continue) and
+ * serves it at GET /owner-workspace/jobs/notices?after=&
  * epoch=. The window polls it. This module is the only place that decides
  * what to show, so a notification fires ONCE per notice however often the
  * window polls, reloads, or the backend re-answers:
@@ -47,6 +48,7 @@
     if (!notice) return '';
     if (notice.kind === 'claimed') return `Ridian is working on: ${shorten(notice.command)}`;
     if (notice.kind === 'parked') return `Ridian needs you: ${shorten(notice.command)}`;
+    if (notice.kind === 'expired') return `Ridian couldn't continue: ${shorten(notice.command)}`;
     return '';
   }
 

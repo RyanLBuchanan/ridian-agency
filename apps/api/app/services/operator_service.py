@@ -32,7 +32,7 @@ from typing import Awaitable, Callable
 from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_model
 from ..agents.planner_agent import build_planner_system
 from . import (gmail_service, google_drive_service, memory_service,
-               operation_log_service, state_store)
+               operation_log_service, parked_runs, state_store)
 from .anthropic_runtime import date_line, estimate_cost_usd, get_client
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
@@ -139,6 +139,7 @@ def _session_lock(operation_id: str) -> asyncio.Lock:
 def _drop_session(operation_id: str) -> None:
     _SESSIONS.pop(operation_id, None)
     _SESSION_LOCKS.pop(operation_id, None)
+    parked_runs.delete(operation_id)   # v7.6: nothing can resume it now
 
 
 def _slug_for_command(command: str) -> str:
@@ -548,6 +549,11 @@ async def _persist_or_pause(emit: EmitFn, record: dict, folder: Path) -> dict:
     and KEEP the session for a /continue. Otherwise finalize and drop it."""
     if record.get("awaiting_input"):
         record["status"] = "awaiting_input"
+        # v7.6: the session also goes to disk BEFORE anything announces the
+        # park, so an answer after a restart can rebuild it (parked_runs).
+        session = _SESSIONS.get(record["id"])
+        if session is not None:
+            parked_runs.save(session)
         snapshot = _finalized_view(record)
         try:
             (folder / "operation_log.json").write_text(
@@ -614,7 +620,7 @@ def clear_staged_source() -> None:
 def save_source_pdf(operation_id: str, data: bytes, filename: str = "source.pdf") -> None:
     """Persist an uploaded PDF into the operation's run folder (git-ignored via
     outputs/*/) so the raw source rides along with source.md."""
-    session = _SESSIONS.get(operation_id)
+    session = _SESSIONS.get(operation_id) or _restore_session(operation_id)[0]
     if not session:
         return
     try:
@@ -1011,6 +1017,150 @@ def dismiss_operation(operation_id: str) -> dict:
     return {"cancelled": changed, "operation_id": operation_id}
 
 
+# v7.6: why a parked run could not continue. The owner reads these (the
+# thread, the notification, the site's replyText), so they say what happened.
+EXPIRED_REASONS = {
+    "state_missing": "Ridian Operator restarted and this run's saved state was not found.",
+    "state_unreadable": "This run's saved state could not be read.",
+    "interrupted": ("Ridian Operator closed while this run was continuing after your "
+                    "answer, so it cannot pick up from the middle."),
+}
+
+
+def expired_message(why: str) -> str:
+    reason = EXPIRED_REASONS.get(why, EXPIRED_REASONS["state_missing"])
+    return (f"This run expired and cannot continue. {reason} "
+            "Send the command again if it is still needed.")
+
+
+async def _discard_event(_event: dict) -> None:
+    return None
+
+
+def _usable_parked(operation_id: str) -> "tuple[dict | None, str]":
+    """(payload, "") for a run that can continue from its parked file, else
+    (None, why) — the file is missing, unreadable, or was left mid-resume."""
+    payload = parked_runs.load(operation_id)
+    if payload is None:
+        return None, ("state_unreadable" if parked_runs.exists(operation_id)
+                      else "state_missing")
+    if payload["state"] != parked_runs.PARKED:
+        return None, "interrupted"
+    return payload, ""
+
+
+def _restore_session(operation_id: str) -> "tuple[_OperationSession | None, str]":
+    """v7.6: rebuild a parked run's live session from its parked file.
+    Returns (session, "") or (None, why). Synchronous on purpose: nothing
+    awaits between the check and the registration, so two answers arriving
+    together cannot both restore."""
+    existing = _SESSIONS.get(operation_id)
+    if existing is not None:
+        return existing, ""
+    op = next((o for o in state_store.load_list("operations")
+               if isinstance(o, dict) and o.get("id") == operation_id), None)
+    if op is None:
+        return None, "unknown"
+    if op.get("status") != "awaiting_input":
+        return None, "ended"
+    payload, why = _usable_parked(operation_id)
+    if payload is None:
+        return None, why
+    folder = Path(payload["folder"])
+    operator = OperatorContext(
+        folder=folder, record=payload["record"], emit=_discard_event,
+        sources_packet_text=str(payload.get("sources_packet_text") or ""),
+        script_text=str(payload.get("script_text") or ""))
+    session = _OperationSession(
+        operator=operator, folder=folder, system=payload["system"],
+        input_list=payload["input_list"],
+        upload_state_line=str(payload.get("upload_state_line") or ""))
+    _SESSIONS[operation_id] = session
+    log.info("operation.restored id=%s", operation_id)
+    return session, ""
+
+
+def _mark_expired(op: dict, why: str, message: str, now: str) -> None:
+    op["status"] = "failed"
+    op["awaiting_input"] = False
+    op.setdefault("errors", []).append(message)
+    op["expired"] = {"reason": why, "message": message, "at": now}
+    op.setdefault("steps", []).append({
+        "name": "expired", "status": "failed",
+        "started_at": now, "completed_at": now, "detail": message})
+
+
+def expire_run(operation_id: str, why: str) -> dict:
+    """v7.6: a parked run that truly cannot continue must not stay waiting.
+    Marks it failed with the reason — the jobs engine reports that to the
+    site (awaiting_input / awaiting_approval -> failed) — voids its staged
+    approvals, rewrites its run-folder log so a reopened thread shows the
+    ending, and notifies once. A run that already ended is left alone.
+    Returns what the window shows: the run, its command and a message."""
+    _drop_session(operation_id)
+    ops = state_store.load_list("operations")
+    op = next((o for o in ops if isinstance(o, dict) and o.get("id") == operation_id), None)
+    info = {"id": operation_id, "command": str((op or {}).get("command") or ""),
+            "status": str((op or {}).get("status") or ""), "reason": why, "expired": False}
+    if op is None:
+        info["message"] = ("This run is no longer on this PC, so there is nothing to "
+                           "answer. Send the command again if it is still needed.")
+        return info
+    if op.get("status") != "awaiting_input":
+        info["message"] = (f"This run already ended ({info['status'] or 'unknown'}), so "
+                           "there is nothing left to answer. Send the command again if "
+                           "it is still needed.")
+        return info
+    now = datetime.now().isoformat(timespec="seconds")
+    message = expired_message(why)
+    _mark_expired(op, why, message, now)
+    state_store.save("operations", ops)
+    from .approval_inbox_service import void_for_operation  # lazy: cycle
+    void_for_operation(operation_id, "owning run expired")
+    folder_log = Path(str(op.get("artifact_folder") or "")) / "operation_log.json"
+    if op.get("artifact_folder") and folder_log.is_file():
+        try:
+            logged = json.loads(folder_log.read_text(encoding="utf-8"))
+            if isinstance(logged, dict) and logged.get("id") == operation_id:
+                _mark_expired(logged, why, message, now)
+                folder_log.write_text(json.dumps(logged, indent=2) + "\n", encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+    log.info("operation.expired id=%s reason=%s", operation_id, why)
+    try:
+        from . import jobs_service, push_service  # lazy: jobs_service imports this module
+        jobs_service.note_run_expired(op)
+        push_service.notify_run_expired(op)
+    except Exception:  # noqa: BLE001 — notification is never load-bearing
+        log.warning("operator.expiry_notify_failed", exc_info=True)
+    info.update(status="failed", expired=True, message=message)
+    return info
+
+
+def recover_parked_runs() -> dict:
+    """v7.6, at startup before the jobs engine: every run still waiting
+    either has a usable parked file — it stays waiting and the answer
+    rebuilds it — or it expires now, so nothing sits "waiting" that can
+    never continue. Parked files of runs no longer waiting are removed."""
+    kept: list[str] = []
+    expired: list[str] = []
+    for op in state_store.load_list("operations"):
+        oid = str(op.get("id") or "") if isinstance(op, dict) else ""
+        if not oid or op.get("status") != "awaiting_input" or oid in _SESSIONS:
+            continue
+        payload, why = _usable_parked(oid)
+        if payload is not None:
+            kept.append(oid)
+        else:
+            expire_run(oid, why)
+            expired.append(oid)
+    for oid in parked_runs.list_ids():
+        if oid not in kept and oid not in _SESSIONS:
+            parked_runs.delete(oid)
+    log.info("parked_runs.recovered kept=%d expired=%d", len(kept), len(expired))
+    return {"kept": kept, "expired": expired}
+
+
 def _apply_restore_answer(operator: OperatorContext, answer: str) -> str:
     """Resolve a pending backup-restore preview from the operator's resume
     answer — the ONLY writer of record["restore_approved"] /
@@ -1170,15 +1320,21 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
     starting fresh — the behavioral heart of v2.
     """
     apply_to_environment()
-    session = _SESSIONS.get(operation_id)
-    if session is None:
-        await emit({"event": "error", "data": {"message":
-            "That operation is no longer active — start a new command instead."}})
-        return {}
-
     answer = (answer or "").strip()
     if not answer:
         await emit({"event": "error", "data": {"message": "Type an answer first."}})
+        return {}
+
+    # v7.6: a parked run survives a restart — its session is rebuilt from the
+    # parked file. A run that truly cannot continue is expired (failed,
+    # reported, notified) and the window says so and offers "Send again";
+    # answering a dead run never ends in a bare error.
+    session = _SESSIONS.get(operation_id)
+    why = ""
+    if session is None:
+        session, why = _restore_session(operation_id)
+    if session is None:
+        await emit({"event": "expired", "data": expire_run(operation_id, why)})
         return {}
 
     async with _session_lock(operation_id):
@@ -1186,6 +1342,9 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         operator.emit = emit                 # rebind to THIS request's SSE stream
         record = operator.record
         record["awaiting_input"] = False     # cleared; set again only if it re-asks
+        # v7.6: until it parks again or ends, a restart means the run was
+        # interrupted mid-way — it must never replay from the question.
+        parked_runs.save(session, parked_runs.RESUMING)
         # v2.1: an address the operator types in a resume answer becomes a
         # verified recipient for draft_gmail's provenance gate.
         typed = record.setdefault("user_provided_emails", [])

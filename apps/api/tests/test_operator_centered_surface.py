@@ -33,7 +33,9 @@ def test_primary_history_uses_operations_language():
     html = _html()
     primary = html.split('id="view-welcome"', 1)[1].split(
         'id="operator-templates"', 1)[0]
-    assert ">Operations</div>" in primary
+    # v7.6: the Operations list is reached from the "Operations" nav item.
+    ops_nav = primary.split('id="rail-operations-btn"', 1)[1].split("</button>", 1)[0]
+    assert "<span>Operations</span>" in ops_nav
     assert 'placeholder="Search operations' in primary
     assert ">Recent runs<" not in primary
     assert ">+ New workflow<" not in primary

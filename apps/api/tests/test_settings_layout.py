@@ -193,9 +193,78 @@ def test_a_hostile_reply_renders_inert_in_the_real_renderer(harness_output):
 def test_a_job_run_is_visible_in_the_real_renderer(harness_output):
     """v7.5: the harness drives the window's own job-notice poll against a
     stub that re-sends every notice: two notifications over four polls, the
-    run pinned and opened live, the question answerable, the "Waiting on you"
-    badge, and the Approvals page's "Waiting for your answer"."""
+    run pinned and opened live, the question answerable, the waiting badge
+    (on the Approvals nav item since v7.6), and the Approvals page's
+    "Waiting for your answer"."""
     section = harness_output.split("--- Job visibility (real DOM) ---", 1)[1]
     assert "notifications=2 pinned=true echo=From Owner Workspace question=true armed=true waiting=true:1" in section
     assert "job runs visible: notified once each" in section
 
+
+
+
+def test_an_expired_run_offers_send_again_in_the_real_renderer(harness_output):
+    """v7.6: answering a parked run that can no longer continue, in Chromium:
+    answer mode disarms, the card says it expired (no bare error), "Send
+    again" posts the ORIGINAL command as a new run, the startup sweep's
+    notice notifies once, and the waiting badge clears."""
+    section = harness_output.split("--- Expired run (real DOM) ---", 1)[1].split("--- Sidebar ---", 1)[0]
+    assert ("armed=true->false waiting=true->false card=true sendAgain=Send again bareError=no "
+            "posted=1 notifications=1") in section, section
+    assert "expired run: said so, Send again re-sent the command, notified once, badge cleared" in section
+
+
+SIDEBAR_SIZES = ("1280px", "1100px", "1000px", "940px", "880px", "1024x700 content", "1024x700 window")
+
+
+def test_the_sidebar_fits_without_scrolling_and_the_list_takes_the_rest(harness_output):
+    """v7.6 (0.9.16) sidebar, measured in Chromium with 40 operations, six
+    projects and every badge: at the five widths and at 1024x700 (as the
+    content size and as the outer window size) the sidebar itself never
+    scrolls, nothing in it is cut off, New operation / search / the four nav
+    items / the list / the utility links / the Owner Workspace line are in
+    that order, the list takes the remaining height (at least three rows)
+    and scrolls on its own, and what needs attention is first. With the
+    backend-down banner or the project filter open, it still never scrolls;
+    the Operations nav item brings the chat pane back from a view."""
+    section = harness_output.split("--- Sidebar ---", 1)[1]
+    for size in SIDEBAR_SIZES:
+        line = next(l for l in section.splitlines() if l.startswith(f"{size}:"))
+        assert "scrolls=no" in line and "attention first=yes" in line and line.endswith("| ok"), line
+        rows = int(line.split(" rows visible", 1)[0].rsplit(", ", 1)[1])
+        assert rows >= 3, line
+    assert "backend-down banner at 1024x700 window:" in section
+    assert "scrolls=no, nav and footer visible=true" in section
+    assert "project filter open at 1024x700 window: 7 project rows, hide-failed toggle=true, sidebar scrolls=no, footer visible=true" in section
+    assert "nav: approvals current=rail-approvals-btn; Operations -> main=flex current=rail-operations-btn" in section
+
+
+def test_the_sidebar_is_actions_nav_list_then_utilities():
+    """Structural: the rail's order in the markup, and the list is the only
+    part that scrolls (the top and the footer never shrink)."""
+    html = (_DESKTOP / "renderer" / "index.html").read_text(encoding="utf-8")
+    rail = html.split('<aside class="operator-rail"', 1)[1].split("</aside>", 1)[0]
+    order = ['id="rail-new-chat"', 'id="rail-search"', 'class="rail-nav"', 'id="rail-operations-btn"',
+             'id="rail-approvals-btn"', 'id="rail-obligations-btn"', 'id="rail-brief-btn"', 'class="rail-ops"',
+             'id="rail-projects-panel"', 'id="rail-threads"', 'class="rail-footer"', 'id="operator-context-memory"',
+             'id="rail-audit-btn"', 'id="rail-settings-btn"', 'id="rail-ows-status"']
+    at = [rail.index(marker) for marker in order]
+    assert at == sorted(at), [m for m, _ in sorted(zip(order, at), key=lambda x: x[1])]
+    nav = rail.split('class="rail-nav"', 1)[1].split("</nav>", 1)[0]
+    assert nav.count('class="rail-nav-btn') == 4
+    assert 'id="rail-approvals-count"' in nav and 'id="rail-waiting-count"' in nav and 'id="rail-obligations-count"' in nav
+    footer = rail.split('class="rail-footer"', 1)[1]
+    assert footer.count('class="rail-utility-link"') == 3 and "<svg" not in footer
+    css = (_DESKTOP / "renderer" / "styles.css").read_text(encoding="utf-8")
+    ops = css.split(".rail-ops > .rail-threads {", 1)[1].split("}", 1)[0]
+    assert "flex: 1 1 auto" in ops and "overflow-y: auto" in ops and "min-height: 0" in ops
+    for rule in (".rail-top {", ".rail-footer {"):
+        assert "flex-shrink: 0" in css.split(rule, 1)[1].split("}", 1)[0], rule
+    assert ".rail-scroll" not in css and 'class="rail-scroll"' not in html
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    threads = app_js.split("function _railRenderThreads(", 1)[1].split("\nfunction ", 1)[0]
+    assert "ops = [...ops.filter(_railNeedsAttention), ...ops.filter((op) => !_railNeedsAttention(op))];" in threads
+    attention = app_js.split("function _railNeedsAttention(", 1)[1].split("\n}", 1)[0]
+    assert "op.status === 'awaiting_input'" in attention and "_bgRuns[op.id] === 'attn'" in attention
+    mgr = app_js.split("function _showWorkspaceView(", 1)[1][:1600]
+    assert "_railMarkCurrent(id);" in mgr

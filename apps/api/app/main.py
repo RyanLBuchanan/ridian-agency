@@ -123,7 +123,15 @@ async def _lifespan(_app):
     shutdown. It sends nothing until the owner connects in Settings.
 
     v7.3: so does the Ridian Jobs engine, on this event loop. It claims
-    nothing until the owner connects AND allows this PC to run commands."""
+    nothing until the owner connects AND allows this PC to run commands.
+
+    v7.6: parked runs are swept first: each either stays resumable from its
+    parked file or expires (failed, reported to the site once the jobs
+    engine starts). Boot never fails on the sweep."""
+    try:
+        operator_service.recover_parked_runs()
+    except Exception:  # noqa: BLE001
+        log.exception("parked_runs.recover_failed")
     push_service.startup_catch_up()
     sync_service.start_engine()
     jobs_service.start_engine()

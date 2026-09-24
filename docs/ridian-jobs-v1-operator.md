@@ -141,15 +141,18 @@ nothing was delivered.
 | --- | --- |
 | The job is claimed | A Windows notification "Ridian is working on: <command>". The run is pinned at the top of the Operations list (whatever project is selected), scrolled into view and highlighted. When nothing else is going on in the chat pane (no run in flight, no question being answered, no Settings/Brief/Approvals page open), the run opens there live. |
 | It parks on a gate approval | A Windows notification "Ridian needs you: <command>" and the Approvals badge. The approval stays answerable on the Approvals page as before. |
-| It parks on a question | The same notification and the new "Waiting on you" badge in the sidebar. The Approvals page lists it under "Waiting for your answer". |
+| It parks on a question | The same notification and the amber waiting badge on Approvals in the sidebar (v7.5 had its own "Waiting on you" item; since v7.6 the count rides the Approvals nav item). The Approvals page lists it under "Waiting for your answer". |
 | Either park | The existing phone push, sent by the backend for every parked run. |
 | A notification is clicked | The window comes to the front and the run opens: live while it runs, or at its question once parked. |
+| A parked run cannot continue (v7.6) | A Windows notification "Ridian couldn't continue: <command>" and a phone push, once. The badges clear. A thread showing the run stops waiting for an answer and shows why, with "Send again". |
 
 **How it works:**
 
 - The backend keeps a numbered notice feed per process: `claimed` when a
   job run starts, `parked` once per park, with `park: "approval"` or
-  `"question"`.
+  `"question"`, and `expired` (v7.6) when a parked run could not continue.
+  The `expired` notice is sent for any parked run, including one typed on
+  this PC.
 - The window polls the feed every 3 seconds
   (`GET /owner-workspace/jobs/notices?after=&epoch=`).
 - `renderer/job_notices.js` decides what is new, so each notification fires
@@ -226,7 +229,8 @@ The body follows the contract's allowlist:
 ```
 
 - `status` inside `result` is the operation's own status: `completed`,
-  `partial`, `failed` or `cancelled`.
+  `partial`, `failed` or `cancelled`. It is `expired` for a parked run
+  that could not continue (see below); the job itself is `failed`.
 - `artifactNames`: deliverable filenames only, computed the way the
   snapshot's recentWork does it (`owner_snapshot_service.deliverable_names`).
   A name the site would refuse is left out, not altered: one containing
@@ -237,7 +241,8 @@ The body follows the contract's allowlist:
   questions stay in `openQuestions`.
 
 `replyText` is the run's receipt (for a failed run with no receipt, its
-last error). It is prepared in three steps:
+last error; for an expired run, why it expired). It is prepared in three
+steps:
 
 1. Cut at a word boundary with "…" when it is longer than the exporter's
    2000-character read limit. The cut never splits an address.
@@ -273,10 +278,54 @@ The operation record on this PC keeps the original receipt.
 
 - **A restart** keeps the current job, and the engine recovers it:
   - an operation that already ended reports its result;
-  - a parked one keeps waiting, since the inbox or Dismiss can still end
-    it;
+  - a parked one keeps waiting, and the owner's answer continues it (see
+    "Parked runs survive a restart" below);
   - a run that died with the process is reported `failed` with
     `interrupted`.
+
+### Parked runs survive a restart (v7.6)
+
+**Why:** `op_3bb0dfb95e13` parked on a question at 10:34:51 on
+2026-09-24. The app was quit and relaunched at 11:49:00 (the same 0.9.14
+install; Windows logged no crash, sleep or restart in between). The parked
+session lived only in memory, so the answer at 11:53 got "That operation
+is no longer active". There was no parked-session timeout: the app quit
+ended it.
+
+**What happens now:**
+
+- Every park (on a question or a gate approval) also writes
+  `state/parked/<operation id>.json`. It holds what the answer needs to
+  continue the run: the full operation record (every gate flag), the run
+  folder, the planner system prompt, the conversation so far (the model's
+  thinking signatures included), and the run's text caches.
+- An answer to a run whose session is gone rebuilds it from that file and
+  continues. This covers a lost session while the app runs and a restart.
+- The file is deleted when the run ends, is dismissed, or is answered from
+  the Approvals inbox. It is local only: never synced, exported, logged or
+  included in state backups.
+- From the moment an answer is accepted until the run parks again or ends,
+  the file is marked `resuming`. A restart in that window means the run
+  cannot pick up from the middle, and replaying from the question could
+  repeat what it already did, so it expires.
+- At startup, before the jobs engine starts, every waiting run is checked.
+  A run with a usable parked file stays waiting. Any other waiting run
+  expires, because nothing can continue it: the file is missing (it parked
+  before 0.9.16), unreadable, or marked `resuming`.
+
+**An expired run:**
+
+- The operation is marked `failed`, with the reason in its errors, in an
+  `expired` field, and in a timeline step. Its run-folder log is updated
+  too, so a reopened thread shows the ending.
+- Its staged approvals are voided.
+- The site hears `failed` (from `awaiting_input` or `awaiting_approval`),
+  with `result.status` `expired` and the reason as `replyText`.
+- One notification on this PC and one phone push. The waiting and
+  Approvals badges drop it.
+- Answering it, or any run that already ended, never shows a bare error.
+  The thread says it expired (or already ended) and offers "Send again",
+  which sends the original command as a new run.
 - **When the connection ends while a job is in progress** (Disconnect, or a
   401), the job is abandoned here and nothing more is reported.
   - The operation itself keeps running on this PC like any other.

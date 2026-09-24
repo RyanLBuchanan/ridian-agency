@@ -433,6 +433,15 @@ def notify_run_parked(snapshot: dict) -> None:
         "tab": "task"})
 
 
+def notify_run_expired(op: dict) -> None:
+    """v7.6 event hook: a parked run could not continue and was marked
+    failed. The ledger key makes it once, even across restarts."""
+    _spawn(_notify_one, f"op:{op.get('id')}:expired", {
+        "title": "Ridian couldn't continue",
+        "body": str(op.get("command") or ""),
+        "tab": "task"})
+
+
 def maybe_evaluate() -> None:
     """Opportunistic, throttled evaluation on existing read traffic — the
     'while the PC is running' half of the obligations model. No timer."""
