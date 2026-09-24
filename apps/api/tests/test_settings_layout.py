@@ -268,3 +268,30 @@ def test_the_sidebar_is_actions_nav_list_then_utilities():
     assert "op.status === 'awaiting_input'" in attention and "_bgRuns[op.id] === 'attn'" in attention
     mgr = app_js.split("function _showWorkspaceView(", 1)[1][:1600]
     assert "_railMarkCurrent(id);" in mgr
+
+
+
+def test_a_run_opened_right_after_claim_is_never_failed_while_alive(harness_output):
+    """v7.7, in Chromium: a job run opened within 100 ms of its claim, before
+    it has written operation_log.json — by the auto-open with the previous
+    job run still in the pane (2026-09-24), its pinned rail row, its
+    notification, and its folder alone — shows the live run from memory, and
+    the pane (sampled on every DOM change and every 5 ms) never shows Failed
+    while the run is alive. It then parks and waits for the answer; a typed
+    background run's folder loads when written; a run that failed shows
+    Failed, and an unknown run with no log shows "Could not load run"."""
+    section = harness_output.split("--- Open right after claim (real DOM) ---", 1)[1].split("--- Sidebar ---", 1)[0]
+    head = section.strip().splitlines()[0]
+    assert head.endswith("| Failed while alive: 0"), head
+    for opener, bound in (("auto", 100), ("row", 100), ("note", 100), ("fold", 100)):
+        ms = int(head.split(f"{opener}=+", 1)[1].split()[0])
+        assert 0 <= ms <= bound, head
+        # "Running…" — matched without the ellipsis, which the harness output
+        # decodes in the console code page.
+        assert f"{opener}: shows op_claim_{opener} echo=From Owner Workspace step=true status=Running" in section
+    assert "parked: question=true armed=true status=Waiting for your answer" in section
+    typed = next(l for l in section.splitlines() if "typed background run:" in l)
+    assert "Running" in typed and "-> Completed (folder loaded when written: true)" in typed, typed
+    assert ("controls: failed run=Failed | unknown run with no log=Could not load run (failed dot=false) "
+            "| dismissed run whose folder says waiting=Cancelled (armed=false)") in section
+    assert "never Failed while alive" in section

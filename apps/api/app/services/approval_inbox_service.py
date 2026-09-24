@@ -271,6 +271,7 @@ async def answer_approval(approval_id: str, value: str) -> dict:
         _update_operation(appr["operation_id"],
                           f"Declined from the approval inbox: {appr['question']}")
         _osvc._drop_session(appr["operation_id"])
+        _osvc._withdraw_pushes(appr["operation_id"], "answered")
         return {"declined": True, "approval": appr["id"]}
     if not approved:
         return {"error": "No gate recognized that answer — nothing was done."}
@@ -318,5 +319,6 @@ async def answer_approval(approval_id: str, value: str) -> dict:
     _update_operation(appr["operation_id"],
                       f"Approved from the approval inbox: {appr['question']}")
     _osvc._drop_session(appr["operation_id"])
+    _osvc._withdraw_pushes(appr["operation_id"], "answered")
     log.info("approvals.executed id=%s tool=%s", approval_id, appr.get("tool"))
     return {"approved": True, "approval": appr["id"], "result": result}

@@ -167,6 +167,51 @@ nothing was delivered.
 - Notices hold the command's first line in memory, for the local
   notification only. They are never written to disk or logged.
 
+### Opening a run that is still going (v7.7)
+
+**Why:** on 2026-09-24 job e52e4f29 (`op_5d6d24ad87a7`, a research
+packet) was claimed at 14:25:21.777 and parked on its research-plan
+approval at 14:25:31.27. A run writes `operation_log.json` into its folder
+only when it first parks or ends. Opened in between, the pane read the
+folder, found no log, and painted the live run "Failed — Could not
+rehydrate this operator run". It stayed that way after the park.
+
+The auto-open on claim had fired, but its live view stopped at once. The
+pane still held the previous job run (`op_5d8e6e5c475d`, auto-opened at
+14:23), and the first live tick took the different run id for "the window
+moved on". The renderer keeps no log on disk, so which click opened the
+run then cannot be recovered. Every path that reads the folder is a click:
+the pinned rail row, a notification, the history panel, or "Open the run".
+
+**What happens now:**
+
+- The pane's status comes from the run's live state,
+  `GET /operations/live?operation_id=&artifact_folder=` (PC only). It
+  answers from the live session first, then the operations store. It never
+  depends on whether the folder could be read.
+- A run that is alive but has no folder log yet is shown from memory:
+  - a job run in flight is followed live, as the auto-open does;
+  - a run waiting on the owner shows its question;
+  - any other run shows as running, and its folder loads once it parks or
+    ends.
+- The live state wins over what the folder last recorded. A run resumed
+  since its last park shows as running, and a dismissed one as cancelled.
+- "Failed" appears only for a run that failed. An unknown run whose folder
+  cannot be read shows "Could not load run".
+- The auto-open sets the pane to the claimed run before following it.
+
+### Phone notifications are withdrawn (v7.7)
+
+When a run is answered (in the thread, from the Approvals inbox, or from
+the phone) or cancelled, the phone notifications it raised are closed: its
+parks and its staged approvals. The PC sends a push listing their tags,
+with nothing to show, and the companion's service worker closes them. When
+a run expires, its "Ridian couldn't continue" push carries the same list.
+Only delivered notifications are withdrawn, once each (ledger keys
+`wd:<tag>`). Chrome may show its own "updated in the background" notice
+for a push that shows nothing, once the site's small allowance for such
+pushes is used up.
+
 ## Handoff: the site change for `awaiting_input`
 
 Give this to the site session. Until it ships, the site answers

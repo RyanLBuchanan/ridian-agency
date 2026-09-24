@@ -282,8 +282,8 @@ _DEVICE_ALLOWED_EXACT = frozenset({
 _OB_ACTION_RE = re.compile(r"^/obligations/[A-Za-z0-9_-]+/(complete|dismiss)$")
 _OP_ACTION_RE = re.compile(r"^/operations/[A-Za-z0-9_-]+/(continue|dismiss|background)$")
 # GET of one operation record — but never the reserved non-id routes that
-# stream source text or audio from disk.
-_OP_GET_RE = re.compile(r"^/operations/(?!recent$|load$|audio$)[A-Za-z0-9_-]+$")
+# stream source text or audio from disk, or the PC's live run state (v7.7).
+_OP_GET_RE = re.compile(r"^/operations/(?!recent$|load$|audio$|live$)[A-Za-z0-9_-]+$")
 
 
 # Which STAGED APPROVAL KINDS a companion device may answer. Deny by

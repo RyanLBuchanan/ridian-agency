@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -1014,7 +1015,18 @@ def dismiss_operation(operation_id: str) -> dict:
         state_store.save("operations", ops)
         from .approval_inbox_service import void_for_operation  # lazy: cycle
         void_for_operation(operation_id, "owning run cancelled by the operator")
+        _withdraw_pushes(operation_id, "cancelled")
     return {"cancelled": changed, "operation_id": operation_id}
+
+
+def _withdraw_pushes(operation_id: str, reason: str) -> None:
+    """v7.7: the phone notifications a run raised close once it is answered
+    or cancelled (an expiry's own push closes them). Never load-bearing."""
+    try:
+        from . import push_service
+        push_service.withdraw_run(operation_id, reason)
+    except Exception:  # noqa: BLE001 — notification is never load-bearing
+        log.warning("operator.push_withdraw_failed", exc_info=True)
 
 
 # v7.6: why a parked run could not continue. The owner reads these (the
@@ -1135,6 +1147,60 @@ def expire_run(operation_id: str, why: str) -> dict:
         log.warning("operator.expiry_notify_failed", exc_info=True)
     info.update(status="failed", expired=True, message=message)
     return info
+
+
+# v7.7 (0.9.17): what a run IS right now. The window takes a run's status
+# from here, never from whether its folder could be read: a run's
+# operation_log.json does not exist until it first parks or ends (on
+# 2026-09-24 a job run opened 14:25:22-31, before its first park, was
+# painted "Failed" for want of that file).
+_TERMINAL_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
+
+
+def _same_folder(a, b) -> bool:
+    if not a or not b:
+        return False
+    norm = lambda p: os.path.normcase(os.path.normpath(str(p)))  # noqa: E731
+    return norm(a) == norm(b)
+
+
+def live_state(operation_id: str = "", artifact_folder: str = "") -> dict:
+    """The run by id (or by its run folder): the live session first — a run
+    in flight or parked in memory — then the operations store. ``known`` is
+    False only when neither has it. ``pending`` is the open question of a
+    run waiting on the owner, so the window can show it from memory."""
+    oid = str(operation_id or "")
+    sessions = list(_SESSIONS.values())
+    session = _SESSIONS.get(oid) if oid else None
+    if session is None and artifact_folder:
+        session = next((s for s in sessions if _same_folder(s.folder, artifact_folder)), None)
+    if session is not None:
+        oid = str(session.operator.record.get("id") or oid)
+    ops = [o for o in state_store.load_list("operations") if isinstance(o, dict)]
+    stored = next((o for o in ops if oid and o.get("id") == oid), None)
+    if stored is None and session is None and artifact_folder:
+        stored = next((o for o in ops if _same_folder(o.get("artifact_folder"), artifact_folder)), None)
+    if session is not None:
+        src = session.operator.record
+        status = str(src.get("status") or "")
+        if src.get("awaiting_input"):
+            status = "awaiting_input"
+        elif status not in _TERMINAL_STATUSES:
+            status = "running"
+        folder = str(session.folder)
+    elif stored is not None:
+        src = stored
+        status = str(stored.get("status") or "") or "unknown"
+        folder = str(stored.get("artifact_folder") or "")
+        oid = str(stored.get("id") or oid)
+    else:
+        return {"id": oid, "known": False, "status": "unknown", "live": False, "command": "",
+                "source": "", "artifact_folder": str(artifact_folder or ""), "pending": None}
+    needs = src.get("needs_input") if isinstance(src.get("needs_input"), list) else []
+    pending = needs[-1] if status == "awaiting_input" and needs and isinstance(needs[-1], dict) else None
+    return {"id": oid, "known": True, "status": status, "live": session is not None,
+            "command": str(src.get("command") or ""), "source": str(src.get("source") or ""),
+            "artifact_folder": folder, "pending": parked_runs.json_safe(pending) if pending else None}
 
 
 def recover_parked_runs() -> dict:
@@ -1345,6 +1411,7 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         # v7.6: until it parks again or ends, a restart means the run was
         # interrupted mid-way — it must never replay from the question.
         parked_runs.save(session, parked_runs.RESUMING)
+        _withdraw_pushes(operation_id, "answered")
         # v2.1: an address the operator types in a resume answer becomes a
         # verified recipient for draft_gmail's provenance gate.
         typed = record.setdefault("user_provided_emails", [])

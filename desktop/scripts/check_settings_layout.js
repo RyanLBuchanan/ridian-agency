@@ -567,6 +567,203 @@ function checkSidebar(label, m) {
   return problems;
 }
 
+// v7.7: runs INSIDE the renderer page. A job run opened within 100 ms of
+// its claim — before it has written operation_log.json — four ways: the
+// auto-open (with the previous job run still in the pane, the 2026-09-24
+// case), a click on its pinned rail row, a click on its notification, and
+// an open by folder alone. The pane is sampled on every DOM change and every
+// 5 ms: it must never show Failed while the run is alive. Then the run parks
+// (question shown, answerable), a typed background run finishes (its folder
+// loads when written), and two controls: a run that did fail shows Failed; an
+// unknown run with no folder log shows "Could not load run", not Failed.
+async function openAfterClaimProbe() {
+  const now = () => performance.now();
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  const QUESTION = 'Approve this research plan (about $1.20)?';
+  const runs = {};
+  const run = (id, extra) => { runs[id] = { id, folder: 'C:/harness/claim/' + id, command: 'Build a research packet on the Navigator pilot (' + id + ')',
+                                            source: 'owner-workspace', phase: 'running', ...extra }; return runs[id]; };
+  ['op_claim_auto', 'op_claim_row', 'op_claim_note', 'op_claim_fold'].forEach((id) => run(id));
+  run('op_typed_bg', { source: '', command: 'Recap Tuesday in the background' });
+  run('op_failed01', { phase: 'failed' });
+  run('op_dismissed', { phase: 'cancelled', logPhase: 'parked' });   // dismiss never rewrote its folder log
+  const byFolder = (f) => Object.values(runs).find((r) => r.folder === f);
+  const need = (r) => ({ id: 'need_' + r.id, question: QUESTION, options: [{ label: 'Approve', action: 'submit', value: 'approve' }], buttons_only: true });
+  const liveOf = (r) => {
+    if (!r) return null;
+    const status = r.phase === 'parked' ? 'awaiting_input' : r.phase;
+    return { id: r.id, known: true, status, live: r.phase === 'running' || r.phase === 'parked', command: r.command, source: r.source,
+             artifact_folder: r.folder, pending: r.phase === 'parked' ? need(r) : null };
+  };
+  const logOf = (r) => { const ph = r.logPhase || r.phase; return ph === 'running' ? null : {
+    id: r.id, command: r.command, source: r.source, intent: '', status: ph === 'parked' ? 'awaiting_input' : ph,
+    awaiting_input: ph === 'parked', steps: [{ name: 'research_plan', status: 'completed', detail: 'Planned' }],
+    artifacts: [], errors: ph === 'failed' ? ['Planner failed: APIConnectionError'] : [], needs_input: ph === 'parked' ? [need(r)] : [],
+    receipt: ph === 'completed' ? 'Recapped Tuesday.' : '', proposed_memory_updates: [] }; };
+  const eventsOf = (r) => {
+    const ev = [{ event: 'start', data: { id: r.id, command: r.command, artifact_folder: r.folder, started_at: '2026-09-24T14:25:21' } },
+                { event: 'step', data: { name: 'research_plan', status: 'running', detail: 'Planning the research', started_at: '', completed_at: '' } }];
+    if (r.phase === 'parked') {
+      ev.push({ event: 'needs_input', data: need(r) });
+      ev.push({ event: 'complete', data: { id: r.id, command: r.command, status: 'awaiting_input', awaiting_input: true, needs_input: [need(r)] } });
+    }
+    return ev;
+  };
+  let feed = [];
+  const notes = [];
+  const realFetch = window.fetch;
+  const realNotification = window.Notification;
+  function FakeNotification(title, opts) { this.body = (opts && opts.body) || title; this.onclick = null; notes.push(this); }
+  FakeNotification.permission = 'granted';
+  FakeNotification.requestPermission = () => Promise.resolve('granted');
+  window.Notification = FakeNotification;
+  const json = (obj, status) => new Response(JSON.stringify(obj), { status: status || 200, headers: { 'content-type': 'application/json' } });
+  window.fetch = async (url) => {
+    const u = new URL(String(url), 'http://x');
+    const q = (k) => u.searchParams.get(k) || '';
+    if (u.pathname.endsWith('/owner-workspace/jobs/notices')) return json({ epoch: 'harness-claim', latest: feed.length, notices: feed });
+    if (u.pathname.endsWith('/owner-workspace/jobs/events')) {
+      const r = runs[q('operation_id')];
+      if (!r) return json({ operation_id: q('operation_id'), known: false, events: [], next: 0, live: false });
+      const ev = eventsOf(r); const after = Number(q('after')) || 0;
+      return json({ operation_id: r.id, known: true, events: ev.slice(after), next: ev.length, live: r.phase === 'running' });
+    }
+    if (u.pathname.endsWith('/operations/live')) {
+      const r = runs[q('operation_id')] || byFolder(q('artifact_folder'));
+      return json(liveOf(r) || { id: q('operation_id'), known: false, status: 'unknown', live: false, command: '', source: '', artifact_folder: q('artifact_folder'), pending: null });
+    }
+    if (u.pathname.endsWith('/operations/load')) {
+      const r = byFolder(q('artifact_folder'));
+      if (!r) return json({ artifact_folder: q('artifact_folder'), operation_log: null, missing: ['operation_log.json — expected but not found in the run folder'] });
+      return json({ artifact_folder: r.folder, operation_log: logOf(r), missing: [], has_audio: false });
+    }
+    if (u.pathname.endsWith('/operations/recent')) {
+      return json({ operations: Object.values(runs).filter((r) => r.phase !== 'running').map((r) => ({ id: r.id, command: r.command, status: logOf(r).status,
+        source: r.source, artifact_folder: r.folder, completed_at: '2026-09-24T14:25:31' })) });
+    }
+    if (u.pathname.endsWith('/approvals/questions')) return json({ count: 0, questions: [] });
+    if (u.pathname.endsWith('/approvals')) return json({ approvals: [], count: 0 });
+    return new Response('{}', { status: 404 });
+  };
+  const bad = [];
+  const failedNow = () => {
+    const label = OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '';
+    const errs = OPERATOR.errors && !OPERATOR.errors.classList.contains('hidden') ? OPERATOR.errors.textContent : '';
+    return (OPERATOR.statusDot && OPERATOR.statusDot.classList.contains('is-failed')) || label === 'Failed'
+      || /Could not rehydrate|no readable operation_log/.test(errs);
+  };
+  let sampling = true;
+  const sample = () => {
+    if (!sampling) return;
+    const id = operatorState.active && operatorState.active.id;
+    const r = runs[id];
+    if (r && (r.phase === 'running' || r.phase === 'parked') && failedNow()) {
+      bad.push(id + ': ' + (OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '?'));
+    }
+  };
+  const observer = new MutationObserver(sample);
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  const timer = setInterval(sample, 5);
+  let seq = 0;
+  const claim = async (id) => {
+    const r = runs[id];
+    seq += 1;
+    feed = [...feed, { seq, kind: 'claimed', job_id: 'j_' + id, operation_id: id, command: r.command, artifact_folder: r.folder }];
+    await _jobsNoticesTick();
+    return now();
+  };
+  const busy = () => _opSetAnswerMode({ opId: 'op_someother', question: 'Something else?', buttonsOnly: false, summary: '' });
+  const shows = (id) => {
+    const echo = (document.querySelector('#operator-active .operator-command-echo-label') || {}).textContent || '';
+    const timeline = OPERATOR.timeline ? OPERATOR.timeline.textContent : '';
+    return { id: operatorState.active && operatorState.active.id, echo, step: timeline.includes('Planning the research') || timeline.includes('research'),
+             label: OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '' };
+  };
+  const out = { opened: {}, shows: {} };
+  try {
+    try { localStorage.removeItem('ridian.jobNotices'); } catch (_) {}
+    _jobNoticeState = RidianJobNotices.initialState();
+    if (typeof closeSettings === 'function') closeSettings();
+    _showWorkspaceView(null);
+    _opNewChat();
+
+    // 1. The auto-open, with the previous job run still in the pane (14:23).
+    operatorState.active = { id: 'op_5d8e6e5c475d', command: 'The 14:23 job run', artifact_folder: 'C:/harness/claim/prev', source: 'owner-workspace' };
+    let t0 = await claim('op_claim_auto');
+    out.opened.auto = Math.round(now() - t0);
+    await settle(700);
+    out.shows.auto = shows('op_claim_auto');
+
+    // 2. A click on the pinned rail row, 50 ms after the claim (pane busy: no auto-open).
+    busy();
+    t0 = await claim('op_claim_row');
+    await settle(50);
+    const row = document.querySelector('#rail-threads .rail-thread[data-op-id="op_claim_row"] .rail-thread-btn');
+    out.opened.row = row ? Math.round(now() - t0) : -1;
+    if (row) row.click();
+    await settle(700);
+    out.shows.row = shows('op_claim_row');
+
+    // 3. A click on its Windows notification, 80 ms after the claim.
+    busy();
+    t0 = await claim('op_claim_note');
+    await settle(80);
+    const note = notes.filter((n) => n.body.includes('op_claim_note')).pop();
+    out.opened.note = note ? Math.round(now() - t0) : -1;
+    if (note && note.onclick) note.onclick();
+    await settle(700);
+    out.shows.note = shows('op_claim_note');
+
+    // 4. An open by folder alone (no id), ~90 ms after the claim.
+    busy();
+    t0 = await claim('op_claim_fold');
+    await settle(90);
+    out.opened.fold = Math.round(now() - t0);
+    loadOperatorRun({ artifact_folder: runs.op_claim_fold.folder, name: runs.op_claim_fold.command });
+    await settle(700);
+    out.shows.fold = shows('op_claim_fold');
+
+    // 5. It parks on its approval: the question, answerable, waiting — never Failed.
+    Object.values(runs).forEach((r) => { if (r.id.startsWith('op_claim')) r.phase = 'parked'; });
+    await settle(1900);
+    const question = [...document.querySelectorAll('.operator-question:not(.operator-expired)')].pop();
+    out.parked = { question: !!question && question.textContent.includes('research plan'), armed: !!operatorState.answerMode,
+                   label: OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '' };
+
+    // 6. A typed background run, still running: shown from memory; its folder loads when written.
+    _opNewChat();
+    loadOperatorRun({ artifact_folder: runs.op_typed_bg.folder, name: runs.op_typed_bg.command, id: 'op_typed_bg' });
+    await settle(300);
+    out.typed = { before: OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '' };
+    runs.op_typed_bg.phase = 'completed';
+    await settle(2200);
+    out.typed.after = OPERATOR.statusLabel ? OPERATOR.statusLabel.textContent : '';
+    out.typed.receipt = (document.getElementById('operator-receipt-text') || {}).textContent || '';
+    sampling = false;
+
+    // 7. Controls: a run that failed shows Failed; an unknown run with no log does not.
+    await loadOperatorRun({ artifact_folder: runs.op_failed01.folder, name: 'failed', id: 'op_failed01' });
+    out.failedControl = { label: OPERATOR.statusLabel.textContent, dotFailed: OPERATOR.statusDot.classList.contains('is-failed') };
+    await loadOperatorRun({ artifact_folder: 'C:/harness/claim/nobody', name: 'unknown' });
+    out.unknownControl = { label: OPERATOR.statusLabel.textContent, dotFailed: OPERATOR.statusDot.classList.contains('is-failed'),
+                           errors: (OPERATOR.errors.textContent || '').includes('no readable operation_log.json') };
+    await loadOperatorRun({ artifact_folder: runs.op_dismissed.folder, name: 'dismissed', id: 'op_dismissed' });
+    out.dismissedControl = { label: OPERATOR.statusLabel.textContent, armed: !!operatorState.answerMode };
+    out.bad = bad;
+    _opNewChat();
+    return out;
+  } finally {
+    sampling = false;
+    observer.disconnect();
+    clearInterval(timer);
+    _opStopRunWatch();
+    _jobsLive = null;
+    _jobsActiveRun = null;
+    window.fetch = realFetch;
+    window.Notification = realNotification;
+  }
+}
+
 app.whenReady().then(async () => {
   const allProblems = [];
   await openOnce();
@@ -790,6 +987,32 @@ app.whenReady().then(async () => {
   if (JSON.stringify(exp.posted) !== JSON.stringify([expCommand])) allProblems.push('expired: Send again posted ' + JSON.stringify(exp.posted));
   if (JSON.stringify(exp.shown) !== JSON.stringify(["Ridian couldn't continue: " + expCommand])) allProblems.push('expired: notifications were ' + JSON.stringify(exp.shown));
   if (!allProblems.some((p) => p.startsWith('expired:'))) console.log('  expired run: said so, Send again re-sent the command, notified once, badge cleared');
+
+
+  // --- v7.7: a job run opened right after its claim, in the REAL renderer.
+  console.log('');
+  console.log('--- Open right after claim (real DOM) ---');
+  const oc = await win.webContents.executeJavaScript('(' + openAfterClaimProbe.toString() + ')()', true);
+  const openers = ['auto', 'row', 'note', 'fold'];
+  console.log(`  opened ms after claim: ${openers.map((k) => `${k}=+${oc.opened[k]}`).join(' ')} | Failed while alive: ${oc.bad.length}`);
+  for (const k of openers) {
+    const sh = oc.shows[k];
+    console.log(`  ${k}: shows ${sh.id} echo=${sh.echo} step=${sh.step} status=${sh.label}`);
+    if (oc.opened[k] < 0 || oc.opened[k] > 100) allProblems.push(`claim: the ${k} open was not within 100 ms of the claim (${oc.opened[k]})`);
+    if (sh.id !== 'op_claim_' + k || sh.echo !== 'From Owner Workspace' || !sh.step || sh.label !== 'Running…') {
+      allProblems.push(`claim: the ${k} open did not show the live run: ` + JSON.stringify(sh));
+    }
+  }
+  console.log(`  parked: question=${oc.parked.question} armed=${oc.parked.armed} status=${oc.parked.label}`);
+  console.log(`  typed background run: ${oc.typed.before} -> ${oc.typed.after} (folder loaded when written: ${oc.typed.receipt === 'Recapped Tuesday.'})`);
+  console.log(`  controls: failed run=${oc.failedControl.label} | unknown run with no log=${oc.unknownControl.label} (failed dot=${oc.unknownControl.dotFailed}) | dismissed run whose folder says waiting=${oc.dismissedControl.label} (armed=${oc.dismissedControl.armed})`);
+  if (oc.bad.length) allProblems.push('claim: the pane showed Failed while the run was alive: ' + oc.bad.slice(0, 5).join('; '));
+  if (!oc.parked.question || !oc.parked.armed || oc.parked.label !== 'Waiting for your answer') allProblems.push('claim: the parked run was not shown waiting: ' + JSON.stringify(oc.parked));
+  if (oc.typed.before !== 'Running…' || oc.typed.after !== 'Completed' || oc.typed.receipt !== 'Recapped Tuesday.') allProblems.push('claim: the typed run was not followed to its folder: ' + JSON.stringify(oc.typed));
+  if (oc.failedControl.label !== 'Failed' || !oc.failedControl.dotFailed) allProblems.push('claim: a failed run did not show Failed');
+  if (oc.unknownControl.label !== 'Could not load run' || oc.unknownControl.dotFailed || !oc.unknownControl.errors) allProblems.push('claim: an unknown run was painted ' + JSON.stringify(oc.unknownControl));
+  if (oc.dismissedControl.label !== 'Cancelled' || oc.dismissedControl.armed) allProblems.push('claim: the folder, not the live state, set the pane: ' + JSON.stringify(oc.dismissedControl));
+  if (!allProblems.some((p) => p.startsWith('claim:'))) console.log('  never Failed while alive: shown live from memory, folder loaded when written; Failed only for a failed run');
 
   // --- v7.6: the sidebar at every width, and at 1024x700.
   console.log('');

@@ -1903,6 +1903,18 @@ async def tts_report(payload: TTSReportRequest) -> dict:
 # FastAPI's first-match ordering will swallow them as if "load"/"audio" were
 # operation IDs.
 
+@app.get("/operations/live")
+async def operations_live(request: Request, operation_id: str = "", artifact_folder: str = "") -> dict:
+    """v7.7 (PC only): what a run is right now — running, waiting on the
+    owner, or how it ended — from the live session first, then the
+    operations store. The window takes a run's status from here, never from
+    whether its folder could be read: operation_log.json does not exist
+    until a run first parks or ends. Loopback-checked and off the companion
+    allowlist."""
+    _require_loopback(request)
+    return operator_service.live_state(operation_id, artifact_folder)
+
+
 @app.get("/operations/load")
 async def operations_load(artifact_folder: str) -> dict:
     """Rehydrate a completed Operator run from its on-disk artifacts.

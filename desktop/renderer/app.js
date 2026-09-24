@@ -4822,7 +4822,7 @@ function _opRenderPendingStrip(mode) {
 function _opSetStatusDot(kind) {
   if (!OPERATOR.statusDot) return;
   OPERATOR.statusDot.classList.remove('is-running', 'is-completed', 'is-failed',
-    'is-partial', 'is-awaiting_input', 'is-cancelled');
+    'is-partial', 'is-awaiting_input', 'is-cancelled', 'is-unknown');
   OPERATOR.statusDot.classList.add('is-' + kind);
   if (OPERATOR.statusLabel) {
     OPERATOR.statusLabel.textContent =
@@ -4833,6 +4833,8 @@ function _opSetStatusDot(kind) {
       // v6.8: cancelled is a CHOICE, not a failure — its own state.
       kind === 'cancelled' ? 'Cancelled' :
       kind === 'failed'    ? 'Failed' :
+      // v7.7: the run's state is not known and its folder could not be read.
+      kind === 'unknown'   ? 'Could not load run' :
       'Idle';
   }
 }
@@ -6324,8 +6326,9 @@ async function loadOperatorRun(run) {
   _opResetUI();
   // Composer state is scoped to its chat: switching threads drops any
   // undispatched draft, the ↑/↓ history-walk scratch, and answer mode —
-  // input can never leak across chat boundaries.
-  _opResetComposer();
+  // input can never leak across chat boundaries. v7.7: a refresh of the
+  // SAME run (its live watch) keeps the draft.
+  if (!run.refresh) _opResetComposer();
   _opSetAnswerMode(null);
 
   // Reveal panels even before the fetch resolves so the user has feedback.
@@ -6335,30 +6338,31 @@ async function loadOperatorRun(run) {
   _opSetStatusDot('running');
   if (OPERATOR.statusLabel) OPERATOR.statusLabel.textContent = 'Loading saved run…';
 
-  let data = null;
-  try {
-    const url = `${BACKEND}/operations/load?artifact_folder=${encodeURIComponent(run.artifact_folder)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error((errBody && errBody.detail) || `HTTP ${res.status}`);
-    }
-    data = await res.json();
-  } catch (err) {
-    _opRenderRehydrateError(run.artifact_folder, err && err.message ? err.message : String(err));
-    return;
-  }
+  // v7.7: the pane's STATUS comes from the run's live state (the session in
+  // memory, else the operations store), never from whether its folder could
+  // be read — a run has no operation_log.json until it first parks or ends.
+  // The 2026-09-24 job run opened before its first park was painted
+  // "Failed". An answer for an open the pane has since moved past is dropped.
+  const token = ++_opLoadSeq;
+  _opStopRunWatch();
+  const [loaded, live] = await Promise.all([_opFetchRunFolder(run.artifact_folder), _opFetchLive(run)]);
+  if (token !== _opLoadSeq) return;
+  const data = loaded.data;
+  const liveStatus = live && live.known ? live.status : '';
+  const log = data ? data.operation_log : null;
+  const folder = (data && data.artifact_folder) || (live && live.artifact_folder) || run.artifact_folder;
 
-  const log = data.operation_log;
-  const folder = data.artifact_folder || run.artifact_folder;
-
-  // If the log itself is missing or unparseable, show a real error state with
-  // the folder path + an Open folder button. Not silent.
   if (!log) {
-    _opRenderRehydrateError(
-      folder,
-      "This operator run has no readable operation_log.json. The folder may have been partially written or hand-edited.",
-    );
+    // Still running or waiting: shown from memory; its folder loads when written.
+    if (liveStatus === 'running' || liveStatus === 'awaiting_input') {
+      _opShowRunFromMemory(run, live, folder, token);
+      return;
+    }
+    // Otherwise a real error state with the folder path + an Open folder
+    // button — "Failed" only when the run did fail.
+    _opRenderRehydrateError(folder, loaded.error
+      || "This operator run has no readable operation_log.json. The folder may have been partially written or hand-edited.",
+      liveStatus);
     return;
   }
 
@@ -6373,7 +6377,9 @@ async function loadOperatorRun(run) {
   operatorState.finalRecord = log;
   operatorState.drive = null; // unknown — user can re-upload if desired
 
-  _opSetStatusDot(log.status || 'completed');
+  // v7.7: the live state wins over what the folder last recorded (a run
+  // resumed since its last park is running; a dismissed one is cancelled).
+  _opSetStatusDot(liveStatus || log.status || 'completed');
 
   // Echo the command above the timeline so the operator knows what's loaded.
   // v7.3: a command sent from the Owner Workspace says so instead of "You".
@@ -6424,7 +6430,7 @@ async function loadOperatorRun(run) {
   // question — the LAST need renders interactively and answer mode re-arms
   // with the pending strip, instead of a read-only replay.
   const needs = Array.isArray(log.needs_input) ? log.needs_input : [];
-  const stillWaiting = !!log.awaiting_input;
+  const stillWaiting = liveStatus ? liveStatus === 'awaiting_input' : !!log.awaiting_input;
   needs.forEach((n, i) => {
     const isLive = stillWaiting && i === needs.length - 1;
     _opRenderNeedsInput(n, isLive);
@@ -6438,11 +6444,88 @@ async function loadOperatorRun(run) {
     }
   });
   if (expired) _opRenderExpired({ command: log.command || '', message: expired.message || '' });
+  // v7.7: a run still going (resumed since its last park) keeps the pane current.
+  if (liveStatus === 'running') _opWatchRun(run, operatorState.active.id, token);
 
   debugLog('operator.rehydrated', {
     id: log.id, status: log.status, sources: log.sources_count,
     has_audio: data.has_audio, missing: data.missing,
   });
+}
+
+// v7.7: which folder load / live watch owns the pane. var, not let: the
+// job controller at the end of the file bumps it too.
+var _opLoadSeq = 0;
+var _opRunWatch = null;
+const _OP_WATCH_MS = 1500;
+
+async function _opFetchRunFolder(folder) {
+  try {
+    const res = await fetch(`${BACKEND}/operations/load?artifact_folder=${encodeURIComponent(folder)}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      return { data: null, error: (errBody && errBody.detail) || `HTTP ${res.status}` };
+    }
+    return { data: await res.json(), error: '' };
+  } catch (err) {
+    return { data: null, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+async function _opFetchLive(run) {
+  try {
+    const qs = `operation_id=${encodeURIComponent(run.id || '')}&artifact_folder=${encodeURIComponent(run.artifact_folder || '')}`;
+    const res = await fetch(`${BACKEND}/operations/live?${qs}`);
+    return res.ok ? await res.json() : null;
+  } catch (_) { return null; }
+}
+
+function _opStopRunWatch() {
+  if (_opRunWatch) clearTimeout(_opRunWatch);
+  _opRunWatch = null;
+}
+
+// A run that is alive but has no readable folder yet: shown from what the
+// backend holds in memory. A job run in flight is followed live, exactly as
+// the auto-open does; a run waiting on the owner shows its question.
+function _opShowRunFromMemory(run, live, folder, token) {
+  const command = live.command || run.name || '';
+  operatorState.active = { id: live.id || run.id || '', artifact_folder: folder, command, intent: '', source: live.source || '' };
+  operatorState.finalRecord = null;
+  if (OPERATOR.folder) OPERATOR.folder.textContent = folder;
+  if (live.source === 'owner-workspace' && live.status === 'running') {
+    _jobsOpenLive({ operation_id: operatorState.active.id, command, artifact_folder: folder });
+    return;
+  }
+  _opRenderCommandEcho(command || '(no command recorded)', live.source === 'owner-workspace' ? 'From Owner Workspace' : 'You');
+  _opSetStatusDot(live.status);
+  if (live.status === 'awaiting_input' && live.pending && live.pending.question) {
+    _opRenderNeedsInput(live.pending, true);
+    _opSetAnswerMode({
+      opId: operatorState.active.id,
+      question: live.pending.question,
+      buttonsOnly: !!live.pending.buttons_only,
+      summary: live.pending.task_summary || '',
+    });
+    return;
+  }
+  _opWatchRun(run, operatorState.active.id, token);
+}
+
+// Poll the run while it is running; once it parks or ends, load it again
+// (from its folder, now written). Stops when the pane shows anything else.
+function _opWatchRun(run, id, token) {
+  _opStopRunWatch();
+  const tick = async () => {
+    _opRunWatch = null;
+    if (token !== _opLoadSeq || !operatorState.active || operatorState.active.id !== id || operatorState.running) return;
+    if (_activeWorkspaceView !== null) { _opRunWatch = setTimeout(tick, _OP_WATCH_MS); return; }
+    const live = await _opFetchLive({ ...run, id });
+    if (token !== _opLoadSeq || !operatorState.active || operatorState.active.id !== id) return;
+    if (!live || (live.known && live.status === 'running')) { _opRunWatch = setTimeout(tick, _OP_WATCH_MS); return; }
+    loadOperatorRun({ ...run, id, refresh: true });
+  };
+  _opRunWatch = setTimeout(tick, _OP_WATCH_MS);
 }
 
 function _opRenderCommandEcho(text, who = 'You') {
@@ -6497,9 +6580,11 @@ function _opRenderRehydrateWarnings(missing) {
   });
 }
 
-function _opRenderRehydrateError(folder, message) {
-  if (OPERATOR.statusLabel) OPERATOR.statusLabel.textContent = 'Could not load run';
-  _opSetStatusDot('failed');
+// v7.7: ``status`` is the run's LIVE state (GET /operations/live). A folder
+// that cannot be read says nothing about whether the run failed, so the dot
+// shows the run's real state, or "Could not load run" when it is unknown.
+function _opRenderRehydrateError(folder, message, status) {
+  _opSetStatusDot(status && status !== 'unknown' ? status : 'unknown');
   if (OPERATOR.folder) OPERATOR.folder.textContent = folder || '';
   if (OPERATOR.errors) {
     OPERATOR.errors.classList.remove('hidden');
@@ -7674,7 +7759,7 @@ async function _historyFill() {
       li.addEventListener('click', () => {
         _historyClose();
         if (op.artifact_folder) {
-          loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd });
+          loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd, id: op.id || '' });
         }
       });
       _historyEls.list.appendChild(li);
@@ -7902,7 +7987,7 @@ function _railRenderThreads() {
     btn.addEventListener('click', () => {
       if (op.artifact_folder) {
         _bgClearSeen(op.id);   // opening the run consumes its badge
-        loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd });
+        loadOperatorRun({ artifact_folder: op.artifact_folder, name: cmd, id: op.id || '' });
         list.querySelectorAll('.rail-thread.is-active').forEach((n) => n.classList.remove('is-active'));
         li.classList.add('is-active');
       }
@@ -8581,7 +8666,7 @@ async function loadApprovals() {
         <span class="brief-item-main">${_briefEsc(q.question || 'Ridian asked a question.')}</span>
         <span class="brief-item-meta">From Owner Workspace: ${_briefEsc(q.command)}${q.parked_at ? ` · asked ${_briefEsc(q.parked_at)}` : ''}</span>
         <span class="approval-actions">
-          <button type="button" class="btn btn-compact approval-open-run-btn" data-folder="${_briefEsc(q.artifact_folder)}" data-command="${_briefEsc(q.command)}">Open the run</button>
+          <button type="button" class="btn btn-compact approval-open-run-btn" data-folder="${_briefEsc(q.artifact_folder)}" data-command="${_briefEsc(q.command)}" data-op-id="${_briefEsc(q.operation_id)}">Open the run</button>
         </span>
       </div>`).join('')}
     </section>` : '';
@@ -8609,7 +8694,7 @@ function _wireOpenRunButtons(body) {
   body.querySelectorAll('.approval-open-run-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const folder = btn.getAttribute('data-folder');
-      if (folder) loadOperatorRun({ artifact_folder: folder, name: btn.getAttribute('data-command') || '' });
+      if (folder) loadOperatorRun({ artifact_folder: folder, name: btn.getAttribute('data-command') || '', id: btn.getAttribute('data-op-id') || '' });
     });
   });
 }
@@ -9195,7 +9280,7 @@ function _jobsOpenFromNotice(notice) {
   if (notice.kind === 'claimed' && _jobsActiveRun && _jobsActiveRun.id === notice.operation_id) {
     _jobsOpenLive(notice);
   } else if (notice.artifact_folder) {
-    loadOperatorRun({ artifact_folder: notice.artifact_folder, name: notice.command || '' });
+    loadOperatorRun({ artifact_folder: notice.artifact_folder, name: notice.command || '', id: notice.operation_id || '' });
   }
 }
 
@@ -9218,11 +9303,20 @@ function _jobsOpenLive(notice) {
   _opResetUI();
   _opResetComposer();
   _opSetAnswerMode(null);
+  // v7.7: the pane now holds THIS run. Left pointing at the previous job run
+  // (2026-09-24: op_5d8e6e5c475d from 14:23), the first live tick took the
+  // mismatch for "the window moved on" and stopped following at once. A
+  // folder load or watch still in flight must not paint over it either.
+  operatorState.active = { id: notice.operation_id || '', command: notice.command || '',
+    artifact_folder: notice.artifact_folder || '', intent: '', source: 'owner-workspace' };
+  operatorState.finalRecord = null;
+  _opLoadSeq += 1;
+  _opStopRunWatch();
   if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
   _opRenderCommandEcho(notice.command || '', 'From Owner Workspace');
   _opSetStatusDot('running');
   _opStartElapsed();
-  _jobsLive = { opId: notice.operation_id, after: 0 };
+  _jobsLive = { opId: notice.operation_id, after: 0, folder: notice.artifact_folder || '', command: notice.command || '' };
   _jobsLiveTick();
 }
 
@@ -9240,6 +9334,13 @@ async function _jobsLiveTick() {
     if (res.ok) data = await res.json();
   } catch (_) { /* try again below */ }
   if (_jobsLive !== live) return;
+  // v7.7: no events for this run here (not the current job run): watch its
+  // live state instead, and load its folder once it parks or ends.
+  if (data && data.known === false) {
+    _jobsLive = null;
+    _opWatchRun({ artifact_folder: live.folder, id: live.opId, name: live.command }, live.opId, _opLoadSeq);
+    return;
+  }
   if (data) {
     (data.events || []).forEach((evt) => _opHandleEvent(evt));
     live.after = data.next || live.after;

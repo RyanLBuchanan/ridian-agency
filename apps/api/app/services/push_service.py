@@ -27,6 +27,9 @@ Occurrence keys are restart-stable:
   op:<operation_id>:q<n>          n = len(needs_input): one per park; an
                                   answer that re-parks extends the list —
                                   new key, new notification.
+  wd:<key>                        v7.7: that notification was WITHDRAWN
+                                  (closed on the phone) because its run was
+                                  answered, cancelled or expired — once.
 A key is marked ONLY after a push service accepted the message for at
 least one subscribed device. Failure leaves it unmarked (the next
 evaluation retries) and records last_error — surfaced in
@@ -394,7 +397,7 @@ def evaluate_and_push(today: Optional[_dt.date] = None) -> dict:
     return {"sent": len(accepted), "attempted": len(claimed)}
 
 
-def _notify_one(key: str, payload: dict) -> None:
+def _notify_one(key: str, payload: dict, also_mark: tuple = ()) -> None:
     if not enabled():
         return
     with _ledger_lock:
@@ -404,7 +407,7 @@ def _notify_one(key: str, payload: dict) -> None:
         _inflight.add(key)
     try:
         if _send_to_subscriptions(payload, tag=key):
-            _mark_accepted([key])
+            _mark_accepted([key, *also_mark])
     finally:
         with _ledger_lock:
             _inflight.discard(key)
@@ -433,13 +436,59 @@ def notify_run_parked(snapshot: dict) -> None:
         "tab": "task"})
 
 
+def _run_push_tags(operation_id: str, ledger: dict) -> list:
+    """v7.7: the phone notifications this run raised that were delivered and
+    not yet withdrawn — its parks (op:<id>:q<n>) and its staged approvals
+    (appr:<id>). The expired notice itself is never withdrawn."""
+    if not operation_id:
+        return []
+    parks = f"op:{operation_id}:q"
+    approvals = {f"appr:{a.get('id')}" for a in state_store.load_list("approvals")
+                 if isinstance(a, dict) and a.get("operation_id") == operation_id and a.get("id")}
+    return sorted(k for k in ledger
+                  if (k.startswith(parks) or k in approvals) and f"wd:{k}" not in ledger)
+
+
+def _withdraw(operation_id: str, reason: str) -> None:
+    if not enabled() or not operation_id:
+        return
+    claim = f"wd:{operation_id}"
+    with _ledger_lock:
+        tags = _run_push_tags(operation_id, _prune(state_store.load_dict(_LEDGER_STORE)))
+        if not tags or claim in _inflight:
+            return
+        _inflight.add(claim)
+    try:
+        # No title: the service worker closes these tags and shows nothing.
+        if _send_to_subscriptions({"withdraw": tags}, tag=claim):
+            _mark_accepted([f"wd:{t}" for t in tags])
+            log.info("push.withdrawn op=%s count=%d reason=%s", operation_id, len(tags), reason)
+    finally:
+        with _ledger_lock:
+            _inflight.discard(claim)
+
+
+def withdraw_run(operation_id: str, reason: str) -> None:
+    """v7.7 event hook: the run was answered (in the thread, the inbox, or
+    from the phone) or cancelled — the notifications it raised on the phone
+    are closed there. Fire-and-forget; only what was delivered, once."""
+    _spawn(_withdraw, str(operation_id or ""), str(reason or ""))
+
+
+def _notify_run_expired(operation_id: str, command: str) -> None:
+    with _ledger_lock:
+        tags = _run_push_tags(operation_id, _prune(state_store.load_dict(_LEDGER_STORE)))
+    payload = {"title": "Ridian couldn't continue", "body": command, "tab": "task"}
+    if tags:
+        payload["withdraw"] = tags    # the stale "waiting on you" closes as this shows
+    _notify_one(f"op:{operation_id}:expired", payload, also_mark=tuple(f"wd:{t}" for t in tags))
+
+
 def notify_run_expired(op: dict) -> None:
     """v7.6 event hook: a parked run could not continue and was marked
-    failed. The ledger key makes it once, even across restarts."""
-    _spawn(_notify_one, f"op:{op.get('id')}:expired", {
-        "title": "Ridian couldn't continue",
-        "body": str(op.get("command") or ""),
-        "tab": "task"})
+    failed. The ledger key makes it once, even across restarts. v7.7: the
+    same push withdraws the run's park and approval notifications."""
+    _spawn(_notify_run_expired, str(op.get("id") or ""), str(op.get("command") or ""))
 
 
 def maybe_evaluate() -> None:
