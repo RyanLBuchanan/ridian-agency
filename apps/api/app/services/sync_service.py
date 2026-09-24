@@ -487,6 +487,22 @@ def _retry_after(resp: httpx.Response) -> float:
     return max(BACKOFF_BASE_SECONDS, min(RETRY_AFTER_CAP_SECONDS, seconds))
 
 
+def _report_allow_jobs(resp: httpx.Response) -> None:
+    """Ridian Jobs (v7.4): every authenticated push answer carries allowJobs
+    (site 47484f6+). Hand it to the jobs engine so the owner's switch takes
+    effect on this push, not the next claim. Never lets a push fail."""
+    if resp.status_code == 401:
+        return
+    allowed = _json(resp).get("allowJobs")
+    if not isinstance(allowed, bool):
+        return
+    try:
+        from . import jobs_service  # lazy: jobs_service imports this module
+        jobs_service.note_allow_jobs(allowed, "push")
+    except Exception:  # noqa: BLE001
+        log.warning("owner_sync.allow_jobs_note_failed", exc_info=True)
+
+
 def _record_push(connection_id: str, site: str, resp: httpx.Response,
                  reasons: list, content_hash: str = "") -> tuple[str, Optional[float]]:
     """Store what a push answer means. Returns (result, backoff): backoff
@@ -495,6 +511,7 @@ def _record_push(connection_id: str, site: str, resp: httpx.Response,
     now = _iso(_utcnow())
     host = _host(site)
     status = resp.status_code
+    _report_allow_jobs(resp)
     if status == 200:
         data = _json(resp)
         result = "duplicate" if data.get("duplicate") else "accepted"

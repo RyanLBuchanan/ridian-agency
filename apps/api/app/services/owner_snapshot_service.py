@@ -93,6 +93,13 @@ _PHONE_RE = re.compile(_PHONE_PATTERN)
 # a refused export, never a leak.
 _LEAK_EMAIL_RE = re.compile(_EMAIL_PATTERN)
 _LEAK_PHONE_RE = re.compile(_PHONE_PATTERN)
+# v7.4: the site's importer refuses EVERY '@' in a string value, not only
+# addresses. After the contact scrub, a word still holding one is an address
+# the email pattern missed (no TLD, cut short) and becomes [email]; a lone
+# '@' (a handle like @jane, "meet @ 5") becomes "(at)". Free text only (the
+# prose fields, and Ridian Jobs replies); a deliverable filename holding '@'
+# is left out; verify_document refuses any other '@'.
+_AT_WORD_RE = re.compile(r"\S+@\S+")
 
 _TS_OUT = "%Y-%m-%dT%H:%M:%SZ"
 TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
@@ -221,6 +228,11 @@ def _scrub_paths(text: str, place_needles: tuple[str, ...]) -> str:
     return text
 
 
+def neutralize_at(text: str) -> str:
+    """No '@' survives: [email] for a word holding one, "(at)" for a lone one."""
+    return _AT_WORD_RE.sub(EMAIL_PLACEHOLDER, text).replace("@", "(at)")
+
+
 def _scrub_contact_details(text: str) -> str:
     """Free text only: email addresses and phone numbers become placeholders."""
     text = _EMAIL_RE.sub(EMAIL_PLACEHOLDER, text)
@@ -265,10 +277,12 @@ class _Coercer:
         return _scrub_paths(s[:TEXT_MAX], self._needles)
 
     def freetext(self, value: Any) -> str:
-        """Human prose: path-scrubbed, contact details replaced, and
-        self-checked with the independent leak detectors — a scrub that
-        left an email or phone behind is a refused export."""
-        out = _scrub_contact_details(self.text(value))
+        """Human prose: path-scrubbed, contact details replaced, any stray
+        '@' neutralized (v7.4), and self-checked with the independent leak
+        detectors — a scrub that left an email or phone behind is a refused
+        export. Labels (text) are NOT neutralized on purpose: a prose field
+        downgraded to a label must still be caught by verify_document."""
+        out = neutralize_at(_scrub_contact_details(self.text(value)))
         if _LEAK_EMAIL_RE.search(out) or _LEAK_PHONE_RE.search(out):
             raise SnapshotPolicyError("contact detail survived the free-text scrub")
         return out
@@ -350,7 +364,9 @@ def deliverable_names(op: Any, c: Optional[_Coercer] = None) -> list[str]:
         if not isinstance(a, dict) or not a.get("name") or a.get("kind") == "browser":
             continue
         name = os.path.basename(str(a.get("name")))
-        if name and name != "operation_log.json":
+        # A filename holding '@' is left out rather than renamed: the site
+        # refuses any '@', and one file must not sink the whole snapshot.
+        if name and name != "operation_log.json" and "@" not in name:
             names.append(c.text(name))
     return names[:LIST_ITEM_MAX]
 
@@ -728,6 +744,10 @@ def verify_document(document: Any, needles: Optional[tuple[str, ...]] = None,
             raise SnapshotPolicyError(f"local path leaked at {_where}")
         if _LEAK_EMAIL_RE.search(document):
             raise SnapshotPolicyError(f"email address leaked at {_where}")
+        if "@" in document:
+            # The site refuses any '@'; the coercer neutralizes every one,
+            # so this only fires for a field that bypassed it.
+            raise SnapshotPolicyError(f"'@' survived at {_where}")
 
 
 # ---------------------------------------------------------------------------

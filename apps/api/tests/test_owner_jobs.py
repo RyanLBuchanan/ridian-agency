@@ -2,8 +2,10 @@
 
 Pins, mutation-style like the other gates:
   1. CADENCE: claim every 15 s while connected; 403 (not allowed) slows to
-     every 5 minutes and Settings says so; 429 honors Retry-After; network
-     failures back off exponentially, capped; 401 drops the connection.
+     every 60 s and Settings says so; allowJobs from a snapshot push answer
+     (or the claim 403 body) takes effect at once — a flip to true claims
+     immediately; 429 honors Retry-After; network failures back off
+     exponentially, capped; 401 drops the connection.
   2. ONE AT A TIME: nothing is claimed while a job is non-terminal here.
   3. The job runs through the REAL operator_service.run_operation (planner
      loop, record, persistence) with a mocked tool, stamped source
@@ -141,9 +143,11 @@ class JobsSite:
             return httpx.Response(401, headers={"www-authenticate": "Bearer"})
         path = request.url.path
         if path == sync_service.PUSH_PATH:
-            return httpx.Response(200, json={"ok": True, "duplicate": False, "snapshotId": "snap"})
+            # Site 47484f6+: every authenticated push answer carries allowJobs.
+            return httpx.Response(200, json={"ok": True, "duplicate": False, "snapshotId": "snap",
+                                             "allowJobs": self.allowed})
         if path.startswith("/api/jobs/") and not self.allowed:
-            return httpx.Response(403, json={"error": "jobs_not_allowed"})
+            return httpx.Response(403, json={"error": "jobs_not_allowed", "allowJobs": False})
         if path == jobs_service.CLAIM_PATH:
             if self.claim_answers:
                 status, body, headers = self.claim_answers.pop(0)
@@ -278,14 +282,14 @@ def _job_op(job_id: str) -> dict:
 
 def test_the_timings_are_the_contract():
     assert jobs_service.POLL_SECONDS == 15
-    assert jobs_service.NOT_ALLOWED_POLL_SECONDS == 5 * 60
+    assert jobs_service.NOT_ALLOWED_POLL_SECONDS == 60
     assert jobs_service.STALE_AFTER == dt.timedelta(hours=1)
     assert jobs_service.COMMAND_MAX_CHARS == 2000
     assert jobs_service.SOURCE == "owner-workspace"
     assert jobs_service.NOT_ALLOWED_TEXT == "Owner Workspace has not allowed this PC to run commands"
 
 
-def test_claims_every_15_seconds_and_backs_off_to_5_minutes_when_not_allowed(monkeypatch):
+def test_claims_every_15_seconds_and_every_60_seconds_when_not_allowed(monkeypatch):
     site = JobsSite().install(monkeypatch)
     _connect(site)
     clock = Clock()
@@ -301,23 +305,81 @@ def test_claims_every_15_seconds_and_backs_off_to_5_minutes_when_not_allowed(mon
         assert await engine.tick() == "waiting" and len(site.of("claim")) == 1
         clock.advance(1)
         assert await engine.tick() == "no_job" and len(site.of("claim")) == 2
-        # The owner has not allowed this PC: every 5 minutes, and Settings says so.
+        # The owner has not allowed this PC: every 60 seconds, and Settings says so.
         site.allowed = False
         clock.advance(15)
         assert await engine.tick() == "not_allowed"
         assert engine.view()["state"] == "not_allowed"
         assert engine.view()["text"] == "Owner Workspace has not allowed this PC to run commands"
         assert sync_service.status_view()["jobs"]["text"] == jobs_service.NOT_ALLOWED_TEXT
-        for _ in range(19):
+        for _ in range(3):
             clock.advance(15)
             assert await engine.tick() == "waiting"
-        assert len(site.of("claim")) == 3, "no claim inside the 5-minute window"
+        assert len(site.of("claim")) == 3, "no claim inside the 60-second window"
         clock.advance(15)
         assert await engine.tick() == "not_allowed" and len(site.of("claim")) == 4
         site.allowed = True
-        clock.advance(300)
+        clock.advance(60)
         assert await engine.tick() == "no_job"
         assert engine.view()["state"] == "accepting"
+
+    asyncio.run(scenario())
+
+
+def test_allow_jobs_on_a_push_answer_takes_effect_at_once(monkeypatch):
+    """The site reports allowJobs on every authenticated snapshot push: a
+    flip to true claims immediately instead of after the 60-second wait; a
+    flip to false stops claiming at once."""
+    site = JobsSite().install(monkeypatch)
+    _connect(site)
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        site.allowed = False
+        assert await engine.tick() == "not_allowed"
+        clock.advance(5)
+        assert await engine.tick() == "waiting"
+        # The owner flips the switch; the next snapshot push says so.
+        site.allowed = True
+        job_id = site.add_job("Draft the recap")
+        assert sync_service.push_now(["timer"])[0] in ("accepted", "unchanged")
+        assert engine.view()["state"] == "accepting"
+        assert await engine.tick() == "claimed", "claimed at once, no 60-second wait"
+        assert clock() == 1005
+        engine._task.cancel()
+        jobs_service._save({})             # the run itself is not this test's subject
+        # Flipped off: the push says so and claiming stops right away.
+        site.allowed = False
+        sync_service._update(None, force_next_push=True)
+        assert sync_service.push_now(["timer"])[0] == "accepted"
+        assert engine.view()["state"] == "not_allowed"
+        assert engine.view()["text"] == jobs_service.NOT_ALLOWED_TEXT
+        claims = len(site.of("claim"))
+        clock.advance(59)
+        assert await engine.tick() == "waiting"
+        assert len(site.of("claim")) == claims
+        return job_id
+
+    asyncio.run(scenario())
+
+
+def test_a_403_is_not_allowed_whatever_its_body_says(monkeypatch):
+    """The claim 403 body's allowJobs only confirms: a contradicting body can
+    never turn a refusal into a claim loop."""
+    site = JobsSite().install(monkeypatch)
+    _connect(site)
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        site.claim_answers.append((403, {"error": "jobs_not_allowed", "allowJobs": True}, None))
+        assert await engine.tick() == "not_allowed"
+        assert engine.view()["state"] == "not_allowed"
+        for _ in range(3):
+            clock.advance(15)
+            assert await engine.tick() == "waiting"
+        assert len(site.of("claim")) == 1
 
     asyncio.run(scenario())
 

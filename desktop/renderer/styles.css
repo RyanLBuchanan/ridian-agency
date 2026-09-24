@@ -1991,10 +1991,23 @@ body {
   font-size: var(--fs-sm);
   color: var(--color-text-strong);
   line-height: 1.55;
-  white-space: pre-wrap;
   word-break: break-word;
   max-width: 75ch;   /* reading measure — panel is full-width, prose isn't */
 }
+/* v7.4: the reply is sanitized Markdown (markdown.js); line breaks are <br>. */
+.operator-receipt-text > :first-child { margin-top: 0; }
+.operator-receipt-text > :last-child { margin-bottom: 0; }
+.operator-receipt-text p { margin: 0 0 0.55em; }
+.operator-receipt-text ul,
+.operator-receipt-text ol { margin: 0 0 0.55em; padding-left: 1.35em; }
+.operator-receipt-text li + li { margin-top: 0.15em; }
+.operator-receipt-text h4,
+.operator-receipt-text h5,
+.operator-receipt-text h6 { margin: 0.7em 0 0.3em; color: var(--color-text-strong); }
+.operator-receipt-text h4 { font-size: 1.05em; }
+.operator-receipt-text h5 { font-size: 1em; }
+.operator-receipt-text h6 { font-size: 0.95em; }
+.operator-receipt-text strong { font-weight: 700; }
 
 /* v1.7: missing-information card */
 

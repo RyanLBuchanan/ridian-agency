@@ -473,15 +473,13 @@ def test_scrub_never_touches_dates_ids_money_or_timestamps():
 
 
 @pytest.mark.parametrize("mutation", [
-    "identity_scrub", "email_regex_disabled", "phone_regex_disabled",
+    "identity_scrub", "phone_regex_disabled",
     "command_kind_downgraded",
 ])
 def test_a_mutated_scrub_is_a_refused_export_not_a_leak(monkeypatch, tmp_path, mutation):
     _seed()
     if mutation == "identity_scrub":
         monkeypatch.setattr(svc, "_scrub_contact_details", lambda text: text)
-    elif mutation == "email_regex_disabled":
-        monkeypatch.setattr(svc, "_EMAIL_RE", re.compile(r"(?!x)x"))
     elif mutation == "phone_regex_disabled":
         monkeypatch.setattr(svc, "_PHONE_RE", re.compile(r"(?!x)x"))
     elif mutation == "command_kind_downgraded":
@@ -494,6 +492,43 @@ def test_a_mutated_scrub_is_a_refused_export_not_a_leak(monkeypatch, tmp_path, m
         svc.export_snapshot()
     assert not (tmp_path / "exports").exists()
 
+
+
+def test_a_disabled_email_pattern_is_still_not_a_leak(monkeypatch):
+    """v7.4: the '@' neutralizer is a second layer behind the email pattern.
+    With the pattern broken, every address still leaves as [email]."""
+    _seed()
+    monkeypatch.setattr(svc, "_EMAIL_RE", re.compile(r"(?!x)x"))
+    text = json.dumps(svc.build_snapshot())
+    for leaked in (FREE_TEXT_EMAIL, "sarah.chen@chenbakery.com", "greg@gulfcoastchamber.org"):
+        assert leaked not in text, leaked
+    assert "@" not in text and "[email]" in text
+
+
+def test_a_stray_at_sign_is_neutralized_so_the_site_accepts_the_snapshot():
+    """The site's importer refuses ANY '@' in a string value, so "@jane" in a
+    command used to sink the whole push. v7.4: a lone '@' becomes "(at)", a
+    word holding one becomes [email], a filename holding one is left out,
+    and verify_document refuses any '@' that gets past the coercer."""
+    _seed()
+    ops = state_store.load_list("operations")
+    ops.insert(0, {
+        "id": "op_at", "command": "Ping @jane about the recap, meet @ 5pm, cc ops@localhost",
+        "intent": "planner", "status": "completed", "started_at": "2026-09-10T08:00:00",
+        "completed_at": "2026-09-10T08:05:00", "tools_used": ["draft_document"],
+        "artifacts": [{"name": "notes@v2.docx", "kind": "docx"}, {"name": "recap.docx", "kind": "docx"}],
+        "needs_input": [], "errors": []})
+    state_store.save("operations", ops)
+    doc = svc.build_snapshot()
+    row = next(r for r in doc["recentWork"] if r["id"] == "op_at")
+    assert row["command"] == "Ping (at)jane about the recap, meet (at) 5pm, cc [email]"
+    assert row["artifactNames"] == ["recap.docx"], "a filename holding '@' is left out, not renamed"
+    assert "@" not in json.dumps(doc)
+    svc.verify_document(doc)
+    assert svc.scrub_free_text("@jane") == "(at)jane"
+    assert svc.neutralize_at("root@server and @jane") == "[email] and (at)jane"
+    with pytest.raises(svc.SnapshotPolicyError, match="'@' survived"):
+        svc.verify_document({"recentWork": [{"intent": "planner @ home"}]})
 
 # --------------------------------------------------------------------------
 # Artifacts: filenames only, no ledger file; browser targets as hosts only

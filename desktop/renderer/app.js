@@ -5161,7 +5161,10 @@ function _opRenderReceipt(text) {
   const card = document.getElementById('operator-receipt');
   const body = document.getElementById('operator-receipt-text');
   if (!card || !body) return;
-  body.textContent = text;
+  // v7.4: sanitized Markdown — headings, paragraphs, lists and bold, built
+  // from DOM nodes only (markdown.js); raw HTML stays literal text.
+  if (window.RidianMarkdown) window.RidianMarkdown.renderInto(body, text);
+  else body.textContent = text;
   card.classList.remove('hidden');
 }
 

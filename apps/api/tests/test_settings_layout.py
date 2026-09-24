@@ -178,3 +178,13 @@ def _sandbox_env() -> dict:
     env.update({"RIDIAN_SANDBOX": "1", "RIDIAN_DATA_DIR": str(scratch),
                 "RIDIAN_PORT": "8766", "APPDATA": str(scratch / "profile")})
     return env
+
+
+def test_a_hostile_reply_renders_inert_in_the_real_renderer(harness_output):
+    """v7.4: the harness renders a reply holding <script>, <img onerror>, a
+    Markdown image and a javascript: link through the app's own
+    _opRenderReceipt in Chromium: only fixed elements, nothing executed."""
+    section = harness_output.split("--- Reply markdown (real DOM) ---", 1)[1]
+    assert "markdown inert: no script, img or link element" in section
+    assert "dangerous=0 pwned=0" in section
+    assert "tags=li,p,strong,ul" in section

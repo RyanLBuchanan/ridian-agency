@@ -18,8 +18,10 @@ THE RULES, each pinned by tests/test_owner_jobs.py:
 
   1. One job at a time: nothing is claimed while a job is non-terminal here.
   2. Claim only while connected. 403 (the owner has not allowed this PC to
-     run commands) slows polling to every 5 minutes and says so in
-     Settings; 429 honors Retry-After; a network failure or 5xx backs off
+     run commands) slows polling to every 60 seconds and says so in
+     Settings. The site also reports allowJobs on every snapshot push answer
+     and in the claim 403 body (v7.4); when it flips to true, the next claim
+     goes out at once. 429 honors Retry-After; a network failure or 5xx backs off
      exponentially (capped at 5 minutes); 401 means the token is dead and
      the Owner Workspace connection is dropped, exactly as a push 401 does.
   3. A job created more than an hour ago is refused even if handed one
@@ -29,9 +31,9 @@ THE RULES, each pinned by tests/test_owner_jobs.py:
      this PC's thread and inbox, or the phone companion's inbox.
   5. The result carries only the contract's allowlisted fields. replyText
      goes through the snapshot exporter's free-text scrub (no local paths,
-     no email addresses, no phone numbers); then, because the site refuses
-     any "@", a word still holding one becomes "[email]" and a lone "@"
-     becomes "(at)". A result the site refuses is
+     no email addresses, no phone numbers, and — because the site refuses
+     any "@" — a word still holding one becomes "[email]" and a lone "@"
+     becomes "(at)"). A result the site refuses is
      recorded on the operation with the reason and NEVER resent with
      different content; a transient failure resends the identical body.
   6. The command text is never logged and never written to this module's
@@ -70,7 +72,7 @@ RESULT_PATH = "/api/jobs/{id}/result"
 JOBS_PATH = data_dir() / "owner_jobs.json"
 
 POLL_SECONDS = 15.0
-NOT_ALLOWED_POLL_SECONDS = 5 * 60.0
+NOT_ALLOWED_POLL_SECONDS = 60.0
 BACKOFF_MAX_SECONDS = 5 * 60.0
 STARTUP_DELAY_SECONDS = 15.0
 STALE_AFTER = _dt.timedelta(hours=1)
@@ -90,9 +92,6 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _RESULT_STATUS_RE = re.compile(r"^[a-z_]{1,32}$")
 _BAD_CONTROL = {chr(c) for c in range(32) if c not in (9, 10, 13)} | {chr(127)}
-# After the exporter's scrub: a word still holding an '@' between two
-# characters is an address the email pattern missed (no TLD, or cut short).
-_AT_WORD_RE = re.compile(r"\S+@\S+")
 
 # Operation status -> the job's final status on the site. "partial" is a
 # finished run that also hit errors: completed, with errorCount telling why.
@@ -158,10 +157,11 @@ def _names(values: Any, max_chars: int) -> list[str]:
 def reply_text(text: Any) -> str:
     """replyText for the site: the snapshot exporter's free-text scrub (which
     reads at most its TEXT_MAX characters, so longer text is first cut at a
-    word boundary — never through an address — and marked "…"). Then any
-    word still holding an '@' becomes "[email]", a lone '@' becomes "(at)"
-    (the site refuses every '@'), and control characters are dropped. ""
-    when there is nothing to say or the scrub refused itself."""
+    word boundary — never through an address — and marked "…"). That scrub
+    also turns any word still holding an '@' into "[email]" and a lone '@'
+    into "(at)" (the site refuses every '@'; v7.4 moved this into the shared
+    scrub). Control characters are dropped. "" when there is nothing to say
+    or the scrub refused itself."""
     from . import owner_snapshot_service  # lazy: it imports half the services
     raw = str(text or "").strip()
     if not raw:
@@ -176,7 +176,6 @@ def reply_text(text: Any) -> str:
     except owner_snapshot_service.SnapshotPolicyError:
         log.warning("owner_jobs.reply_withheld reason=scrub_refused")
         return ""
-    scrubbed = _AT_WORD_RE.sub(owner_snapshot_service.EMAIL_PLACEHOLDER, scrubbed).replace("@", "(at)")
     return _clean_text(scrubbed, REPLY_TEXT_MAX_CHARS).strip()
 
 
@@ -310,6 +309,20 @@ class JobsEngine:
     def detach(self) -> None:
         state_store.remove_save_listener(self.on_store_saved)
         operator_service.remove_run_listener(self.on_run_event)
+
+    def on_allow_jobs(self, allowed: bool, source: str) -> None:
+        """The site said whether this PC may run commands (a snapshot push
+        answer, or the claim 403 body). A flip to true claims at once; a flip
+        to false stops claiming until the next not-allowed check."""
+        previous, self._allowed = self._allowed, allowed
+        if allowed and previous is not True:
+            self._next_poll = self._clock()
+            self._retry_at = 0.0
+            log.info("owner_jobs.allowed source=%s — claiming now", source)
+            self._wake()
+        elif not allowed and previous is not False:
+            self._next_poll = max(self._next_poll, self._clock() + NOT_ALLOWED_POLL_SECONDS)
+            log.info("owner_jobs.not_allowed source=%s — checking every %d s", source, int(NOT_ALLOWED_POLL_SECONDS))
 
     def poll_now(self) -> None:
         """Tests: make the next tick claim (or retry) without waiting."""
@@ -563,11 +576,15 @@ class JobsEngine:
         if status == 401:
             return self._unauthorized(conn)
         if status == 403:
-            self._allowed = False
+            # The body says {"error": "jobs_not_allowed", "allowJobs": false}
+            # (site 47484f6+). The status decides: a 403 is "not allowed"
+            # whatever the body claims, so a contradicting body can never
+            # start a claim-403 loop.
+            confirmed = sync_service._json(resp).get("allowJobs") is False
+            self.on_allow_jobs(False, "claim_403" if confirmed else "claim_403_no_body")
             self._failures = 0
             self._last_error = ""
             self._next_poll = now + NOT_ALLOWED_POLL_SECONDS
-            log.info("owner_jobs.not_allowed — polling every %d s", int(NOT_ALLOWED_POLL_SECONDS))
             return "not_allowed"
         if status == 429:
             self._next_poll = now + self._backoff(sync_service._retry_after(resp))
@@ -643,7 +660,7 @@ class JobsEngine:
                 return self._unauthorized(conn)
             data = sync_service._json(resp)
             if status == 403 and data.get("error") == "jobs_not_allowed":
-                self._allowed = False
+                self.on_allow_jobs(False, "report_403")
                 self._retry_at = self._clock() + NOT_ALLOWED_POLL_SECONDS
                 return "not_allowed"
             if status in (403, 404):
@@ -756,6 +773,13 @@ def stop_engine() -> None:
         engine.stop()
     if task is not None and not task.done():
         task.cancel()
+
+
+def note_allow_jobs(allowed: bool, source: str) -> None:
+    """sync_service hands over allowJobs from each authenticated push answer."""
+    engine = _engine
+    if engine is not None and isinstance(allowed, bool):
+        engine.on_allow_jobs(allowed, source)
 
 
 def use_engine(engine: Optional[JobsEngine]) -> Optional[JobsEngine]:

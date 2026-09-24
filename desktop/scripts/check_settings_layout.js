@@ -449,6 +449,43 @@ app.whenReady().then(async () => {
     allProblems.push(...problems);
   }
 
+  // --- v7.4: Ridian's reply as sanitized Markdown, in the REAL renderer DOM.
+  // The hostile reply goes through the app's own _opRenderReceipt into the
+  // real #operator-receipt-text; nothing in it may become an element.
+  console.log('');
+  console.log('--- Reply markdown (real DOM) ---');
+  const replyLines = [
+    '**Today:** 3 meetings', '', '- **Invoice** Sandy Alvarez', '- Follow up', '',
+    '<script>window.__pwned = 1</script>', '', '<img src=x onerror="window.__pwned = 2">', '',
+    '![tracker](https://evil.example/pixel.png)', '', '[click me](javascript:window.__pwned=3)',
+  ];
+  const reply = await win.webContents.executeJavaScript(`(() => {
+    const text = ${JSON.stringify(replyLines)}.join(String.fromCharCode(10));
+    _opRenderReceipt(text);
+    const el = document.getElementById('operator-receipt-text');
+    const all = [...el.querySelectorAll('*')];
+    return {
+      loaded: typeof window.RidianMarkdown === 'object',
+      tags: [...new Set(all.map((e) => e.tagName.toLowerCase()))].sort(),
+      attrs: [...new Set(all.flatMap((e) => [...e.attributes].map((a) => a.name)))],
+      dangerous: el.querySelectorAll('script, img, a, iframe, b, style, object, embed').length,
+      literalStars: el.textContent.includes('**'),
+      strong: el.querySelectorAll('strong').length,
+      items: el.querySelectorAll('li').length,
+      scriptShownAsText: el.textContent.includes('<script>window.__pwned = 1</script>'),
+      pwned: window.__pwned || 0,
+    };
+  })()`, true);
+  console.log(`  tags=${reply.tags.join(',')} strong=${reply.strong} items=${reply.items} dangerous=${reply.dangerous} pwned=${reply.pwned}`);
+  const allowedTags = new Set(['h4', 'h5', 'h6', 'p', 'br', 'ul', 'ol', 'li', 'strong']);
+  if (!reply.loaded) allProblems.push('markdown: window.RidianMarkdown is not loaded');
+  if (reply.dangerous || reply.pwned) allProblems.push(`markdown: hostile reply was not inert (dangerous=${reply.dangerous} pwned=${reply.pwned})`);
+  if (reply.tags.some((t) => !allowedTags.has(t))) allProblems.push('markdown: unexpected element ' + reply.tags.join(','));
+  if (reply.attrs.some((a) => a !== 'start')) allProblems.push('markdown: unexpected attribute ' + reply.attrs.join(','));
+  if (reply.literalStars || reply.strong < 2 || reply.items !== 2) allProblems.push('markdown: bold/lists did not render');
+  if (!reply.scriptShownAsText) allProblems.push('markdown: the script tag was not shown as text');
+  if (reply.loaded && !reply.dangerous && !reply.pwned) console.log('  markdown inert: no script, img or link element; tags shown as text');
+
   if (allProblems.length) {
     console.log('\nLAYOUT PROBLEMS:');
     allProblems.forEach((p) => console.log('  - ' + p));

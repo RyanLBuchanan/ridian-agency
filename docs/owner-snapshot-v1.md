@@ -96,7 +96,19 @@ the data directory, or an email address.
 `approvals[].command` and `question`, `followUps[].what` and `who`, deal
 titles and next actions, contact names, roles and companies, project and
 obligation names) have email addresses replaced with `[email]` and phone
-numbers with `[phone]`, and paths with `[local path removed]`. The phone
+numbers with `[phone]`, and paths with `[local path removed]`.
+
+**No `@` survives (v7.4).** The Owner Workspace refuses any `@` in a string
+value, not only addresses:
+
+- In free text, a word still holding an `@` after the email scrub (an
+  address with no domain ending, such as `name@localhost`) becomes
+  `[email]`. A lone `@` (a handle like `@jane`, or "meet @ 5") becomes
+  `(at)`.
+- A deliverable filename holding `@` is left out of `artifactNames`.
+- `verify_document` refuses any `@` that reaches the finished document.
+
+The phone
 pattern is deliberately strict (three/three/four digit groups with an
 optional country code) so dates, times, ids and money are never touched. Two
 independent leak detectors re-check every scrubbed field; if a scrub ever

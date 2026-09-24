@@ -25,7 +25,7 @@ The Owner Workspace block in Settings shows one of these lines:
 | --- | --- |
 | Accepting commands from the Owner Workspace | Allowed; checking every 15 seconds. |
 | Running a command from the Owner Workspace | A job is in progress here. |
-| Owner Workspace has not allowed this PC to run commands | The site answered 403 `jobs_not_allowed`; checking every 5 minutes. |
+| Owner Workspace has not allowed this PC to run commands | The site answered 403 `jobs_not_allowed` or a push said `allowJobs: false`; checking every 60 seconds. |
 | Checking the Owner Workspace for commands | Connected, not asked yet. |
 
 Nothing shows while the PC is disconnected.
@@ -39,10 +39,20 @@ token. The first claim goes out 15 seconds after startup.
 | --- | --- |
 | 204 (nothing queued) | in 15 s |
 | 200 (a job) | 15 s after that job is finished here |
-| 403 `jobs_not_allowed` | in 5 minutes, and Settings says so |
+| 403 `jobs_not_allowed` | in 60 s, and Settings says so |
 | 429 | after `Retry-After` |
 | 5xx, a redirect, or a network failure | backs off from 15 s, doubling to a 5-minute cap |
 | 401 | never: the token is dead, so the Owner Workspace connection is dropped exactly as a push 401 drops it |
+
+**The switch takes effect at once (v7.4).** The site reports `allowJobs`
+(true or false) on every authenticated snapshot push answer and in the claim
+403 body (site 47484f6 or later).
+
+- A push that says `true` while this PC thought it was not allowed makes
+  the next claim go out immediately, with no 60-second wait.
+- A push that says `false` stops claiming at once.
+- A 403 is always "not allowed", whatever its body says, so a
+  contradictory body can never start a claim loop.
 
 **One job at a time.** Nothing is claimed while a job is non-terminal on
 this PC: running, parked on an approval, or waiting to report its result.
@@ -128,18 +138,20 @@ The body follows the contract's allowlist:
   questions stay in `openQuestions`.
 
 `replyText` is the run's receipt (for a failed run with no receipt, its
-last error). It is prepared in four steps:
+last error). It is prepared in three steps:
 
 1. Cut at a word boundary with "…" when it is longer than the exporter's
    2000-character read limit. The cut never splits an address.
 2. Passed through the snapshot exporter's free-text scrub
-   (`owner_snapshot_service.scrub_free_text`): local paths and the data
-   directory are removed, email addresses become `[email]`, phone numbers
-   become `[phone]`, and the result is self-checked.
-3. The site refuses every `@`. Any word still holding one (an address the
-   email pattern missed, such as `name@localhost`) becomes `[email]`. A
-   lone `@` becomes `(at)`.
-4. Control characters other than line breaks and tabs are dropped.
+   (`owner_snapshot_service.scrub_free_text`), the same one the snapshot
+   uses:
+   - local paths and the data directory are removed;
+   - email addresses become `[email]` and phone numbers become `[phone]`;
+   - the site refuses every `@`, so any word still holding one (an address
+     the email pattern missed, such as `name@localhost`) becomes `[email]`
+     and a lone `@` becomes `(at)`;
+   - the result is self-checked.
+3. Control characters other than line breaks and tabs are dropped.
 
 The operation record on this PC keeps the original receipt.
 
@@ -199,8 +211,9 @@ guarantee explicit, independent of what the record carries.
 - **Clock:** "stale" is judged by this PC's clock against the site's
   `createdAt`. A PC clock more than an hour off would misjudge; Windows
   keeps it in sync by default.
-- **Snapshot and a bare `@`:** the exporter's scrub replaces email-shaped
-  text but not a bare `@` (for example `@jane` in a command). The site's
-  importer refuses any `@`, so a snapshot carrying one would be rejected.
-  The job result handles this itself (step 3 above). The snapshot does not
-  yet.
+- **A bare `@` (fixed in v7.4):** the site refuses any `@`, not only
+  addresses. `@jane` in a command used to sink a whole snapshot push. The
+  neutralizing step now lives in the exporter's shared free-text scrub, so
+  the snapshot and job results handle it the same way. A deliverable
+  filename holding `@` is left out of `artifactNames`, and the exporter's
+  self-check refuses any `@` that gets past the coercer.
