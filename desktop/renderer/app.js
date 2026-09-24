@@ -7782,7 +7782,12 @@ function _railRenderThreads() {
     _railProjects.forEach((p) => {
       if ((p.parent_id || '') === _activeProjectId) ids.add(p.id);
     });
-    ops = _railOps.filter((op) => ids.has(op.project_id || ''));
+    ops = _railOps.filter((op) => ids.has(op.project_id || '') || _jobsPinned(op));
+  }
+  // v7.5: a job run that has not saved a record yet (it just started) still
+  // gets its row, at the top, from the "claimed" notice.
+  if (_jobsActiveRun && !_railOps.some((op) => op.id === _jobsActiveRun.id)) {
+    ops = [_jobsActiveRun, ...ops];
   }
   if (q) ops = ops.filter((op) => (op.command || '').toLowerCase().includes(q));
   const terminal = ops.filter((op) => op.status === 'failed' || op.status === 'cancelled');
@@ -7815,6 +7820,7 @@ function _railRenderThreads() {
   ops.forEach((op) => {
     const li = document.createElement('li');
     li.className = 'rail-thread';
+    li.setAttribute('data-op-id', op.id || '');
     if (op.artifact_folder && op.artifact_folder === activeFolder) li.classList.add('is-active');
     const cmd = (op.command || '(no command)').split(/\r?\n/)[0];
     const btn = document.createElement('button');
@@ -8498,11 +8504,28 @@ async function loadApprovals() {
     return;
   }
   _updateApprovalsBadge(data.count);
+  // v7.5: questions Owner Workspace job runs are parked on. They are not
+  // gate approvals (nothing is staged), so they are answered in the run.
+  const questions = await _fetchWaitingQuestions();
+  _updateWaitingBadge(questions.length);
+  const waitingHtml = questions.length ? `
+    <section class="approvals-section" aria-labelledby="approvals-waiting-title">
+      <h3 id="approvals-waiting-title" class="approvals-section-title">Waiting for your answer</h3>
+      ${questions.map((q) => `
+      <div class="brief-item approval-item approval-question" data-operation-id="${_briefEsc(q.operation_id)}">
+        <span class="brief-item-main">${_briefEsc(q.question || 'Ridian asked a question.')}</span>
+        <span class="brief-item-meta">From Owner Workspace: ${_briefEsc(q.command)}${q.parked_at ? ` · asked ${_briefEsc(q.parked_at)}` : ''}</span>
+        <span class="approval-actions">
+          <button type="button" class="btn btn-compact approval-open-run-btn" data-folder="${_briefEsc(q.artifact_folder)}" data-command="${_briefEsc(q.command)}">Open the run</button>
+        </span>
+      </div>`).join('')}
+    </section>` : '';
   if (!data.approvals.length) {
-    body.innerHTML = '<p class="brief-note">Nothing is awaiting your approval.</p>';
+    body.innerHTML = waitingHtml || '<p class="brief-note">Nothing is awaiting your approval.</p>';
+    _wireOpenRunButtons(body);
     return;
   }
-  body.innerHTML = data.approvals.map((a) => `
+  body.innerHTML = waitingHtml + (waitingHtml ? '<section class="approvals-section"><h3 class="approvals-section-title">Awaiting approval</h3>' : '') + data.approvals.map((a) => `
     <div class="brief-item approval-item" data-approval-id="${_briefEsc(a.id)}">
       <span class="brief-item-main">${a.stale ? '<span class="approval-stale">STALE 7+ DAYS</span> ' : ''}${_briefEsc(a.question || a.tool)}</span>
       <span class="brief-item-meta">From: ${_briefEsc(a.command || a.operation_id)} · staged ${_briefEsc(a.staged_at)}</span>
@@ -8510,10 +8533,36 @@ async function loadApprovals() {
         ${(a.options || []).map((o) => `<button type="button" class="btn btn-compact approval-answer-btn" data-value="${_briefEsc(o.value)}">${_briefEsc(o.label)}</button>`).join(' ')}
       </span>
       <span class="approval-status" role="status" aria-live="polite"></span>
-    </div>`).join('');
+    </div>`).join('') + (waitingHtml ? '</section>' : '');
   body.querySelectorAll('.approval-answer-btn').forEach((btn) => {
     btn.addEventListener('click', () => _answerApproval(btn));
   });
+  _wireOpenRunButtons(body);
+}
+
+function _wireOpenRunButtons(body) {
+  body.querySelectorAll('.approval-open-run-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const folder = btn.getAttribute('data-folder');
+      if (folder) loadOperatorRun({ artifact_folder: folder, name: btn.getAttribute('data-command') || '' });
+    });
+  });
+}
+
+async function _fetchWaitingQuestions() {
+  try {
+    const res = await fetch(`${BACKEND}/approvals/questions`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.questions) ? data.questions : [];
+  } catch (_err) { return []; }
+}
+
+function _updateWaitingBadge(count) {
+  const btn = document.getElementById('rail-waiting-btn');
+  const badge = document.getElementById('rail-waiting-count');
+  if (badge) badge.textContent = String(count || 0);
+  if (btn) btn.classList.toggle('hidden', !count);
 }
 
 async function _answerApproval(btn) {
@@ -8553,6 +8602,7 @@ async function refreshApprovalsBadge() {
     const res = await fetch(`${BACKEND}/approvals`);
     if (res.ok) _updateApprovalsBadge((await res.json()).count);
   } catch (_err) { /* badge only — never intrusive */ }
+  _updateWaitingBadge((await _fetchWaitingQuestions()).length);
 }
 
 function openApprovals() {
@@ -8985,3 +9035,151 @@ if (_menuSettingsBtn) {
     }
   }, 1500);
 })();
+
+
+/* ============================================================ */
+/*   v7.5: OWNER WORKSPACE JOBS ARE VISIBLE ON THIS PC            */
+/* ============================================================ */
+// The backend keeps a notice feed (claimed / parked) and the live events of
+// the current job run (jobs_service; loopback-only routes). This polls the
+// feed, and for each NEW notice (job_notices.js decides; once per notice):
+//   - claimed: a Windows notification "Ridian is working on: <command>", the
+//     run pinned at the top of the Operations list and scrolled into view,
+//     and — when nothing else is going on in the chat pane — the run opened
+//     live, replayed through the same event handler as a typed run;
+//   - parked: "Ridian needs you: <command>", the Approvals badge (a gate
+//     approval) or the "Waiting on you" badge (a question). The phone push
+//     is sent by the backend, as for every parked run.
+// Clicking a notification raises the window and opens the run.
+
+const _JOB_NOTICE_KEY = 'ridian.jobNotices';
+let _jobNoticeState = (() => {
+  try { return JSON.parse(window.localStorage.getItem(_JOB_NOTICE_KEY) || 'null') || RidianJobNotices.initialState(); }
+  catch (_) { return RidianJobNotices.initialState(); }
+})();
+// var, not let: _railRenderThreads may read these before this point runs.
+var _jobsActiveRun = null;   // a just-claimed run with no saved record yet
+var _jobsLive = null;        // { opId, after } while the pane follows a job run
+
+function _jobsPinned(op) {
+  return !!op && op.source === 'owner-workspace' && (op.status === 'awaiting_input' || op.status === 'running');
+}
+
+async function _jobsNoticesTick() {
+  let data;
+  try {
+    const qs = `after=${encodeURIComponent(_jobNoticeState.lastSeq || 0)}&epoch=${encodeURIComponent(_jobNoticeState.epoch || '')}`;
+    const res = await fetch(`${BACKEND}/owner-workspace/jobs/notices?${qs}`);
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (_) { return; }
+  const { notices, state } = RidianJobNotices.fresh(_jobNoticeState, data);
+  _jobNoticeState = state;
+  try { window.localStorage.setItem(_JOB_NOTICE_KEY, JSON.stringify(state)); } catch (_) {}
+  for (const notice of notices) _jobsHandleNotice(notice);
+}
+
+function _jobsHandleNotice(notice) {
+  const text = RidianJobNotices.text(notice);
+  if (!text) return;
+  _jobsNotify(text, notice);
+  if (notice.kind === 'claimed') {
+    _jobsActiveRun = {
+      id: notice.operation_id, command: notice.command || '', status: 'running',
+      source: 'owner-workspace', artifact_folder: notice.artifact_folder || '', completed_at: '',
+    };
+    const idle = _activeWorkspaceView === null && !operatorState.running && !operatorState.answerMode;
+    if (idle) _jobsOpenLive(notice);
+  } else {
+    _jobsActiveRun = null;
+    refreshApprovalsBadge();
+  }
+  Promise.resolve(_railThreadsFill()).then(() => _jobsRevealInRail(notice.operation_id));
+}
+
+function _jobsNotify(text, notice) {
+  _opSetStatus(text, notice.kind === 'parked' ? 'err' : 'ok');
+  try {
+    if (typeof Notification === 'undefined') return;
+    const show = () => {
+      const n = new Notification('Ridian Operator', { body: text, tag: `ridian-job-${notice.kind}-${notice.seq}` });
+      n.onclick = () => {
+        if (window.ridian && typeof window.ridian.raiseWindow === 'function') window.ridian.raiseWindow();
+        _jobsOpenFromNotice(notice);
+      };
+    };
+    if (Notification.permission === 'granted') show();
+    else if (Notification.permission === 'default') {
+      Notification.requestPermission().then((p) => { if (p === 'granted') show(); });
+    }
+  } catch (_) { /* the in-app status line already says it */ }
+}
+
+function _jobsOpenFromNotice(notice) {
+  if (notice.kind === 'claimed' && _jobsActiveRun && _jobsActiveRun.id === notice.operation_id) {
+    _jobsOpenLive(notice);
+  } else if (notice.artifact_folder) {
+    loadOperatorRun({ artifact_folder: notice.artifact_folder, name: notice.command || '' });
+  }
+}
+
+function _jobsRevealInRail(opId) {
+  const list = document.getElementById('rail-threads');
+  if (!list || !opId) return;
+  const row = [...list.querySelectorAll('.rail-thread')].find((li) => li.getAttribute('data-op-id') === opId);
+  if (!row) return;
+  const title = list.previousElementSibling;
+  if (title && title.scrollIntoView) title.scrollIntoView({ block: 'nearest' });
+  if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+  row.classList.add('rail-thread-flash');
+  setTimeout(() => row.classList.remove('rail-thread-flash'), 4000);
+}
+
+// Show a job run live: the pane is reset like a thread click, then the run's
+// captured events replay through _opHandleEvent — the same handler a typed
+// run's stream uses — so a question arms answer mode exactly as it would.
+function _jobsOpenLive(notice) {
+  if (!_showWorkspaceView(null)) return;
+  setWorkspaceView('welcome');
+  _opResetUI();
+  _opResetComposer();
+  _opSetAnswerMode(null);
+  if (OPERATOR.active) OPERATOR.active.classList.remove('hidden');
+  _opRenderCommandEcho(notice.command || '', 'From Owner Workspace');
+  _opSetStatusDot('running');
+  _opStartElapsed();
+  _jobsLive = { opId: notice.operation_id, after: 0 };
+  _jobsLiveTick();
+}
+
+async function _jobsLiveTick() {
+  const live = _jobsLive;
+  if (!live) return;
+  // The window moved on (another run opened or started): stop following.
+  if (operatorState.active && operatorState.active.id && operatorState.active.id !== live.opId) {
+    _jobsLive = null;
+    return;
+  }
+  let data = null;
+  try {
+    const res = await fetch(`${BACKEND}/owner-workspace/jobs/events?operation_id=${encodeURIComponent(live.opId)}&after=${live.after}`);
+    if (res.ok) data = await res.json();
+  } catch (_) { /* try again below */ }
+  if (_jobsLive !== live) return;
+  if (data) {
+    (data.events || []).forEach((evt) => _opHandleEvent(evt));
+    live.after = data.next || live.after;
+    if (!data.live) {
+      _opStopElapsed();
+      _jobsLive = null;
+      return;
+    }
+  }
+  setTimeout(_jobsLiveTick, 1500);
+}
+
+const _railWaitingBtn = document.getElementById('rail-waiting-btn');
+if (_railWaitingBtn) _railWaitingBtn.addEventListener('click', openApprovals);
+_jobsNoticesTick();
+setInterval(_jobsNoticesTick, 3000);
+setInterval(refreshApprovalsBadge, 60000);

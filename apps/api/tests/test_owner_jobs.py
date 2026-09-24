@@ -119,6 +119,7 @@ class JobsSite:
         self.statuses: dict = {}
         self.results: dict = {}
         self.fail_network = False
+        self.legacy_statuses = False     # a site that predates awaiting_input
 
     def issue(self) -> str:
         token = secrets.token_urlsafe(32)
@@ -162,6 +163,9 @@ class JobsSite:
             job_id, kind = m.groups()
             body = json.loads(request.content)
             if kind == "status":
+                if self.legacy_statuses and body.get("status") not in ("running", "awaiting_approval"):
+                    self.statuses.setdefault(job_id + ":refused", []).append(body)
+                    return httpx.Response(400, json={"error": "invalid_status"})
                 self.statuses.setdefault(job_id, []).append(body)
                 return httpx.Response(200, json={"id": job_id, "status": body["status"],
                                                  "operationId": body.get("operationId"), "startedAt": _iso(_now())})
@@ -541,7 +545,7 @@ def test_one_job_at_a_time(monkeypatch):
 # 4. Approvals: park -> awaiting_approval; resume -> running
 # ---------------------------------------------------------------------------
 
-def test_an_approval_parks_and_reports_awaiting_approval_then_resume_reports_running(monkeypatch):
+def test_a_question_parks_and_reports_awaiting_input_then_resume_reports_running(monkeypatch):
     site = JobsSite().install(monkeypatch)
     _connect(site)
     planner(monkeypatch, [_park, _draft])
@@ -558,14 +562,14 @@ def test_an_approval_parks_and_reports_awaiting_approval_then_resume_reports_run
         op = _job_op(job_id)
         assert op["status"] == "awaiting_input"
         assert await engine.tick() == "reported"
-        assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_approval"]
-        assert jobs_service.current_job()["phase"] == "awaiting_approval"
+        assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_input"]
+        assert jobs_service.current_job()["phase"] == "awaiting_input"
         # Answered on this PC exactly as today: the in-thread resume.
         await operator_service.continue_operation(operation_id=op["id"], answer="approve", emit=null_emit)
         assert await engine.tick() == "result_accepted"
 
     asyncio.run(scenario())
-    assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_approval", "running"]
+    assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_input", "running"]
     assert all(s["operationId"] == _job_op(job_id)["id"] for s in site.statuses[job_id])
     body = json.loads(site.results[job_id][0])
     assert body["status"] == "completed" and body["result"]["artifactNames"] == ["recap.docx"]
@@ -599,6 +603,171 @@ def test_the_inbox_answer_and_dismiss_end_a_parked_job(monkeypatch):
     asyncio.run(scenario())
     assert json.loads(site.results[approved][0])["status"] == "completed"
     assert json.loads(site.results[dismissed][0])["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# 4b. Visible on the PC (v7.5): notices, live events, waiting questions
+# ---------------------------------------------------------------------------
+
+async def _stage_then_park(tool):
+    """A real gate: stage the approval in the inbox, then park on it."""
+    op = current_operator()
+    approval_inbox_service.stage_from_tool(
+        "create_quickbooks_invoice", {"customer": "Sandy Alvarez"}, {"reason": "invoice_plan_pending"})
+    op.record.setdefault("tools_used", []).append("create_quickbooks_invoice")
+    await op.emit_needs_input(question="Create this $250 invoice for Sandy Alvarez?",
+                              context_hint="QuickBooks invoice — approval needed", buttons_only=True,
+                              options=[{"label": "Approve", "action": "submit", "value": "approve"}])
+    return "Waiting for your approval of the invoice."
+
+
+@pytest.fixture
+def fresh_notices(monkeypatch):
+    monkeypatch.setattr(jobs_service, "_notices", jobs_service.deque(maxlen=jobs_service.NOTICE_KEEP))
+    monkeypatch.setattr(jobs_service, "_noticed", set())
+    monkeypatch.setattr(jobs_service, "_notice_seq", 0)
+    monkeypatch.setattr(jobs_service, "_events", {})
+    monkeypatch.setattr(jobs_service, "_site_awaiting_input", None)
+
+
+def test_a_job_parked_on_a_question_is_visible_on_the_pc_once(monkeypatch, fresh_notices):
+    """Today's incident: request_missing_info, nothing staged. The window gets
+    one "working on" and one "needs you" notice however often it polls, the
+    Approvals page lists the question, the site hears awaiting_input, and the
+    existing phone push fires once."""
+    pushes = []
+    from app.services import push_service
+    monkeypatch.setattr(push_service, "notify_run_parked", lambda snap: pushes.append(snap.get("id")))
+    site = JobsSite().install(monkeypatch)
+    _connect(site)
+    planner(monkeypatch, [_park])
+    job_id = site.add_job("Draft a follow-up to Greg about the Navigator pilot")
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        await engine.tick()
+        await engine.wait_for_job()
+        for _ in range(4):
+            await engine.tick()
+            clock.advance(15)
+        # Re-saves of the same parked record never make a second notice.
+        for _ in range(3):
+            state_store.save("operations", state_store.load_list("operations"))
+
+    asyncio.run(scenario())
+    op = _job_op(job_id)
+    assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_input"]
+    feed = jobs_service.notices_after(0, "")
+    assert [(n["kind"], n.get("park")) for n in feed["notices"]] == [("claimed", None), ("parked", "question")]
+    claimed, parked = feed["notices"]
+    assert claimed["operation_id"] == parked["operation_id"] == op["id"]
+    assert claimed["command"] == "Draft a follow-up to Greg about the Navigator pilot"
+    assert claimed["artifact_folder"] == op["artifact_folder"]
+    assert parked["question"] == "Send the $250 invoice to Sandy Alvarez?"
+    again = jobs_service.notices_after(feed["latest"], feed["epoch"])
+    assert again["notices"] == [], "a window that has seen them gets nothing new"
+    assert jobs_service.notices_after(feed["latest"], "another-epoch")["notices"] == feed["notices"]
+    assert pushes == [op["id"]], "the existing phone push, once"
+
+    # A run typed on this PC and parked on a question is not a job: not listed here.
+    ops = state_store.load_list("operations")
+    ops.append({"id": "op_typed000001", "command": "Typed here", "status": "awaiting_input", "source": "",
+                "needs_input": [{"question": "Which Greg?"}], "artifact_folder": "C:/typed"})
+    state_store.save("operations", ops)
+    pc = TestClient(app, client=PC)
+    questions = pc.get("/approvals/questions").json()
+    assert questions["count"] == 1
+    q = questions["questions"][0]
+    assert q["operation_id"] == op["id"] and q["job_id"] == job_id
+    assert q["question"] == "Send the $250 invoice to Sandy Alvarez?"
+    assert q["command"].startswith("Draft a follow-up to Greg") and q["artifact_folder"] == op["artifact_folder"]
+    assert pc.get("/approvals").json()["count"] == 0, "nothing staged: the inbox itself is empty"
+    notices = pc.get("/owner-workspace/jobs/notices", params={"after": 0}).json()
+    assert [n["kind"] for n in notices["notices"]] == ["claimed", "parked"]
+
+
+def test_a_job_parked_on_a_gate_approval_says_so_and_stays_in_the_inbox(monkeypatch, fresh_notices):
+    site = JobsSite().install(monkeypatch)
+    _connect(site)
+    planner(monkeypatch, [_stage_then_park])
+    job_id = site.add_job("Invoice Sandy Alvarez $250 for the workshop")
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        await engine.tick()
+        await engine.wait_for_job()
+        await engine.tick()
+
+    asyncio.run(scenario())
+    op = _job_op(job_id)
+    assert [s["status"] for s in site.statuses[job_id]] == ["running", "awaiting_approval"]
+    assert jobs_service.park_kind(op["id"]) == "approval"
+    parked = jobs_service.notices_after(0, "")["notices"][-1]
+    assert parked["kind"] == "parked" and parked["park"] == "approval" and parked["question"] == ""
+    pc = TestClient(app, client=PC)
+    assert pc.get("/approvals/questions").json()["count"] == 0, "gate approvals are not questions"
+    inbox = pc.get("/approvals").json()
+    assert inbox["count"] == 1 and inbox["approvals"][0]["operation_id"] == op["id"]
+
+
+def test_a_site_without_awaiting_input_hears_awaiting_approval(monkeypatch, fresh_notices):
+    """Until the site adds awaiting_input it answers 400 invalid_status: the
+    report is resent as awaiting_approval, and later parks skip the 400."""
+    site = JobsSite().install(monkeypatch)
+    site.legacy_statuses = True
+    _connect(site)
+    planner(monkeypatch, [_park, _park])
+    first = site.add_job("Draft a follow-up to Greg")
+    second = site.add_job("Draft a follow-up to Sandy")
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        await engine.tick()
+        await engine.wait_for_job()
+        assert await engine.tick() == "reported"
+        operator_service.dismiss_operation(_job_op(first)["id"])
+        await engine.tick()
+        clock.advance(15)
+        await engine.tick()
+        await engine.wait_for_job()
+        await engine.tick()
+
+    asyncio.run(scenario())
+    assert [s["status"] for s in site.statuses[first]] == ["running", "awaiting_approval"]
+    assert [s["status"] for s in site.statuses[first + ":refused"]] == ["awaiting_input"]
+    assert [s["status"] for s in site.statuses[second]] == ["running", "awaiting_approval"]
+    assert second + ":refused" not in site.statuses, "no second 400 once the site is known"
+
+
+def test_the_window_can_follow_a_job_run_live(monkeypatch, fresh_notices):
+    site = JobsSite().install(monkeypatch)
+    _connect(site)
+    planner(monkeypatch, [_park])
+    job_id = site.add_job("Draft a follow-up to Greg")
+    clock = Clock()
+
+    async def scenario():
+        engine = _engine(clock)
+        await engine.tick()
+        await engine.wait_for_job()
+
+    asyncio.run(scenario())
+    op = _job_op(job_id)
+    pc = TestClient(app, client=PC)
+    feed = pc.get("/owner-workspace/jobs/events", params={"operation_id": op["id"], "after": 0}).json()
+    kinds = [e["event"] for e in feed["events"]]
+    assert kinds[0] == "start" and "needs_input" in kinds and kinds[-1] == "complete"
+    start = feed["events"][0]["data"]
+    assert start["id"] == op["id"] and start["artifact_folder"] == op["artifact_folder"]
+    assert feed["events"][-1]["data"]["awaiting_input"] is True
+    assert feed["known"] is True and feed["live"] is False, "parked: nothing more will stream"
+    rest = pc.get("/owner-workspace/jobs/events", params={"operation_id": op["id"], "after": feed["next"]}).json()
+    assert rest["events"] == [] and rest["next"] == feed["next"]
+    unknown = pc.get("/owner-workspace/jobs/events", params={"operation_id": "op_nope", "after": 0}).json()
+    assert unknown["known"] is False and unknown["events"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -841,25 +1010,33 @@ def test_a_restart_recovers_the_current_job(monkeypatch):
 # 8. The phone companion cannot touch jobs
 # ---------------------------------------------------------------------------
 
+JOB_ROUTES = ("/owner-workspace/status", "/owner-workspace/jobs/notices",
+              "/owner-workspace/jobs/events", "/approvals/questions")
+
+
 def test_nothing_about_jobs_is_reachable_from_the_phone():
-    # No jobs route exists at all; the only place jobs show is the loopback
-    # Owner Workspace status.
+    # Every jobs surface is loopback-only and off the companion allowlist.
     paths = [getattr(r, "path", "") for r in app.routes]
-    assert not [p for p in paths if "job" in p.lower()], "no jobs route"
+    job_paths = [p for p in paths if "job" in p.lower() or p.startswith("/owner-workspace") or p == "/approvals/questions"]
+    assert set(JOB_ROUTES) <= set(job_paths)
     for method, path in companion_service._DEVICE_ALLOWED_EXACT | companion_service._PREAUTH_ALLOWED:
-        assert "job" not in path and "owner-workspace" not in path, path
-    for path in [p for p in paths if p.startswith("/owner-workspace")]:
+        assert "job" not in path and "owner-workspace" not in path and path != "/approvals/questions", path
+    for path in job_paths:
         for method in ("GET", "POST"):
             assert not companion_service.device_request_allowed(method, path), path
-    # A paired phone is refused the status that carries the jobs view.
+    for handler in (main_module.owner_workspace_job_notices, main_module.owner_workspace_job_events,
+                    main_module.approvals_questions):
+        assert "_require_loopback(request)" in inspect.getsource(handler)
+    # A paired phone is refused every one of them.
     settings_service.save_settings({"companion_enabled": "true"})
     pc = TestClient(app, client=PC)
     code = pc.post("/companion/pairing-code").json()["code"]
     lan = TestClient(app, base_url="http://192.168.1.7:8000", client=("192.168.1.50", 40001))
     paired = lan.post("/companion/pair", headers=HDR, json={"code": code, "device_name": "Pixel 7"})
     assert paired.status_code == 200, paired.text
-    refused = lan.get("/owner-workspace/status")
-    assert refused.status_code == 403
+    for path in JOB_ROUTES:
+        refused = lan.get(path)
+        assert refused.status_code == 403, path
     # The phone's own /operations/run can never stamp a job: the request
     # model has no such field, and only jobs_service passes origin.
     fields = set(main_module.OperationRunRequest.model_fields)

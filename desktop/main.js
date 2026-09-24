@@ -359,6 +359,8 @@ function wireCommandBarIpc() {
   // The renderer asks whether the hotkey actually registered, so Settings can
   // tell the truth instead of implying a shortcut that does nothing.
   ipcMain.handle('hotkey:status', () => hotkeyStatus);
+  // v7.5: clicking a job notification brings this window to the front.
+  ipcMain.on('window:raise', () => { raiseMainWindow(); });
   // v6.5: Settings applies a new hotkey WITHOUT a restart. The new binding
   // is attempted; on failure the previous one is restored and the returned
   // status says so — the renderer shows it verbatim.

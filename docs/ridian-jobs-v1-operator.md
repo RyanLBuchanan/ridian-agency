@@ -94,7 +94,8 @@ is reported `failed` with `not_started` and the reason.
 | On this PC | Reported to the site |
 | --- | --- |
 | The run starts | `running`, with `operationId` |
-| The run parks on an approval or a question | `awaiting_approval` |
+| The run parks on a gate approval (the gate staged one in the inbox) | `awaiting_approval` |
+| The run parks on a question (`request_missing_info`, or any needs-input with nothing staged) | `awaiting_input` (v7.5); `awaiting_approval` to a site that does not have it yet |
 | An in-thread answer resumes it | `running` |
 | It finishes: `completed` or `partial` | result `completed` |
 | It finishes: `failed` | result `failed` |
@@ -115,6 +116,104 @@ Approvals are answered exactly as today:
 Nothing new is exposed, and nothing on the site can answer one. An inbox
 answer (PC or phone) executes the staged action and ends the run without
 resuming the planner. The job then reports its result.
+
+A **question** (`request_missing_info`) stages nothing in the inbox. It is
+answered in the run itself, on this PC. The Approvals page lists it under
+"Waiting for your answer" with a button that opens the run (v7.5). Dismiss
+cancels it, as for any parked run.
+
+## Seeing a job run on this PC (v7.5)
+
+**Why:** on 2026-09-24 a job run (`op_3bb0dfb95e13`) parked at 10:34 on a
+`request_missing_info` question, and nothing on the PC showed it:
+
+- the Approvals page listed only staged gate approvals, and a question
+  stages none;
+- the run was not open;
+- the Operator reported `awaiting_approval` to the site.
+
+The phone push did fire, but the paired phone had no push subscription, so
+nothing was delivered.
+
+**What happens now**, for every run started from a job:
+
+| Moment | On this PC |
+| --- | --- |
+| The job is claimed | A Windows notification "Ridian is working on: <command>". The run is pinned at the top of the Operations list (whatever project is selected), scrolled into view and highlighted. When nothing else is going on in the chat pane (no run in flight, no question being answered, no Settings/Brief/Approvals page open), the run opens there live. |
+| It parks on a gate approval | A Windows notification "Ridian needs you: <command>" and the Approvals badge. The approval stays answerable on the Approvals page as before. |
+| It parks on a question | The same notification and the new "Waiting on you" badge in the sidebar. The Approvals page lists it under "Waiting for your answer". |
+| Either park | The existing phone push, sent by the backend for every parked run. |
+| A notification is clicked | The window comes to the front and the run opens: live while it runs, or at its question once parked. |
+
+**How it works:**
+
+- The backend keeps a numbered notice feed per process: `claimed` when a
+  job run starts, `parked` once per park, with `park: "approval"` or
+  `"question"`.
+- The window polls the feed every 3 seconds
+  (`GET /owner-workspace/jobs/notices?after=&epoch=`).
+- `renderer/job_notices.js` decides what is new, so each notification fires
+  once however often the window polls or the backend re-answers. A
+  restarted backend starts a new numbered stream.
+- The live view replays the run's events from
+  `GET /owner-workspace/jobs/events` through the same event handler a typed
+  run uses. So a question arms the composer's answer mode, exactly as in a
+  typed run.
+- `GET /approvals/questions` lists the parked questions.
+- All three routes are loopback-only and off the companion allowlist.
+- Notices hold the command's first line in memory, for the local
+  notification only. They are never written to disk or logged.
+
+## Handoff: the site change for `awaiting_input`
+
+Give this to the site session. Until it ships, the site answers
+`awaiting_input` with 400 `invalid_status`. The Operator then resends that
+report as `awaiting_approval`, and keeps using `awaiting_approval` until
+the Operator restarts. **Restart Ridian Operator once after the site
+ships.**
+
+The change, against ridian-technologies-site `docs/ridian-jobs-v1.md` (at
+47484f6 or later) and its code:
+
+1. **Statuses table:** add the row
+   `| awaiting_input | The run is paused on a question only the owner can answer; it is answered on the PC. | device |`.
+2. **State machine table:** add these rows:
+   - `| claimed | awaiting_input | device | POST /api/jobs/{id}/status |`
+   - `| running | awaiting_input | device | POST /api/jobs/{id}/status |`
+   - `| awaiting_input | running | device only | POST /api/jobs/{id}/status |`
+   - `| awaiting_input | completed, failed, cancelled | device | POST /api/jobs/{id}/result |`
+
+   Also extend the existing `claimed, running, awaiting_approval` result
+   row to include `awaiting_input`. There is no direct move between
+   `awaiting_input` and `awaiting_approval`: a run resumes (`running`)
+   before it can park again.
+3. **`POST /api/jobs/{id}/status`:** `status` may be `running`,
+   `awaiting_approval` or `awaiting_input`.
+   - `running` is allowed from `claimed`, `awaiting_approval` or
+     `awaiting_input`.
+   - `awaiting_approval` and `awaiting_input` are each allowed from
+     `claimed` or `running`.
+4. **`POST /api/jobs/{id}/result`:** allowed from `claimed`, `running`,
+   `awaiting_approval` or `awaiting_input`.
+5. **`$lib/operator-jobs/types.ts`:**
+   - add `'awaiting_input'` to `JOB_STATUSES`, `ACTIVE_STATUSES` (so a
+     token refresh moves such jobs) and `PROGRESS_STATUSES`;
+   - `JOB_STATUS_LABELS.awaiting_input = 'Waiting for your answer on the PC'`.
+6. **`$lib/server/operator-jobs.ts` `TRANSITIONS`:**
+   - `claimed` gains `'awaiting_input'`;
+   - `running` gains `'awaiting_input'`;
+   - new entry `awaiting_input: ['running', 'completed', 'failed', 'cancelled']`.
+7. **Database:** `ridian_operator_jobs_status_check` must accept
+   `'awaiting_input'`. Change the `check()` in `db/schema.ts` and generate
+   one migration.
+8. **`/owner` thread:** style `awaiting_input` like `awaiting_approval`, the
+   amber "waiting" badge.
+9. **Tests:**
+   - the state-machine table test gains the four new transitions;
+   - the status test covers `claimed → awaiting_input → running →
+     awaiting_input → completed`;
+   - the device-only test covers `awaiting_input → running`;
+   - a refresh moves an `awaiting_input` job to the new token.
 
 ## The result
 
@@ -190,9 +289,12 @@ The operation record on this PC keeps the original receipt.
 - The command text is never logged and never written to
   `owner_jobs.json`. The operation record keeps it, as for any typed
   command.
-- There is no jobs route. The jobs state appears only inside the
-  loopback-only `/owner-workspace/status`, which the companion allowlist
-  does not include; `test_owner_jobs.py` pins this.
+- Every jobs route is loopback-only and absent from the companion
+  allowlist: `/owner-workspace/status`, `/owner-workspace/jobs/notices`,
+  `/owner-workspace/jobs/events` and `/approvals/questions`. A paired phone
+  gets 403 on each (pinned by `test_owner_jobs.py`). The phone keeps what it
+  had: the recent operations list, the approval inbox, and the parked-run
+  push.
 
 ## Related change: the first push after pairing
 

@@ -324,6 +324,15 @@
                   <span>Approvals</span>
                   <span id="rail-approvals-count" class="rail-approvals-count hidden">0</span>
                 </button>
+                <!-- v7.5: job runs parked on a QUESTION (gate approvals count above). -->
+                <button id="rail-waiting-btn" type="button" class="rail-settings rail-waiting hidden" title="Owner Workspace commands waiting for your answer">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>
+                  </svg>
+                  <span>Waiting on you</span>
+                  <span id="rail-waiting-count" class="rail-waiting-count">0</span>
+                </button>
                 <button id="rail-brief-btn" type="button" class="rail-settings">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="4"/>
@@ -2137,6 +2146,8 @@
 
     <!-- v7.4: Ridian's replies as sanitized Markdown (DOM nodes only). -->
     <script src="markdown.js" defer></script>
+    <!-- v7.5: which Owner Workspace job notices are new (notify once). -->
+    <script src="job_notices.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>

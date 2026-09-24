@@ -188,3 +188,14 @@ def test_a_hostile_reply_renders_inert_in_the_real_renderer(harness_output):
     assert "markdown inert: no script, img or link element" in section
     assert "dangerous=0 pwned=0" in section
     assert "tags=li,p,strong,ul" in section
+
+
+def test_a_job_run_is_visible_in_the_real_renderer(harness_output):
+    """v7.5: the harness drives the window's own job-notice poll against a
+    stub that re-sends every notice: two notifications over four polls, the
+    run pinned and opened live, the question answerable, the "Waiting on you"
+    badge, and the Approvals page's "Waiting for your answer"."""
+    section = harness_output.split("--- Job visibility (real DOM) ---", 1)[1]
+    assert "notifications=2 pinned=true echo=From Owner Workspace question=true armed=true waiting=true:1" in section
+    assert "job runs visible: notified once each" in section
+

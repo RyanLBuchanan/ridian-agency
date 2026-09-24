@@ -2187,6 +2187,33 @@ async def artifacts_open_file(payload: ArtifactFileRequest) -> ArtifactOpenRespo
     return ArtifactOpenResponse(status="success", detail="File opened.", path=str(path))
 
 
+@app.get("/owner-workspace/jobs/notices")
+async def owner_workspace_job_notices(request: Request, after: int = 0, epoch: str = "") -> dict:
+    """v7.5 (PC only): job runs claimed or parked since the window last asked,
+    for its notifications and badges. Loopback-checked here and absent from
+    the companion allowlist, like every jobs surface."""
+    _require_loopback(request)
+    return jobs_service.notices_after(after, epoch)
+
+
+@app.get("/owner-workspace/jobs/events")
+async def owner_workspace_job_events(request: Request, operation_id: str = "", after: int = 0) -> dict:
+    """v7.5 (PC only): the current job run's events, the same shape as the run
+    SSE stream, so the window can show a run it did not start. PC only."""
+    _require_loopback(request)
+    return jobs_service.job_events(operation_id, after)
+
+
+@app.get("/approvals/questions")
+async def approvals_questions(request: Request) -> dict:
+    """v7.5 (PC only): questions job runs are parked on, for the Approvals
+    page's "Waiting for your answer". Gate approvals stay in GET /approvals.
+    Not on the companion allowlist (it names GET /approvals exactly)."""
+    _require_loopback(request)
+    items = await asyncio.to_thread(jobs_service.waiting_questions)
+    return {"questions": items, "count": len(items)}
+
+
 @app.get("/owner-workspace/status")
 async def owner_workspace_status(request: Request) -> dict:
     """Owner Workspace sync (v7.1, PC only): connection and last-sync state

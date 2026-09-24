@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('ridian', {
   // returned status is honest: ok/reason/detail + which binding is ACTIVE.
   applyHotkey: (accelerator) => ipcRenderer.invoke('hotkey:apply',
                                                    String(accelerator || '')),
+  // v7.5: a clicked job notification raises the window before opening the run.
+  raiseWindow: () => ipcRenderer.send('window:raise'),
 });

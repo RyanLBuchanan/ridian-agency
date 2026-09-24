@@ -295,6 +295,86 @@ function checkBrief(width, b) {
   return problems;
 }
 
+// v7.5: runs INSIDE the renderer page (passed via toString). The backend is
+// stubbed at window.fetch and the OS notification at window.Notification; the
+// window's own job-notice poll, live view, badges and Approvals page run.
+async function jobVisibilityProbe() {
+  const OP = 'op_harness0001';
+  const COMMAND = 'Draft a follow-up to Greg about the Navigator pilot';
+  const FOLDER = 'C:/harness/run';
+  const QUESTION = 'What is the Navigator pilot? I have nothing on record about it.';
+  const claimed = { seq: 1, kind: 'claimed', job_id: 'j1', operation_id: OP, command: COMMAND, artifact_folder: FOLDER };
+  const parked = { seq: 2, kind: 'parked', park: 'question', job_id: 'j1', operation_id: OP, command: COMMAND, question: QUESTION, artifact_folder: FOLDER };
+  const events = [
+    { event: 'start', data: { id: OP, command: COMMAND, artifact_folder: FOLDER, started_at: '2026-09-24T10:34:28' } },
+    { event: 'needs_input', data: { id: 'need_1', question: QUESTION, options: [], context_hint: 'Follow-up to Greg' } },
+    { event: 'complete', data: { id: OP, command: COMMAND, status: 'awaiting_input', awaiting_input: true, needs_input: [{ id: 'need_1', question: QUESTION }] } },
+  ];
+  let feed = [claimed];
+  const shown = [];
+  const realFetch = window.fetch;
+  const realNotification = window.Notification;
+  function FakeNotification(title, opts) { shown.push((opts && opts.body) || title); this.onclick = null; }
+  FakeNotification.permission = 'granted';
+  FakeNotification.requestPermission = () => Promise.resolve('granted');
+  window.Notification = FakeNotification;
+  const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { 'content-type': 'application/json' } });
+  window.fetch = async (url) => {
+    const u = String(url);
+    // The stub re-sends EVERY notice on every poll: "once" must hold anyway.
+    if (u.includes('/owner-workspace/jobs/notices')) return json({ epoch: 'harness', latest: feed.length, notices: feed });
+    if (u.includes('/owner-workspace/jobs/events')) return json({ operation_id: OP, known: true, events, next: events.length, live: false });
+    if (u.includes('/approvals/questions')) {
+      return json({ count: 1, questions: [{ operation_id: OP, job_id: 'j1', command: COMMAND, question: QUESTION, artifact_folder: FOLDER, parked_at: '2026-09-24T10:34:51' }] });
+    }
+    if (u.endsWith('/approvals')) return json({ approvals: [], count: 0 });
+    if (u.includes('/operations/recent')) return json({ operations: [] });
+    return new Response('{}', { status: 404 });
+  };
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    try { localStorage.removeItem('ridian.jobNotices'); } catch (_) {}
+    _jobNoticeState = RidianJobNotices.initialState();
+    if (typeof closeSettings === 'function') closeSettings();
+    _showWorkspaceView(null);
+    await _jobsNoticesTick();
+    await settle(400);
+    const pinnedRow = document.querySelector('#rail-threads .rail-thread[data-op-id="' + OP + '"]');
+    const railPinned = !!pinnedRow && pinnedRow.textContent.includes('From Owner Workspace');
+    const echoLabel = (document.querySelector('#operator-active .operator-command-echo-label') || {}).textContent || '';
+    feed = [claimed, parked];
+    await _jobsNoticesTick();
+    await _jobsNoticesTick();
+    await _jobsNoticesTick();
+    await settle(400);
+    const question = document.querySelector('.operator-question');
+    const waitingBtn = document.getElementById('rail-waiting-btn');
+    const waitingCount = (document.getElementById('rail-waiting-count') || {}).textContent || '';
+    openApprovals();
+    await settle(400);
+    const section = document.getElementById('approvals-waiting-title');
+    const item = document.querySelector('.approval-question');
+    const openBtn = document.querySelector('.approval-open-run-btn');
+    const result = {
+      shown,
+      railPinned,
+      echoLabel,
+      questionShown: !!question && question.textContent.includes('Navigator pilot'),
+      answerArmed: !!operatorState.answerMode,
+      waitingVisible: !!waitingBtn && !waitingBtn.classList.contains('hidden'),
+      waitingCount,
+      section: section ? section.textContent : '',
+      itemText: item ? item.textContent : '',
+      openFolder: openBtn ? openBtn.getAttribute('data-folder') : '',
+    };
+    closeApprovals();
+    return result;
+  } finally {
+    window.fetch = realFetch;
+    window.Notification = realNotification;
+  }
+}
+
 app.whenReady().then(async () => {
   const allProblems = [];
   await openOnce();
@@ -485,6 +565,23 @@ app.whenReady().then(async () => {
   if (reply.literalStars || reply.strong < 2 || reply.items !== 2) allProblems.push('markdown: bold/lists did not render');
   if (!reply.scriptShownAsText) allProblems.push('markdown: the script tag was not shown as text');
   if (reply.loaded && !reply.dangerous && !reply.pwned) console.log('  markdown inert: no script, img or link element; tags shown as text');
+
+  // --- v7.5: an Owner Workspace job run is visible, in the REAL renderer.
+  console.log('');
+  console.log('--- Job visibility (real DOM) ---');
+  const jobs = await win.webContents.executeJavaScript('(' + jobVisibilityProbe.toString() + ')()', true);
+  console.log(`  notifications=${jobs.shown.length} pinned=${jobs.railPinned} echo=${jobs.echoLabel} question=${jobs.questionShown} armed=${jobs.answerArmed} waiting=${jobs.waitingVisible}:${jobs.waitingCount} section=${jobs.section}`);
+  const expectShown = ['Ridian is working on: Draft a follow-up to Greg about the Navigator pilot',
+    'Ridian needs you: Draft a follow-up to Greg about the Navigator pilot'];
+  if (JSON.stringify(jobs.shown) !== JSON.stringify(expectShown)) allProblems.push('jobs: notifications were ' + JSON.stringify(jobs.shown));
+  if (!jobs.railPinned) allProblems.push('jobs: the claimed run was not pinned in the Operations list');
+  if (jobs.echoLabel !== 'From Owner Workspace') allProblems.push('jobs: the live view did not open (echo=' + jobs.echoLabel + ')');
+  if (!jobs.questionShown || !jobs.answerArmed) allProblems.push('jobs: the parked question was not shown and answerable');
+  if (!jobs.waitingVisible || jobs.waitingCount !== '1') allProblems.push('jobs: no "Waiting on you" badge');
+  if (jobs.section !== 'Waiting for your answer' || !jobs.itemText.includes('Navigator pilot') || jobs.openFolder !== 'C:/harness/run') {
+    allProblems.push('jobs: the Approvals page did not list the parked question with an Open-the-run button');
+  }
+  if (!allProblems.some((p) => p.startsWith('jobs:'))) console.log('  job runs visible: notified once each, pinned, opened live, badged, listed under Waiting for your answer');
 
   if (allProblems.length) {
     console.log('\nLAYOUT PROBLEMS:');

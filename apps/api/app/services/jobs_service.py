@@ -38,9 +38,14 @@ THE RULES, each pinned by tests/test_owner_jobs.py:
      different content; a transient failure resends the identical body.
   6. The command text is never logged and never written to this module's
      store (the operation record keeps it, as for any typed command).
-  7. Nothing about jobs is reachable from the phone companion: there is no
-     jobs route at all, and the status lives in the loopback-only
-     /owner-workspace/status.
+  7. Nothing about jobs is reachable from the phone companion: every jobs
+     route is loopback-only and off the companion allowlist.
+  8. A job run is visible on the PC (v7.5): a notice feed (claimed, parked)
+     for the window's notifications and badges, the run's live events so the
+     window can show it while it runs, and the parked questions for the
+     Approvals page. A park on a gate approval (a staged approval exists) is
+     reported awaiting_approval; a park on a question is reported
+     awaiting_input, or awaiting_approval to a site that predates it.
 
 State: <data_dir>/owner_jobs.json (beside owner_workspace.json, never under
 state/), holding the current job's ids, phase and an ordered outbox of
@@ -55,8 +60,10 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
+from collections import deque
 from typing import Any, Callable, Optional
 
 import httpx
@@ -99,6 +106,24 @@ TERMINAL_OPERATION = {"completed": "completed", "partial": "completed",
                       "failed": "failed", "cancelled": "cancelled"}
 
 _store_lock = threading.RLock()
+
+# v7.5 — what the PC's own window needs to show a job run. In memory only:
+# notices carry the command's first line for the local notification, and are
+# never written to disk or logged. Served by loopback-only routes.
+NOTICE_KEEP = 100
+EVENTS_KEEP = 1000
+NOTICE_COMMAND_CHARS = 140
+NOTICE_QUESTION_CHARS = 300
+_EPOCH = secrets.token_hex(6)          # a new backend process = a new notice stream
+_notices: deque = deque(maxlen=NOTICE_KEEP)
+_notice_seq = 0
+_noticed: set = set()
+_notice_lock = threading.Lock()
+_events: dict = {}                     # operation id -> the current job run's events
+# None: not known yet; False: the site answered 400 invalid_status to
+# awaiting_input (it predates the status), so parks on a question are
+# reported as awaiting_approval until the backend restarts.
+_site_awaiting_input: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +263,85 @@ def _save(data: dict) -> None:
 def current_job() -> Optional[dict]:
     current = _load().get("current")
     return current if isinstance(current, dict) else None
+
+
+def _first_line(text: Any, limit: int) -> str:
+    line = str(text or "").strip().splitlines()[0] if str(text or "").strip() else ""
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def _add_notice(key: str, **fields: Any) -> bool:
+    """One notice per key, ever, in this process: a park re-observed on every
+    store save or tick never notifies twice."""
+    global _notice_seq
+    with _notice_lock:
+        if key in _noticed:
+            return False
+        _noticed.add(key)
+        _notice_seq += 1
+        _notices.append({"seq": _notice_seq, "at": _iso(_utcnow()), **fields})
+        return True
+
+
+def notices_after(after: int, epoch: str) -> dict:
+    """The notices a window has not seen. A window holding another process's
+    epoch gets everything this process has (its sequence numbers restart)."""
+    with _notice_lock:
+        floor = int(after) if epoch == _EPOCH else 0
+        return {"epoch": _EPOCH, "latest": _notice_seq,
+                "notices": [dict(n) for n in _notices if n["seq"] > floor]}
+
+
+def job_events(operation_id: str, after: int) -> dict:
+    """The current job run's events from index `after`, in the same shape
+    as the run SSE stream, so the window replays them through its own event
+    handler. `live` is False once the run has parked or ended."""
+    events = _events.get(str(operation_id or ""))
+    if events is None:
+        return {"operation_id": operation_id, "known": False, "events": [], "next": 0, "live": False}
+    start = max(0, int(after))
+    current = current_job() or {}
+    live = current.get("operation_id") == operation_id and current.get("phase") in ("starting", "running")
+    return {"operation_id": operation_id, "known": True, "events": events[start:], "next": len(events), "live": live}
+
+
+def park_kind(operation_id: str) -> str:
+    """'approval' when the run parked at a gate that staged an approval (the
+    Approvals inbox can answer it); 'question' otherwise — request_missing_info
+    or any other needs-input with nothing staged."""
+    for a in state_store.load_list("approvals"):
+        if isinstance(a, dict) and a.get("operation_id") == operation_id and a.get("status") == "pending":
+            return "approval"
+    return "question"
+
+
+def _park_status(kind: str) -> str:
+    if kind == "approval" or _site_awaiting_input is False:
+        return "awaiting_approval"
+    return "awaiting_input"
+
+
+def waiting_questions() -> list:
+    """Parked QUESTIONS from job runs, for the Approvals page's "Waiting for
+    your answer". A run parked at a gate approval is not here: the inbox
+    already lists (and answers) its staged approval."""
+    staged = {a.get("operation_id") for a in state_store.load_list("approvals")
+              if isinstance(a, dict) and a.get("status") == "pending"}
+    out = []
+    for op in state_store.load_list("operations"):
+        if (not isinstance(op, dict) or op.get("source") != SOURCE
+                or op.get("status") != "awaiting_input" or op.get("id") in staged):
+            continue
+        needs = op.get("needs_input") if isinstance(op.get("needs_input"), list) else []
+        last = needs[-1] if needs and isinstance(needs[-1], dict) else {}
+        out.append({
+            "operation_id": op.get("id") or "", "job_id": op.get("job_id") or "",
+            "command": str(op.get("command") or ""), "question": str(last.get("question") or ""),
+            "context_hint": str(last.get("context_hint") or ""),
+            "artifact_folder": str(op.get("artifact_folder") or ""),
+            "parked_at": str(op.get("completed_at") or op.get("started_at") or ""),
+        })
+    return out
 
 
 def _last_intended_status(current: dict) -> str:
@@ -390,7 +494,7 @@ class JobsEngine:
                 self._observe_locked(data, current, op)
             elif op is not None and op.get("status") == "awaiting_input":
                 current["operation_id"] = str(op.get("id") or "")
-                _enqueue_status(current, "awaiting_approval")
+                _enqueue_status(current, _park_status(park_kind(current["operation_id"])))
             else:
                 current.setdefault("outbox", []).append({"kind": "result", "body": refusal_result(
                     "interrupted", "Ridian Operator closed before this command finished. Nothing more will "
@@ -444,7 +548,18 @@ class JobsEngine:
             current["operation_id"] = str(op["id"])
         status = str(op.get("status") or "")
         if status == "awaiting_input":
-            return _enqueue_status(current, "awaiting_approval")
+            operation_id = str(op.get("id") or current.get("operation_id") or "")
+            kind = park_kind(operation_id)
+            changed = _enqueue_status(current, _park_status(kind))
+            needs = op.get("needs_input") if isinstance(op.get("needs_input"), list) else []
+            last = needs[-1] if needs and isinstance(needs[-1], dict) else {}
+            if _add_notice(f"parked:{operation_id}:{len(needs)}", kind="parked", park=kind,
+                           job_id=current.get("job_id"), operation_id=operation_id,
+                           command=_first_line(op.get("command"), NOTICE_COMMAND_CHARS),
+                           question=_first_line(last.get("question"), NOTICE_QUESTION_CHARS) if kind == "question" else "",
+                           artifact_folder=str(op.get("artifact_folder") or "")):
+                log.info("owner_jobs.parked job=%s operation=%s on=%s", current.get("job_id"), operation_id, kind)
+            return changed
         if status in TERMINAL_OPERATION:
             current.setdefault("outbox", []).append({"kind": "result", "body": build_result(op)})
             current["phase"] = "reporting"
@@ -455,7 +570,7 @@ class JobsEngine:
 
     # -- the job run -------------------------------------------------------
 
-    def _job_started(self, job_id: str, operation_id: str) -> None:
+    def _job_started(self, job_id: str, operation_id: str, command: str = "", folder: str = "") -> None:
         with _store_lock:
             data = _load()
             current = data.get("current")
@@ -464,6 +579,8 @@ class JobsEngine:
             current["operation_id"] = operation_id
             _enqueue_status(current, "running")
             _save(data)
+        _add_notice(f"claimed:{job_id}", kind="claimed", job_id=job_id, operation_id=operation_id,
+                    command=_first_line(command, NOTICE_COMMAND_CHARS), artifact_folder=folder)
         self._wake()
 
     def _job_ended_without_operation(self, job_id: str, reason: str, text: str) -> None:
@@ -486,7 +603,15 @@ class JobsEngine:
             payload = event.get("data") or {}
             if kind == "start" and not payload.get("resumed") and payload.get("id") and not started["id"]:
                 started["id"] = str(payload["id"])
-                self._job_started(job_id, started["id"])
+                _events.clear()                   # only the current job run is kept
+                _events[started["id"]] = []
+            if started["id"]:
+                log_ = _events.setdefault(started["id"], [])
+                if len(log_) < EVENTS_KEEP:
+                    log_.append(json.loads(json.dumps({"event": kind, "data": payload}, default=str)))
+            if kind == "start" and started["id"] == str(payload.get("id") or "") and not payload.get("resumed"):
+                self._job_started(job_id, started["id"], str(payload.get("command") or command),
+                                  str(payload.get("artifact_folder") or ""))
             elif kind == "error":
                 errors.append(str(payload.get("message") or ""))
 
@@ -673,6 +798,22 @@ class JobsEngine:
             self._failures = 0
             self._last_error = ""
             if item["kind"] == "status":
+                if (status == 400 and data.get("error") == "invalid_status"
+                        and item["body"].get("status") == "awaiting_input"):
+                    # A site that predates awaiting_input: say awaiting_approval
+                    # (the nearest status it has) and keep doing so.
+                    _note_site_awaiting_input(False)
+                    with _store_lock:
+                        stored = _load()
+                        cur = stored.get("current")
+                        if isinstance(cur, dict) and cur.get("job_id") == current["job_id"] and cur.get("outbox"):
+                            cur["outbox"][0]["body"]["status"] = "awaiting_approval"
+                            if cur.get("phase") == "awaiting_input":
+                                cur["phase"] = "awaiting_approval"
+                            _save(stored)
+                    continue
+                if status == 200 and item["body"].get("status") == "awaiting_input":
+                    _note_site_awaiting_input(True)
                 # 200 accepted; 409 means that step no longer applies (e.g. the
                 # job was already further along) — drop it and go on.
                 with _store_lock:
@@ -773,6 +914,13 @@ def stop_engine() -> None:
         engine.stop()
     if task is not None and not task.done():
         task.cancel()
+
+
+def _note_site_awaiting_input(supported: bool) -> None:
+    global _site_awaiting_input
+    if _site_awaiting_input is not supported:
+        _site_awaiting_input = supported
+        log.info("owner_jobs.site_awaiting_input supported=%s", supported)
 
 
 def note_allow_jobs(allowed: bool, source: str) -> None:

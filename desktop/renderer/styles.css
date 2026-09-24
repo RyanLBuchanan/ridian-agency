@@ -1410,6 +1410,30 @@ body {
   font-size: 0.68rem;
   color: var(--color-muted-soft);
 }
+/* v7.5: parked job questions — amber, distinct from the approvals count. */
+.rail-waiting-count {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.rail-thread.rail-thread-flash .rail-thread-btn {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.approvals-section-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--color-text-strong);
+}
+.approvals-section + .approvals-section { margin-top: var(--space-4); }
 /* v7.3 Ridian Jobs: a run the owner sent from the Owner Workspace. */
 .rail-thread-source {
   font-size: 0.64rem;
