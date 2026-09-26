@@ -5,8 +5,7 @@ experience is one natural-language command surface: describe the outcome you
 need, then follow the planner's tool use, questions, approvals, artifacts, and
 final receipt in one operation timeline.
 
-The backend uses Python, FastAPI, the OpenAI Responses API, and Claude's tool
-runner. Electron provides the Windows desktop experience. Business data and
+The backend uses Python, FastAPI, and the OpenAI Responses API. Electron provides the Windows desktop experience. Business data and
 operation history remain local; connected Google and QuickBooks capabilities
 use their respective cloud APIs.
 
@@ -167,9 +166,6 @@ app, click **Settings** in the top-right header, fill in:
 
 - **AI provider — OpenAI** — OpenAI API key (recommended/primary). New
   Operator runs and specialist agents use the OpenAI Responses API.
-- **Anthropic compatibility** — optional Anthropic API key. Existing parked
-  Anthropic runs remain resumable, and Anthropic can serve as fallback when
-  no OpenAI key is configured.
 - **Voice input / read-aloud** — the OpenAI key also powers the existing
   transcription and speech features.
 - **Operator profile** — your name, email, company name.
@@ -179,7 +175,7 @@ app, click **Settings** in the top-right header, fill in:
 Settings persist to `apps/api/local_settings.json` and take precedence
 over any values in `apps/api/.env`. If neither is set, the GUI shows a
 first-run banner pointing you at Settings; the **Run workflow** button
-stays disabled until an Anthropic key is configured.
+stays disabled until an OpenAI key is configured.
 
 ## Developer setup (Windows PowerShell)
 
@@ -224,7 +220,7 @@ Useful URLs (backend only):
 | --- | --- |
 | <http://127.0.0.1:8000>            | The same operator console served as static HTML |
 | <http://127.0.0.1:8000/docs>       | Swagger UI for the API |
-| <http://127.0.0.1:8000/health>     | `{ anthropic_key_loaded, model, ... }` |
+| <http://127.0.0.1:8000/health>     | `{ openai_key_loaded, model, ... }` |
 | <http://127.0.0.1:8000/settings>   | GET / POST settings (never returns secrets) |
 | <http://127.0.0.1:8000/workflows/run> | POST the workflow |
 | <http://127.0.0.1:8000/email/send-approved> | POST to send an approved email |
