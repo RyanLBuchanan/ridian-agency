@@ -1,25 +1,23 @@
 """OpenAI runtime for Ridian Operator.
 
-New Ridian runs prefer OpenAI when OPENAI_API_KEY is configured.  This module
-owns OpenAI model calls while the existing Anthropic runtime remains intact for
-legacy/parked sessions and fallback compatibility.
-
-The Responses API is used with store=False so Ridian keeps conversation state
-locally. Function tools still execute inside Ridian; only the tool schemas,
-arguments, outputs, and prompt context are sent to the model.
+Ridian uses OpenAI for planner reasoning, specialist agents, hosted web search,
+voice features, and function-tool orchestration. Conversation state remains
+local with store=False; Ridian executes tool calls behind its existing approval,
+provenance, and audit gates.
 """
 
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from openai import AsyncOpenAI
 
-from .anthropic_runtime import RunBudgetExceeded, TextAgentResult, date_line
+from .runtime_common import RunBudgetExceeded, TextAgentResult, date_line
 
 log = logging.getLogger("ridian.openai")
 
@@ -70,6 +68,64 @@ def _dump(item: Any) -> Any:
     if hasattr(item, "model_dump"):
         return item.model_dump(mode="json", exclude_none=True, by_alias=True)
     return item
+
+
+def _json_type(annotation: Any) -> dict:
+    """Small JSON-schema mapper for Ridian's typed planner-tool signatures."""
+    if annotation is inspect._empty or annotation is Any:
+        return {}
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is list:
+        return {"type": "array", "items": _json_type(args[0]) if args else {}}
+    if origin is dict:
+        return {"type": "object"}
+    if origin is not None and type(None) in args:
+        non_none = [a for a in args if a is not type(None)]
+        return _json_type(non_none[0]) if len(non_none) == 1 else {}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    return {}
+
+
+class FunctionTool:
+    """Provider-independent wrapper around an async Ridian tool function."""
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.name = fn.__name__
+        self.description = inspect.getdoc(fn) or ""
+        sig = inspect.signature(fn)
+        properties = {}
+        required = []
+        for name, param in sig.parameters.items():
+            properties[name] = _json_type(param.annotation)
+            if param.default is inspect._empty:
+                required.append(name)
+        self.input_schema = {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "description": self.description,
+                "input_schema": self.input_schema}
+
+    async def call(self, args: dict):
+        return await self.fn(**args)
+
+
+def tool_from_callable(fn):
+    """Register a Ridian async function for OpenAI function calling."""
+    return FunctionTool(fn)
 
 
 def _tool_specs(tools: list) -> list[dict]:
