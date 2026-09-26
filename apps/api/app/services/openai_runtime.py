@@ -204,7 +204,12 @@ async def run_planner_turn(*, system: str, input_items: list, tools: list,
         total_in += t_in
         total_out += t_out
         output = [_dump(x) for x in (getattr(response, "output", []) or [])]
-        items.extend(output)
+        # Responses input accepts assistant messages/function calls, but
+        # reasoning-only output items are opaque provider state. With store=False
+        # we keep only replayable conversation items in Ridian's local session.
+        replayable = [x for x in output
+                      if isinstance(x, dict) and x.get("type") in ("message", "function_call")]
+        items.extend(replayable)
         text = (getattr(response, "output_text", "") or "").strip()
         if text:
             last_text = text
