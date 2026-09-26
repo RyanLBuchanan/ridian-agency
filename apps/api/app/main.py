@@ -483,10 +483,6 @@ class SettingsView(BaseModel):
     operator_email: str = ""
     default_to_email: str = ""
     company_name: str = ""
-    anthropic_model: str = ""
-    anthropic_research_model: str = ""
-    anthropic_script_model: str = ""
-    anthropic_api_key_configured: bool = False
     openai_model: str = ""
     openai_research_model: str = ""
     openai_tts_voice: str = ""
@@ -553,10 +549,6 @@ class SettingsUpdate(BaseModel):
     operator_email: str | None = None
     default_to_email: str | None = None
     company_name: str | None = None
-    anthropic_api_key: str | None = None
-    anthropic_model: str | None = None
-    anthropic_research_model: str | None = None
-    anthropic_script_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
     openai_research_model: str | None = None
