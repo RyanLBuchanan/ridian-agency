@@ -68,8 +68,8 @@ from .anthropic_runtime import (
     WEB_SEARCH_TOOL,
     RunBudgetExceeded,
     estimate_cost_usd,
-    run_text_agent,
 )
+from . import anthropic_runtime, openai_runtime
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -148,6 +148,22 @@ _WRITE_FILE_ALLOWLIST: frozenset[str] = frozenset({
 _RESEARCH_PROMPT = "operator_research_prompt.txt"
 _SCRIPT_PROMPT = "operator_script_prompt.txt"
 _PACKET_PROMPT = "operator_research_packet_prompt.txt"
+
+
+async def _run_text_agent(*args, **kwargs):
+    """Provider-neutral specialist dispatch.
+
+    OpenAI is primary when configured; Anthropic remains a compatibility
+    fallback. The public result contract stays TextAgentResult-compatible so
+    grounding and cost gates above this layer do not change.
+    """
+    settings_service.apply_to_environment()
+    if settings_service.get_effective_value("OPENAI_API_KEY"):
+        model = kwargs.get("model")
+        if model and str(model).startswith("claude-"):
+            kwargs.pop("model", None)
+        return await openai_runtime.run_text_agent(*args, **kwargs)
+    return await anthropic_runtime.run_text_agent(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +737,7 @@ async def web_research(
         "Produce the sources packet now."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
@@ -883,7 +899,7 @@ async def build_research_packet(
         "Produce the research packet body now (focus line + sources)."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
@@ -1082,7 +1098,7 @@ async def write_audiobook_script(
         "Produce the audiobook script now."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_SCRIPT_PROMPT), prompt,
             model=_effective_script_model(operator),
             effort=_effective_effort(operator) or None,
@@ -2905,7 +2921,7 @@ async def prep_brief(company_or_person: str) -> dict:
     required = _prep_queries(subject)
     numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(required, 1))
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             _prep_system(),
             (f"Prep brief subject: {subject}\n\n"
              f"REQUIRED SEARCHES — run every one of these, EXACTLY as "
@@ -3148,7 +3164,7 @@ async def draft_proposal(deal: str, price: str = "", timeline: str = "",
     if str(guidance or "").strip():
         facts.append(f"Guidance: {guidance.strip()}")
 
-    text = await run_text_agent(_proposal_system(), "\n".join(facts),
+    text = await _run_text_agent(_proposal_system(), "\n".join(facts),
                                 max_tokens=2000)
     gated, stripped = _proposal_number_gate(text, allowed)
     if len(gated.strip()) < 40:
@@ -3236,7 +3252,7 @@ async def draft_followup(contact: str, context: str = "") -> dict:
     if str(context or "").strip():
         facts.append(f"Operator guidance: {context.strip()}")
 
-    text = await run_text_agent(_followup_system(), "\n".join(facts),
+    text = await _run_text_agent(_followup_system(), "\n".join(facts),
                                 max_tokens=1000)
     lines = (text or "").strip().split("\n")
     subject = (lines[0] or "").strip() or f"Following up — {deal.get('title') or match.get('name')}"
