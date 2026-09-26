@@ -103,6 +103,7 @@ def save(session: Any, state: str = PARKED) -> bool:
         "folder": str(session.folder),
         "system": session.system,
         "upload_state_line": session.upload_state_line,
+        "provider": str(getattr(session, "provider", "anthropic") or "anthropic"),
         "sources_packet_text": operator.sources_packet_text or "",
         "script_text": operator.script_text or "",
         "record": json_safe(record),
