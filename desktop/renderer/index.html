@@ -811,19 +811,6 @@
                   <!-- shape for all of them — QuickBooks is not special.    -->
                   <div class="settings-block">
                     <div class="settings-row">
-                      <span id="settings-dot-anthropic" class="settings-dot" aria-hidden="true"></span>
-                      <span class="settings-row-label">Anthropic</span>
-                      <input name="anthropic_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
-                      <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test</button>
-                    </div>
-                    <div class="settings-row-note">
-                      <span id="settings-anthropic-key-hint"></span>
-                      <span id="settings-test-anthropic-status" role="status" aria-live="polite"></span>
-                    </div>
-                  </div>
-
-                  <div class="settings-block">
-                    <div class="settings-row">
                       <span id="settings-dot-openai" class="settings-dot" aria-hidden="true"></span>
                       <span class="settings-row-label">OpenAI</span>
                       <input name="openai_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
@@ -832,6 +819,19 @@
                     <div class="settings-row-note">
                       <span id="settings-openai-key-hint"></span>
                       <span id="settings-test-openai-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-row">
+                      <span id="settings-dot-anthropic" class="settings-dot" aria-hidden="true"></span>
+                      <span class="settings-row-label">Anthropic</span>
+                      <input name="anthropic_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
+                      <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test</button>
+                    </div>
+                    <div class="settings-row-note">
+                      <span id="settings-anthropic-key-hint"></span>
+                      <span id="settings-test-anthropic-status" role="status" aria-live="polite"></span>
                     </div>
                   </div>
 
@@ -1010,14 +1010,16 @@
                         <input name="company_name" type="text" autocomplete="off" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Default recipient</span>
                         <input name="default_to_email" type="email" autocomplete="off" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Planner model</span>
+                      <label class="settings-adv-field"><span>OpenAI planner model</span>
+                        <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-5.6-sol" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>OpenAI research model</span>
+                        <input name="openai_research_model" type="text" autocomplete="off" placeholder="gpt-5.6-terra" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>Anthropic planner (fallback)</span>
                         <input name="anthropic_model" type="text" autocomplete="off" placeholder="claude-opus-4-8" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Research model</span>
+                      <label class="settings-adv-field"><span>Anthropic research (fallback)</span>
                         <input name="anthropic_research_model" type="text" autocomplete="off" placeholder="claude-sonnet-5" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Script model</span>
+                      <label class="settings-adv-field"><span>Anthropic script (fallback)</span>
                         <input name="anthropic_script_model" type="text" autocomplete="off" placeholder="(planner model)" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>OpenAI model</span>
-                        <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-4o-mini" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Read-aloud quality</span>
                         <select name="openai_tts_model" class="settings-input">
                           <option value="">tts-1 (default)</option>
