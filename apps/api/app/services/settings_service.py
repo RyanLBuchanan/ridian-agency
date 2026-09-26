@@ -115,8 +115,7 @@ SECRET_KEYS: frozenset[str] = frozenset({
 PUBLIC_KEYS: tuple[str, ...] = tuple(k for k in SETTABLE_KEYS if k not in SECRET_KEYS)
 
 # Settings whose values we mirror into os.environ so SDKs that read env vars
-# directly (the Anthropic SDK reading ANTHROPIC_API_KEY, the OpenAI SDK
-# reading OPENAI_API_KEY for Whisper) see the value.
+# directly (the OpenAI SDK reading OPENAI_API_KEY) see the value.
 _SDK_ENV_MAP: dict[str, str] = {
     "openai_api_key": "OPENAI_API_KEY",
     "openai_model": "OPENAI_MODEL",
