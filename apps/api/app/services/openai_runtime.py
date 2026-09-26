@@ -24,7 +24,7 @@ from .anthropic_runtime import RunBudgetExceeded, TextAgentResult, date_line
 log = logging.getLogger("ridian.openai")
 
 _DEFAULT_MODEL = "gpt-5.6-sol"
-_DEFAULT_RESEARCH_MODEL = "gpt-5.6-terra"
+_DEFAULT_RESEARCH_MODEL = "gpt-5.6-sol"
 
 # Deliberately conservative until OpenAI exposes a stable machine-readable
 # price source in this app. A high estimate protects Ridian's spend fence.
