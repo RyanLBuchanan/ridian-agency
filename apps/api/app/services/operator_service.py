@@ -34,7 +34,8 @@ from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_mod
 from ..agents.planner_agent import build_planner_system
 from . import (gmail_service, google_drive_service, memory_service,
                operation_log_service, parked_runs, state_store)
-from .anthropic_runtime import date_line, estimate_cost_usd, get_client
+from .runtime_common import date_line
+from . import openai_runtime
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
@@ -87,8 +88,9 @@ class _OperationSession:
     operator: OperatorContext
     folder: Path
     system: str          # the planner system prompt (tool list spliced in)
-    input_list: list     # mirrored Anthropic messages — full conversation history
+    input_list: list     # replayable OpenAI Responses conversation history
     upload_state_line: str
+    provider: str = "openai"
 
 
 _SESSIONS: dict[str, _OperationSession] = {}
@@ -480,79 +482,42 @@ def _build_planner_input(command: str, upload_state_line: str) -> str:
 
 
 async def _run_turn(session: _OperationSession, messages: list) -> None:
-    """Run ONE planner turn on the Anthropic tool runner.
-
-    The runner drives the model → tool → result loop; our tools emit their own
-    step/artifact SSE from inside their bodies (they read the OperatorContext
-    off the contextvar bound here). We mirror the conversation into
-    ``session.input_list`` as it grows — the runner keeps its own private
-    copy — so a /continue can resume the SAME operation with full history.
-    ``pause_turn`` (a long server-tool turn parking itself) is resumed by
-    restarting the runner with the paused assistant turn appended, capped.
-    """
+    """Run one OpenAI planner turn through Ridian's existing tools and gates."""
     set_current_operator(session.operator)
-    client = get_client()
-    restarts = 0
-    turn_no = 0
-    turn_started = time.monotonic()
-    while True:
-        runner = client.beta.messages.tool_runner(
-            model=default_model(),
-            max_tokens=16000,
-            system=session.system,
-            tools=PLANNER_TOOLS,
-            messages=messages,
-            max_iterations=_MAX_PLANNER_TURNS,
-            # EXPERIMENT (A/B vs thinking-off): adaptive thinking on the gate
-            # brain — Opus 4.8 omits = off, so this is the deliberate ON arm.
-            # Thinking blocks enter the mirrored history and replay on resume
-            # unchanged (same model), which the resume leg of the A/B verifies.
-            thinking={"type": "adaptive"},
-            output_config={"effort": "medium"},
-        )
-        last = None
-        async for message in runner:
-            last = message
-            turn_no += 1
-            # Per-turn forensics (model/thinking experiments): ms is this
-            # turn's API latency — the clock restarts after tools execute, so
-            # tool time is excluded. output_tokens includes thinking tokens.
-            u = getattr(message, "usage", None)
-            log.info(
-                "planner.turn n=%d ms=%d in=%d out=%d stop=%s",
-                turn_no, int((time.monotonic() - turn_started) * 1000),
-                int(getattr(u, "input_tokens", 0) or 0),
-                int(getattr(u, "output_tokens", 0) or 0),
-                getattr(message, "stop_reason", ""),
-            )
-            # Mirror history: the assistant turn, then any tool results the
-            # runner produced for it (cached — tools still execute once).
-            messages.append({"role": "assistant", "content": message.content})
-            tool_response = await runner.generate_tool_call_response()
-            if tool_response is not None:
-                messages.append(tool_response)
-            await _surface_planner_message(session.operator, message)
-            turn_started = time.monotonic()
-            # v3.2: the run's dollar fence covers planner turns too. Checked
-            # AFTER mirroring so the history stays consistent for a /continue.
-            if await _absorb_planner_spend(session.operator, message):
-                session.input_list = messages
-                return None
-            # v7.8: the app is closing. This step — the model turn and the
-            # tools it called — is done and mirrored: stop here, at a clean
-            # boundary, before the next model call. (A turn that ended with
-            # no tool call is the run's last; it finishes normally.)
-            if _DRAINING and tool_response is not None:
-                session.input_list = messages
-                return CHECKPOINTED
-        if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
-            break
-        if _DRAINING:
-            session.input_list = messages
-            return CHECKPOINTED
-        restarts += 1
-
-    session.input_list = messages
+    session.operator._ridian_provider = "openai"
+    result = await openai_runtime.run_planner_turn(
+        system=session.system,
+        input_items=messages,
+        tools=PLANNER_TOOLS,
+        max_turns=_MAX_PLANNER_TURNS,
+        effort="medium",
+    )
+    session.input_list = result["items"]
+    if result.get("text"):
+        session.operator.record["receipt"] = result["text"]
+        await session.operator.emit({
+            "event": "message", "data": {"text": result["text"]}})
+    for name in result.get("tool_names", []):
+        await session.operator.emit({
+            "event": "message",
+            "data": {"text": f"Planner → calling tool: {name}"},
+        })
+    usage = type("_Usage", (), {
+        "input_tokens": int(result.get("tokens_in", 0) or 0),
+        "output_tokens": int(result.get("tokens_out", 0) or 0),
+    })()
+    msg = type("_PlannerMessage", (), {
+        "usage": usage,
+        "stop_reason": "end_turn" if result.get("completed") else "max_turns",
+    })()
+    if await _absorb_planner_spend(session.operator, msg):
+        return None
+    if _DRAINING and not result.get("completed"):
+        return CHECKPOINTED
+    if not result.get("completed"):
+        text = f"Planner stopped after {_MAX_PLANNER_TURNS} turns without completing."
+        session.operator.record["errors"].append(text)
+        await session.operator.emit_error(text)
     return None
 
 
@@ -851,8 +816,9 @@ async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
     """
     rec = operator.record
     u = getattr(message, "usage", None)
-    turn_cost = estimate_cost_usd(
-        default_model(),
+    turn_cost = openai_runtime.estimate_cost_usd(
+        openai_runtime.default_model(),
+        model,
         int(getattr(u, "input_tokens", 0) or 0),
         int(getattr(u, "output_tokens", 0) or 0),
     )
@@ -1108,7 +1074,8 @@ def _session_from_payload(payload: dict) -> "_OperationSession":
     return _OperationSession(
         operator=operator, folder=folder, system=payload["system"],
         input_list=payload["input_list"],
-        upload_state_line=str(payload.get("upload_state_line") or ""))
+        upload_state_line=str(payload.get("upload_state_line") or ""),
+        provider="openai")
 
 
 def _mark_expired(op: dict, why: str, message: str, now: str) -> None:
@@ -1355,6 +1322,10 @@ async def resume_checkpointed(operation_id: str) -> dict:
         return {}
     apply_to_environment()
     record = session.operator.record
+    required_key = "OPENAI_API_KEY"
+    if not get_effective_value(required_key):
+        log.warning("operation.resume_provider_missing id=%s provider=%s", operation_id, session.provider)
+        return {}
     emit = _resume_emit(record)
     session.operator.emit = emit
     parked_runs.save(session, parked_runs.RUNNING)
@@ -1446,9 +1417,9 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     from the Owner Workspace: it STAMPS the record (source + job id) and
     changes nothing else — same planner, tools, gates, ceilings, allowlists."""
     apply_to_environment()
-    if not get_effective_value("ANTHROPIC_API_KEY"):
+    if not get_effective_value("OPENAI_API_KEY"):
         await emit({"event": "error", "data": {
-            "message": "ANTHROPIC_API_KEY is not set. Open Settings to add your Anthropic API key."
+            "message": "OpenAI is not configured. Open Settings and add your OpenAI API key."
         }})
         return {}
     if _DRAINING:
@@ -1523,6 +1494,7 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     session = _OperationSession(
         operator=operator, folder=folder, system=build_planner_system(),
         input_list=[], upload_state_line=upload_state_line,
+        provider="openai",
     )
     _SESSIONS[record["id"]] = session
     # v7.8: on disk from the start, so a run the app closes mid-step is
@@ -1576,6 +1548,12 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         session, why = _restore_session(operation_id)
     if session is None:
         await emit({"event": "expired", "data": expire_run(operation_id, why)})
+        return {}
+    required_key = "OPENAI_API_KEY"
+    if not get_effective_value(required_key):
+        await emit({"event": "error", "data": {
+            "message": "OpenAI is required to continue this run. Add its API key in Settings and answer again."
+        }})
         return {}
 
     async with _session_lock(operation_id):

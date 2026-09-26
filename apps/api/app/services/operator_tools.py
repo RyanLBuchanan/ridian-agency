@@ -5,7 +5,7 @@ effect (file written, draft created, upload completed) or it doesn't ship.
 No tool whose output is 'here's a prompt.'"
 
 These tools are decorated with ``@planner_tool`` — a thin wrapper around the
-Anthropic SDK's ``beta_async_tool`` that (a) JSON-encodes each tool's dict
+Ridian OpenAI runtime's function-tool adapter that (a) JSON-encodes each tool's dict
 return for the model and (b) preserves the tool's signature/docstring so the
 input schema is generated exactly as the OpenAI Agents SDK used to. Tools read
 the active run's ``OperatorContext`` from a task-local contextvar
@@ -37,8 +37,6 @@ import json
 import logging
 from pathlib import Path
 
-from anthropic import beta_async_tool
-
 import re as _re
 
 from ..agents import load_prompt, model_supports_effort, research_model, script_model
@@ -63,13 +61,12 @@ from . import (
 from datetime import datetime
 
 from . import sms_service
-from .anthropic_runtime import (
+from .runtime_common import (
     SEARCH_COST_USD,
     WEB_SEARCH_TOOL,
     RunBudgetExceeded,
-    estimate_cost_usd,
-    run_text_agent,
 )
+from . import openai_runtime, provider_runtime
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -88,7 +85,7 @@ _TOOL_CALL_DEPTH = contextvars.ContextVar("ridian_tool_depth", default=0)
 
 
 def planner_tool(fn):
-    """Register an async tool with the Anthropic tool runner.
+    """Register an async tool with the OpenAI planner.
 
     The wrapped function keeps its exact signature and Google-style docstring
     (the SDK generates the input schema from both — same behavior as the old
@@ -118,7 +115,7 @@ def planner_tool(fn):
             return result
         return json.dumps(result, default=str)
 
-    return beta_async_tool(wrapper)
+    return openai_runtime.tool_from_callable(wrapper)
 
 
 # Files the planner is allowed to write via the generic write_file tool.
@@ -141,13 +138,16 @@ _WRITE_FILE_ALLOWLIST: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # Internal sub-agents (not exposed to the planner directly)
 # ---------------------------------------------------------------------------
-# Each is a system prompt run one-shot via anthropic_runtime.run_text_agent;
+# Each is a system prompt run one-shot via provider_runtime.run_text_agent;
 # the research/packet ones attach the server-side web_search tool. The planner
 # never sees web search directly — same encapsulation as before.
 
 _RESEARCH_PROMPT = "operator_research_prompt.txt"
 _SCRIPT_PROMPT = "operator_script_prompt.txt"
 _PACKET_PROMPT = "operator_research_packet_prompt.txt"
+
+
+_run_text_agent = provider_runtime.run_text_agent
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +431,8 @@ def _effective_research_model(operator: OperatorContext) -> str:
     """The composer's per-run override (allowlisted at intake by
     operator_service._sanitize_research_model), else the Settings/env
     default. Research sub-agents only — the planner never reads this."""
+    if settings_service.get_effective_value("OPENAI_API_KEY"):
+        return openai_runtime.research_model()
     return operator.record.get("research_model_override") or research_model()
 
 
@@ -438,6 +440,8 @@ def _effective_script_model(operator: OperatorContext) -> str:
     """Per-run Script selector override, else the Settings/env default
     (which itself falls back to the planner model, preserving the script
     writer's historical behavior)."""
+    if settings_service.get_effective_value("OPENAI_API_KEY"):
+        return openai_runtime.default_model()
     return operator.record.get("script_model_override") or script_model()
 
 
@@ -465,7 +469,7 @@ def _effort_note(operator: OperatorContext, model: str) -> str:
 
 # Deterministic estimate constants — no model call builds the plan (instant,
 # free, can't hallucinate the numbers). Per-search and per-token rates live in
-# anthropic_runtime (SEARCH_COST_USD / estimate_cost_usd — one shared math for
+# OpenAI runtime (SEARCH_COST_USD / estimate_cost_usd — one shared math for
 # the plan, the ceiling, the reconciliation, and failure forensics); dynamic-
 # filtering code execution is free alongside web search.
 #
@@ -509,7 +513,7 @@ def _reconciliation(res, model: str) -> str:
 # record["cost_ceiling_usd"] is snapshotted at intake (operator_service) and
 # record["spend_usd"] accumulates planner turns + sub-agent calls + FAILED
 # calls' partials. Layer 1 (here): billable tools refuse to start once the run
-# is at/over the fence. Layer 2 (anthropic_runtime): the live mid-stream guard
+# is at/over the fence. Layer 2 (OpenAI runtime): the live mid-stream guard
 # aborts a call in flight the moment observed spend crosses it.
 
 
@@ -537,12 +541,15 @@ def _add_spend(operator: OperatorContext, model: str, res) -> None:
     """Fold a completed sub-agent call into the run's dollar ledger."""
     operator.record["spend_usd"] = round(
         float(operator.record.get("spend_usd", 0.0) or 0.0)
-        + estimate_cost_usd(model, res.tokens_in, res.tokens_out,
-                            searches=res.searches), 4)
+        + (openai_runtime.estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                                           searches=res.searches)
+           if str(model).startswith("gpt-")
+           else estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                                  searches=res.searches)), 4)
 
 
 def _add_partial_spend(operator: OperatorContext, exc: Exception) -> str:
-    """Fold a FAILED call's pre-death spend — attached by anthropic_runtime as
+    """Fold a FAILED call's pre-death spend — attached by OpenAI runtime as
     ``ridian_partial`` — into the run's ledger. Failed runs still bill for the
     searches and tokens that ran; returns a sentence for the failed step so
     that money is STATED, never silently swallowed ("" when unknown)."""
@@ -666,7 +673,7 @@ async def web_research(
 ) -> dict:
     """Run live web research on ``topic`` and return a finished sources packet.
 
-    Uses Anthropic's server-side web search through an internal sub-agent. The
+    Uses OpenAI hosted web search through an internal sub-agent. The
     returned ``sources_md`` is a Markdown sources packet ready to be passed
     to ``write_sources_packet`` or ``write_audiobook_script``. Source URLs
     are cited; confidence flags are included.
@@ -721,7 +728,7 @@ async def web_research(
         "Produce the sources packet now."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_RESEARCH_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
@@ -883,7 +890,7 @@ async def build_research_packet(
         "Produce the research packet body now (focus line + sources)."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_PACKET_PROMPT), prompt, use_web_search=True,
             return_stats=True, model=_effective_research_model(operator),
             on_progress=_progress, effort=_effective_effort(operator) or None,
@@ -1082,7 +1089,7 @@ async def write_audiobook_script(
         "Produce the audiobook script now."
     )
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             load_prompt(_SCRIPT_PROMPT), prompt,
             model=_effective_script_model(operator),
             effort=_effective_effort(operator) or None,
@@ -2905,7 +2912,7 @@ async def prep_brief(company_or_person: str) -> dict:
     required = _prep_queries(subject)
     numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(required, 1))
     try:
-        res = await run_text_agent(
+        res = await _run_text_agent(
             _prep_system(),
             (f"Prep brief subject: {subject}\n\n"
              f"REQUIRED SEARCHES — run every one of these, EXACTLY as "
@@ -3148,7 +3155,7 @@ async def draft_proposal(deal: str, price: str = "", timeline: str = "",
     if str(guidance or "").strip():
         facts.append(f"Guidance: {guidance.strip()}")
 
-    text = await run_text_agent(_proposal_system(), "\n".join(facts),
+    text = await _run_text_agent(_proposal_system(), "\n".join(facts),
                                 max_tokens=2000)
     gated, stripped = _proposal_number_gate(text, allowed)
     if len(gated.strip()) < 40:
@@ -3236,7 +3243,7 @@ async def draft_followup(contact: str, context: str = "") -> dict:
     if str(context or "").strip():
         facts.append(f"Operator guidance: {context.strip()}")
 
-    text = await run_text_agent(_followup_system(), "\n".join(facts),
+    text = await _run_text_agent(_followup_system(), "\n".join(facts),
                                 max_tokens=1000)
     lines = (text or "").strip().split("\n")
     subject = (lines[0] or "").strip() or f"Following up — {deal.get('title') or match.get('name')}"

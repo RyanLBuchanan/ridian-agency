@@ -202,11 +202,11 @@
             class="banner banner-warn hidden"
             role="alert"
           >
-            <div class="banner-title">Anthropic API key is not configured.</div>
+            <div class="banner-title">OpenAI API key is not configured.</div>
             <div class="banner-body">
               Open <strong>Settings</strong> (bottom left) to add your key before
               running an operation. Get a key at
-              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>.
             </div>
           </section>
 
@@ -216,7 +216,7 @@
             <!-- ============= OPERATOR v1 — COMMAND SURFACE ============= -->
             <section class="operator" aria-label="Ridian Operator">
               <!-- Left rail: persistent workspace context (memory + last run),
-                   Claude/ChatGPT-style. Chip ids are unchanged so the existing
+                   assistant-style. Chip ids are unchanged so the existing
                    JS wiring (counts, click-through to Memory) keeps working. -->
               <aside class="operator-rail" aria-label="Workspace navigation">
                 <!-- v7.6 (0.9.16) sidebar. Top: New operation, search, the
@@ -408,10 +408,7 @@
                         aria-label="Research model for this run"
                       >
                         <option value="">Research: default</option>
-                        <option value="claude-sonnet-5">Research: Sonnet 5</option>
-                        <option value="claude-opus-4-8">Research: Opus 4.8</option>
-                        <option value="claude-haiku-4-5">Research: Haiku 4.5</option>
-                        <option value="claude-fable-5">Research: Fable 5</option>
+                         <option value="gpt-5.6-sol">Research: GPT-5.6 Sol</option>
                       </select>
                       <select
                         id="operator-script-model"
@@ -420,10 +417,7 @@
                         aria-label="Script-writer model for this run"
                       >
                         <option value="">Script: default</option>
-                        <option value="claude-sonnet-5">Script: Sonnet 5</option>
-                        <option value="claude-opus-4-8">Script: Opus 4.8</option>
-                        <option value="claude-haiku-4-5">Script: Haiku 4.5</option>
-                        <option value="claude-fable-5">Script: Fable 5</option>
+                         <option value="gpt-5.6-sol">Script: GPT-5.6 Sol</option>
                       </select>
                       <!-- Effort applies to SUB-AGENT calls only (research +
                            script). The planner's model and effort are locked
@@ -505,7 +499,7 @@
                   <span id="operator-project-chip-text" class="operator-source-chip-text"></span>
                   <button id="operator-project-chip-clear" type="button" class="operator-source-chip-clear" title="Stop filing runs under this project" aria-label="Clear active project">✕</button>
                 </div>
-                <!-- Structured-question options (Claude-style suggested
+                <!-- Structured-question options (assistant suggested
                      replies): tappable choices ride the composer while a
                      question is live; hidden once answered or dismissed. -->
                 <!-- v6.8: due-obligations banner — persistent until each is
@@ -811,19 +805,6 @@
                   <!-- shape for all of them — QuickBooks is not special.    -->
                   <div class="settings-block">
                     <div class="settings-row">
-                      <span id="settings-dot-anthropic" class="settings-dot" aria-hidden="true"></span>
-                      <span class="settings-row-label">Anthropic</span>
-                      <input name="anthropic_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
-                      <button id="settings-test-anthropic" type="button" class="btn btn-ghost btn-compact">Test</button>
-                    </div>
-                    <div class="settings-row-note">
-                      <span id="settings-anthropic-key-hint"></span>
-                      <span id="settings-test-anthropic-status" role="status" aria-live="polite"></span>
-                    </div>
-                  </div>
-
-                  <div class="settings-block">
-                    <div class="settings-row">
                       <span id="settings-dot-openai" class="settings-dot" aria-hidden="true"></span>
                       <span class="settings-row-label">OpenAI</span>
                       <input name="openai_api_key" type="password" autocomplete="new-password" placeholder="API key" class="settings-input" />
@@ -1010,14 +991,10 @@
                         <input name="company_name" type="text" autocomplete="off" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Default recipient</span>
                         <input name="default_to_email" type="email" autocomplete="off" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Planner model</span>
-                        <input name="anthropic_model" type="text" autocomplete="off" placeholder="claude-opus-4-8" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Research model</span>
-                        <input name="anthropic_research_model" type="text" autocomplete="off" placeholder="claude-sonnet-5" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>Script model</span>
-                        <input name="anthropic_script_model" type="text" autocomplete="off" placeholder="(planner model)" class="settings-input" /></label>
-                      <label class="settings-adv-field"><span>OpenAI model</span>
-                        <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-4o-mini" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>OpenAI planner model</span>
+                        <input name="openai_model" type="text" autocomplete="off" placeholder="gpt-5.6-sol" class="settings-input" /></label>
+                      <label class="settings-adv-field"><span>OpenAI research model</span>
+                        <input name="openai_research_model" type="text" autocomplete="off" placeholder="gpt-5.6-sol" class="settings-input" /></label>
                       <label class="settings-adv-field"><span>Read-aloud quality</span>
                         <select name="openai_tts_model" class="settings-input">
                           <option value="">tts-1 (default)</option>

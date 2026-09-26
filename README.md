@@ -5,8 +5,7 @@ experience is one natural-language command surface: describe the outcome you
 need, then follow the planner's tool use, questions, approvals, artifacts, and
 final receipt in one operation timeline.
 
-The backend uses Python, FastAPI, the official Anthropic SDK, and Claude's tool
-runner. Electron provides the Windows desktop experience. Business data and
+The backend uses Python, FastAPI, and the OpenAI Responses API. Electron provides the Windows desktop experience. Business data and
 operation history remain local; connected Google and QuickBooks capabilities
 use their respective cloud APIs.
 
@@ -17,7 +16,7 @@ Operator. Normal work starts in the Operator composer, not a workflow picker.
 
 ## What you get
 
-- **One Ridian Operator** backed by a general-purpose Claude planner that
+- **One Ridian Operator** backed by a general-purpose OpenAI planner that
   dynamically selects registered business tools.
 - **Observable operations** with an execution timeline, resumable questions,
   approval gates, receipts, generic artifacts, and one Operations history.
@@ -165,11 +164,10 @@ this README.
 You don't need to edit environment variables for normal use. Launch the
 app, click **Settings** in the top-right header, fill in:
 
-- **AI provider — Anthropic** — Anthropic API key (required; get one at
-  <https://console.anthropic.com/settings/keys>), model (defaults to
-  `claude-opus-4-8`).
-- **Voice input (OpenAI Whisper)** — optional OpenAI API key, used ONLY
-  for microphone transcription. Everything else runs on Claude.
+- **AI provider — OpenAI** — OpenAI API key (recommended/primary). New
+  Operator runs and specialist agents use the OpenAI Responses API.
+- **Voice input / read-aloud** — the OpenAI key also powers the existing
+  transcription and speech features.
 - **Operator profile** — your name, email, company name.
 - **Default email recipient** — where the Approve & Send button delivers.
 - **SMTP credentials** — only needed for the email send button.
@@ -177,7 +175,7 @@ app, click **Settings** in the top-right header, fill in:
 Settings persist to `apps/api/local_settings.json` and take precedence
 over any values in `apps/api/.env`. If neither is set, the GUI shows a
 first-run banner pointing you at Settings; the **Run workflow** button
-stays disabled until an Anthropic key is configured.
+stays disabled until an OpenAI key is configured.
 
 ## Developer setup (Windows PowerShell)
 
@@ -222,7 +220,7 @@ Useful URLs (backend only):
 | --- | --- |
 | <http://127.0.0.1:8000>            | The same operator console served as static HTML |
 | <http://127.0.0.1:8000/docs>       | Swagger UI for the API |
-| <http://127.0.0.1:8000/health>     | `{ anthropic_key_loaded, model, ... }` |
+| <http://127.0.0.1:8000/health>     | `{ openai_key_loaded, model, ... }` |
 | <http://127.0.0.1:8000/settings>   | GET / POST settings (never returns secrets) |
 | <http://127.0.0.1:8000/workflows/run> | POST the workflow |
 | <http://127.0.0.1:8000/email/send-approved> | POST to send an approved email |
@@ -266,7 +264,7 @@ presentation_agent -> slide_outline.md
 email_agent        -> draft_email.md
 ```
 
-The pipeline runs as five sequential Claude calls; each step's output is
+The pipeline runs as five sequential model calls; each step's output is
 written to disk before the next begins.
 
 ## Files that must never be committed

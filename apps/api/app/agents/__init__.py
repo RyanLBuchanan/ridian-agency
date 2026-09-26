@@ -1,8 +1,7 @@
-"""Agent definitions for Ridian Agency (Anthropic-powered).
+"""Agent definitions for Ridian Agency.
 
-An "agent" here is just a named system prompt — execution goes through
-``services.anthropic_runtime.run_text_agent`` (one-shot specialists) or the
-Tool Runner loop in ``services.operator_service`` (the operator planner).
+An "agent" is a named system prompt. Execution goes through Ridian's OpenAI
+runtime for both the operator planner and one-shot specialists.
 """
 
 import os
@@ -21,22 +20,15 @@ def load_prompt(name: str) -> str:
 
 
 def default_model() -> str:
-    return os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+    return os.getenv("OPENAI_MODEL", "gpt-5.6-sol")
 
 
 def research_model() -> str:
-    """Model for the research/packet sub-agents ONLY. They spend their time on
-    web-search round-trips + summarizing, where Sonnet-tier quality holds up
-    and the foreground wait matters — the planner (tool selection, gates
-    context, receipts) stays on default_model()."""
-    return os.getenv("ANTHROPIC_RESEARCH_MODEL", "claude-sonnet-5")
+    return os.getenv("OPENAI_RESEARCH_MODEL", "") or default_model()
 
 
 def script_model() -> str:
-    """Model for the audiobook script-writer sub-agent. Falls back to
-    default_model() — the script writer historically rode the planner model,
-    and picking nothing preserves that behavior exactly."""
-    return os.getenv("ANTHROPIC_SCRIPT_MODEL", "") or default_model()
+    return default_model()
 
 
 # Curated per-run override targets for the sub-agent selectors (Research and
@@ -45,10 +37,7 @@ def script_model() -> str:
 # deliberately absent from per-run selection: it enforces the gates and is
 # changeable only from Settings.
 ALLOWED_RESEARCH_MODELS: tuple[str, ...] = (
-    "claude-sonnet-5",
-    "claude-opus-4-8",
-    "claude-haiku-4-5",
-    "claude-fable-5",
+    "gpt-5.6-sol",
 )
 
 # Per-run effort levels for SUB-AGENT calls (output_config.effort — GA API
@@ -59,14 +48,12 @@ ALLOWED_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high")
 
 
 def model_supports_effort(model_id: str) -> bool:
-    """Haiku 4.5 rejects output_config.effort — omit it there rather than 400."""
-    return not (model_id or "").startswith("claude-haiku")
+    return True
 
 
 @dataclass(frozen=True)
 class PromptAgent:
-    """A named system prompt. Replaces the OpenAI Agents SDK ``Agent`` object
-    for one-shot specialists — run it with anthropic_runtime.run_text_agent."""
+    """A named system prompt executed through the OpenAI runtime."""
 
     name: str
     instructions: str

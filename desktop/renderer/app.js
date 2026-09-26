@@ -196,8 +196,7 @@ const SOCIAL_FIELD_MAP = {
 
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
-  'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
-  'openai_model', 'openai_tts_voice', 'openai_tts_model',
+  'openai_model', 'openai_research_model', 'openai_tts_voice', 'openai_tts_model',
   'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
@@ -209,7 +208,7 @@ const SETTINGS_FIELDS = [
   'twilio_account_sid', 'twilio_from_number', 'sms_recipient_allowlist',
   'owner_workspace_url',
 ];
-const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password',
+const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password',
   'quickbooks_client_secret', 'twilio_auth_token'];
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
@@ -443,8 +442,7 @@ const els = {
   settingsTestEmailBtn: document.getElementById('settings-test-email-btn'),
   settingsStatus: document.getElementById('settings-status'),
   settingsPasswordHint: document.getElementById('settings-password-hint'),
-  settingsAnthropicKeyHint: document.getElementById('settings-anthropic-key-hint'),
-  settingsQboSecretHint: document.getElementById('settings-qbo-secret-hint'),
+    settingsQboSecretHint: document.getElementById('settings-qbo-secret-hint'),
   settingsTwilioTokenHint: document.getElementById('settings-twilio-token-hint'),
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsOutputsPath: document.getElementById('settings-outputs-path'),
@@ -2045,7 +2043,7 @@ async function runWorkflow() {
   const task = els.taskInput.value.trim();
   if (task.length < 10) { showError('Please describe the task in at least 10 characters.'); return; }
   if (backendUp === false) { showError('Backend is not running. Start the FastAPI server first.'); return; }
-  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
 
   hide(els.errorRegion);
   setRunning(true);
@@ -2100,7 +2098,7 @@ async function runSocialWorkflow() {
   }
   if (!payload.channel) { showError('Choose a Channel / Brand before running the social workflow.'); return; }
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
 
   // Capture meta now so the run summary has it after completion
   currentRunMeta = { ...payload };
@@ -2151,7 +2149,7 @@ async function runAgenticAdvancesWorkflow() {
     output_depth: (els.agenticOutputDepth && els.agenticOutputDepth.value) || 'Strategic brief',
   };
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
 
   currentRunMeta = { ...payload };
 
@@ -2210,7 +2208,7 @@ async function runNotebookLMWorkflow() {
     notes: (els.notebooklmNotes && els.notebooklmNotes.value) || '',
   };
   if (backendUp === false) { showError('Backend is not running.'); return; }
-  if (openaiKeyConfigured === false) { showError('Anthropic API key is not configured. Open Settings to add your key.'); return; }
+  if (openaiKeyConfigured === false) { showError('OpenAI API key is not configured. Open Settings to add your key.'); return; }
 
   currentRunMeta = { ...payload };
 
@@ -3122,113 +3120,7 @@ function applySettingsToForm(settings) {
     const input = els.settingsForm.elements.namedItem(name);
     if (input) input.value = '';
   });
-  if (els.settingsAnthropicKeyHint) {
-    if (settings.anthropic_api_key_configured) {
-      els.settingsAnthropicKeyHint.className = 'field-hint is-ok';
-      els.settingsAnthropicKeyHint.textContent = 'An Anthropic API key is currently saved. Leave blank to keep it; type a new one to replace it.';
-    } else {
-      els.settingsAnthropicKeyHint.className = 'field-hint';
-      els.settingsAnthropicKeyHint.textContent = 'Paste your Anthropic API key here. Get one at console.anthropic.com/settings/keys.';
-    }
-  }
-  if (els.settingsOpenaiKeyHint) {
-    if (settings.openai_api_key_configured) {
-      els.settingsOpenaiKeyHint.className = 'field-hint is-ok';
-      els.settingsOpenaiKeyHint.textContent = 'An OpenAI key is saved (voice input only). Leave blank to keep it.';
-    } else {
-      els.settingsOpenaiKeyHint.className = 'field-hint';
-      els.settingsOpenaiKeyHint.textContent = 'Optional — only needed for microphone voice input (Whisper).';
-    }
-  }
-  if (els.settingsPasswordHint) {
-    if (settings.smtp_password_configured) {
-      els.settingsPasswordHint.className = 'field-hint is-ok';
-      els.settingsPasswordHint.textContent = 'A password is currently saved. Leave blank to keep it; type a new one to replace it.';
-    } else {
-      els.settingsPasswordHint.className = 'field-hint';
-      els.settingsPasswordHint.textContent = 'No password saved yet. For Gmail use an App Password.';
-    }
-  }
-  if (els.settingsQboSecretHint) {
-    if (settings.quickbooks_client_secret_configured) {
-      els.settingsQboSecretHint.className = 'field-hint is-ok';
-      els.settingsQboSecretHint.textContent = 'A client secret is currently saved. Leave blank to keep it; type a new one to replace it.';
-    } else {
-      els.settingsQboSecretHint.className = 'field-hint';
-      els.settingsQboSecretHint.textContent = 'No client secret saved yet.';
-    }
-  }
-  if (els.settingsTwilioTokenHint) {
-    if (settings.twilio_auth_token_configured) {
-      els.settingsTwilioTokenHint.className = 'field-hint is-ok';
-      els.settingsTwilioTokenHint.textContent = 'A Twilio Auth Token is currently saved. Leave blank to keep it; type a new one to replace it.';
-    } else {
-      els.settingsTwilioTokenHint.className = 'field-hint';
-      els.settingsTwilioTokenHint.textContent = 'No Twilio Auth Token saved yet. Texts go only to the labels listed under Recipients, and only after you approve each one.';
-    }
-  }
-  if (els.settingsOutputsPath) els.settingsOutputsPath.textContent = settings.outputs_path || '—';
-  // Programmatic (re)load: the form now mirrors the stored truth.
-  _settingsDirty = false;
-}
-
-async function loadSettingsIntoForm() {
-  setSettingsStatus('Loading…');
-  try {
-    const res = await fetch(`${BACKEND}/settings`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    cachedSettings = data;
-    applySettingsToForm(data);
-    setSettingsStatus('');
-  } catch (err) {
-    const msg = err && err.message ? err.message : String(err);
-    setSettingsStatus(/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg) ? 'Backend is not reachable.' : `Could not load settings: ${msg}`, 'err');
-  }
-}
-
-/* ============================================================ */
-/*   WORKSPACE VIEW MANAGER (v6.1) — exactly one view at a time  */
-/* ============================================================ */
-// Settings, Morning brief, Approvals and Audit are FULL-PAGE views that
-// each claim the chat pane's grid cell (.settings-view sets grid-column 2 /
-// grid-row 1). They used to open and close independently, which let two
-// contradictory states exist:
-//
-//   open Brief -> open Settings   => BOTH views visible, stacked in one cell
-//   ...then close Settings        => the close restored .operator-main while
-//                                    the Brief was STILL open. With cell
-//                                    (2,1) already taken by the Brief, the
-//                                    chat pane auto-placed into an implicit
-//                                    row 2 / column 1 — a 240px-wide composer
-//                                    under the rail — and the implicit row
-//                                    stole height from row 1, squeezing the
-//                                    Brief so only its first sections fit.
-//
-// One manager now owns the whole switch: every view is hidden, the requested
-// one is shown, and the chat pane is visible only when no view is. Views can
-// never disagree about who owns the cell.
-const WORKSPACE_VIEW_IDS = ['settings-view', 'brief-view', 'approvals-view',
-                            'audit-view', 'obligations-view'];
-let _activeWorkspaceView = null;
-
-// v6.9.5: unsaved settings edits are the one thing navigation may not
-// silently discard. Set by any input/change inside the settings form,
-// cleared when the form is (re)loaded from the backend or saved.
-let _settingsDirty = false;
-
-function _showWorkspaceView(id) {
-  // Leaving Settings with unsaved edits requires consent — EVERY route out
-  // (another view, Escape, New chat, a thread click) funnels through here,
-  // so the guard cannot be bypassed by one forgotten call site.
-  if (_activeWorkspaceView === 'settings-view' && id !== 'settings-view'
-      && _settingsDirty) {
-    if (!window.confirm('You have unsaved settings changes. Discard them and leave?')) {
-      return false;
-    }
-    _settingsDirty = false;              // consent given — they are gone
-  }
-  const main = document.querySelector('.operator-main');
+    const main = document.querySelector('.operator-main');
   for (const viewId of WORKSPACE_VIEW_IDS) {
     const el = document.getElementById(viewId);
     if (el) el.classList.toggle('hidden', viewId !== id);
@@ -3319,7 +3211,7 @@ function openSettings() {
   if (scroll) scroll.scrollTop = 0;
   loadSettingsIntoForm().then(() => { if (scroll) scroll.scrollTop = 0; });
   // Verified-state dots: neutral until proven this session.
-  _setKeyDot('settings-dot-anthropic', null);
+  _setKeyDot('settings-dot-openai', null);
   _setKeyDot('settings-dot-openai', null);
   _setKeyDot('settings-dot-drive', null);
   _setKeyDot('settings-dot-gmail', null);
@@ -3650,8 +3542,8 @@ function setOpenAIKeyState(configured) {
     if (els.socialRunBtn) { els.socialRunBtn.disabled = false; els.socialRunBtn.title = ''; }
   } else {
     show(els.openaiMissingBanner);
-    if (els.runBtn) { els.runBtn.disabled = true; els.runBtn.title = 'Configure your Anthropic API key in Settings first.'; }
-    if (els.socialRunBtn) { els.socialRunBtn.disabled = true; els.socialRunBtn.title = 'Configure your Anthropic API key in Settings first.'; }
+    if (els.runBtn) { els.runBtn.disabled = true; els.runBtn.title = 'Configure your OpenAI API key in Settings first.'; }
+    if (els.socialRunBtn) { els.socialRunBtn.disabled = true; els.socialRunBtn.title = 'Configure your OpenAI API key in Settings first.'; }
   }
 }
 
@@ -3664,7 +3556,7 @@ async function pollHealth() {
     setBackendStatus(res.ok);
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
-      setOpenAIKeyState(!!data.anthropic_key_loaded);
+      setOpenAIKeyState(!!data.openai_key_loaded);
       if (data.app_version) _applyVersion(data.app_version);
     }
   } catch (_) { setBackendStatus(false); }
@@ -5159,7 +5051,7 @@ const _OP_ERROR_FIXES = [
   { re: /quickbooks is not connected|client id\/secret are not set|connected to the (sandbox|production) environment/i,
     label: 'Open Settings',
     run: () => openSettings() },
-  { re: /anthropic_api_key is not set|openai_api_key is not set|api key is invalid|rejected the (api )?key/i,
+  { re: /openai_api_key is not set|api key is invalid|rejected the (api )?key/i,
     label: 'Open Settings',
     run: () => openSettings() },
 ];
@@ -7173,7 +7065,7 @@ function _wireKeyTest(btnId, statusId, endpoint, dotId) {
     } finally { btn.disabled = false; }
   });
 }
-_wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic', 'settings-dot-anthropic');
+_wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
 _wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
 // v7.0: Twilio — the test reads the Account resource; it never sends a text.
 _wireKeyTest('settings-test-twilio', 'settings-twilio-status', '/settings/test-twilio', 'settings-dot-twilio');

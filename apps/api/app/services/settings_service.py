@@ -35,14 +35,10 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "operator_email",
     "default_to_email",
     "company_name",
-    # Anthropic powers all agents/workflows; the OpenAI key remains only for
-    # voice-input transcription (Whisper — Anthropic has no transcription API).
-    "anthropic_api_key",
-    "anthropic_model",
-    "anthropic_research_model",
-    "anthropic_script_model",
+    # OpenAI powers Ridian intelligence, voice input, and read-aloud.
     "openai_api_key",
     "openai_model",
+    "openai_research_model",
     # v3.7: read-aloud (OpenAI TTS) — voice + model only; the key is the
     # existing openai_api_key. Allowlisted in speech_service at call time.
     "openai_tts_voice",
@@ -112,22 +108,18 @@ SETTABLE_KEYS: tuple[str, ...] = (
 # Secrets — never returned by the public view, and preserved-on-blank when
 # the GUI submits an empty field (so the renderer never round-trips them).
 SECRET_KEYS: frozenset[str] = frozenset({
-    "smtp_password", "openai_api_key", "anthropic_api_key",
+    "smtp_password", "openai_api_key",
     "quickbooks_client_secret", "twilio_auth_token",
 })
 
 PUBLIC_KEYS: tuple[str, ...] = tuple(k for k in SETTABLE_KEYS if k not in SECRET_KEYS)
 
 # Settings whose values we mirror into os.environ so SDKs that read env vars
-# directly (the Anthropic SDK reading ANTHROPIC_API_KEY, the OpenAI SDK
-# reading OPENAI_API_KEY for Whisper) see the value.
+# directly (the OpenAI SDK reading OPENAI_API_KEY) see the value.
 _SDK_ENV_MAP: dict[str, str] = {
-    "anthropic_api_key": "ANTHROPIC_API_KEY",
-    "anthropic_model": "ANTHROPIC_MODEL",
-    "anthropic_research_model": "ANTHROPIC_RESEARCH_MODEL",
-    "anthropic_script_model": "ANTHROPIC_SCRIPT_MODEL",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_model": "OPENAI_MODEL",
+    "openai_research_model": "OPENAI_RESEARCH_MODEL",
 }
 
 
@@ -276,9 +268,6 @@ def public_view() -> dict[str, Any]:
         return bool((s.get(k) or "").strip())
     out["smtp_password_configured"] = bool(s.get("smtp_password"))
     out["openai_api_key_configured"] = _set("openai_api_key")
-    out["anthropic_api_key_configured"] = bool(
-        _set("anthropic_api_key") or (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-    )
     out["quickbooks_client_secret_configured"] = _set("quickbooks_client_secret")
     out["twilio_auth_token_configured"] = _set("twilio_auth_token")
     return out
@@ -313,13 +302,7 @@ def test_api_key(provider: str) -> dict[str, Any]:
     import httpx
 
     s = load_settings()
-    if provider == "anthropic":
-        stored = (s.get("anthropic_api_key") or "").strip()
-        env = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-        url = "https://api.anthropic.com/v1/models"
-        headers_for = lambda key: {"x-api-key": key, "anthropic-version": "2023-06-01"}  # noqa: E731
-        label = "Anthropic"
-    elif provider == "openai":
+    if provider == "openai":
         stored = (s.get("openai_api_key") or "").strip()
         env = (os.getenv("OPENAI_API_KEY") or "").strip()
         url = "https://api.openai.com/v1/models"

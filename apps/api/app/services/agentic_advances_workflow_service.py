@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..agents import load_prompt
-from .anthropic_runtime import run_text_agent
+from .provider_runtime import run_text_agent
 from .artifact_service import create_run_folder, write_artifact
 from .settings_service import apply_to_environment
 
