@@ -140,7 +140,7 @@ async def run_text_agent(
         "store": False,
     }
     if effort:
-        kwargs["reasoning"] = {"effort": effort}
+        kwargs["reasoning"] = {"effort": "high" if effort == "high" else "medium"}
     if use_web_search:
         kwargs["tools"] = [{"type": "web_search"}]
 
