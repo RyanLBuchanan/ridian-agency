@@ -43,7 +43,7 @@ from .runtime_paths import guard_real_state_write
 
 log = logging.getLogger("ridian.parked_runs")
 
-VERSION = 1
+VERSION = 2
 PARKED = "parked"
 RESUMING = "resuming"
 RUNNING = "running"          # v7.8: mid-step — a restart expires it
@@ -137,7 +137,10 @@ def load(operation_id: str) -> Optional[dict]:
         log.warning("parked_runs.unreadable id=%s type=%s", operation_id, type(exc).__name__)
         return None
     record = data.get("record") if isinstance(data, dict) else None
-    if (data.get("version") != VERSION
+    version = data.get("version")
+    if version == 1:
+        data["provider"] = "anthropic"
+    if (version not in (1, VERSION)
             or data.get("operation_id") != operation_id
             or data.get("state") not in _STATES
             or not isinstance(record, dict) or record.get("id") != operation_id
