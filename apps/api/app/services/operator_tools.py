@@ -5,7 +5,7 @@ effect (file written, draft created, upload completed) or it doesn't ship.
 No tool whose output is 'here's a prompt.'"
 
 These tools are decorated with ``@planner_tool`` — a thin wrapper around the
-Anthropic SDK's ``beta_async_tool`` that (a) JSON-encodes each tool's dict
+Ridian OpenAI runtime's function-tool adapter that (a) JSON-encodes each tool's dict
 return for the model and (b) preserves the tool's signature/docstring so the
 input schema is generated exactly as the OpenAI Agents SDK used to. Tools read
 the active run's ``OperatorContext`` from a task-local contextvar
@@ -37,8 +37,6 @@ import json
 import logging
 from pathlib import Path
 
-from anthropic import beta_async_tool
-
 import re as _re
 
 from ..agents import load_prompt, model_supports_effort, research_model, script_model
@@ -63,11 +61,10 @@ from . import (
 from datetime import datetime
 
 from . import sms_service
-from .anthropic_runtime import (
+from .runtime_common import (
     SEARCH_COST_USD,
     WEB_SEARCH_TOOL,
     RunBudgetExceeded,
-    estimate_cost_usd,
 )
 from . import openai_runtime, provider_runtime
 from .artifact_service import write_artifact
@@ -88,7 +85,7 @@ _TOOL_CALL_DEPTH = contextvars.ContextVar("ridian_tool_depth", default=0)
 
 
 def planner_tool(fn):
-    """Register an async tool with the Anthropic tool runner.
+    """Register an async tool with the OpenAI planner.
 
     The wrapped function keeps its exact signature and Google-style docstring
     (the SDK generates the input schema from both — same behavior as the old
@@ -118,7 +115,7 @@ def planner_tool(fn):
             return result
         return json.dumps(result, default=str)
 
-    return beta_async_tool(wrapper)
+    return openai_runtime.tool_from_callable(wrapper)
 
 
 # Files the planner is allowed to write via the generic write_file tool.
@@ -141,7 +138,7 @@ _WRITE_FILE_ALLOWLIST: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # Internal sub-agents (not exposed to the planner directly)
 # ---------------------------------------------------------------------------
-# Each is a system prompt run one-shot via anthropic_runtime.run_text_agent;
+# Each is a system prompt run one-shot via provider_runtime.run_text_agent;
 # the research/packet ones attach the server-side web_search tool. The planner
 # never sees web search directly — same encapsulation as before.
 
