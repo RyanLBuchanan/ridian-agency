@@ -34,8 +34,8 @@ from ..agents import ALLOWED_EFFORT_LEVELS, ALLOWED_RESEARCH_MODELS, default_mod
 from ..agents.planner_agent import build_planner_system
 from . import (gmail_service, google_drive_service, memory_service,
                operation_log_service, parked_runs, state_store)
-from .anthropic_runtime import date_line
-from . import anthropic_runtime, openai_runtime
+from .runtime_common import date_line
+from . import openai_runtime
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
@@ -90,7 +90,7 @@ class _OperationSession:
     system: str          # the planner system prompt (tool list spliced in)
     input_list: list     # mirrored Anthropic messages — full conversation history
     upload_state_line: str
-    provider: str = "anthropic"
+    provider: str = "openai"
 
 
 _SESSIONS: dict[str, _OperationSession] = {}
@@ -1555,7 +1555,7 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     session = _OperationSession(
         operator=operator, folder=folder, system=build_planner_system(),
         input_list=[], upload_state_line=upload_state_line,
-        provider="openai" if get_effective_value("OPENAI_API_KEY") else "anthropic",
+        provider="openai",
     )
     _SESSIONS[record["id"]] = session
     # v7.8: on disk from the start, so a run the app closes mid-step is
