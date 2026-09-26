@@ -196,7 +196,6 @@ const SOCIAL_FIELD_MAP = {
 
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
-  'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
   'openai_model', 'openai_research_model', 'openai_tts_voice', 'openai_tts_model',
   'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
@@ -209,7 +208,7 @@ const SETTINGS_FIELDS = [
   'twilio_account_sid', 'twilio_from_number', 'sms_recipient_allowlist',
   'owner_workspace_url',
 ];
-const SETTINGS_SECRET_FIELDS = ['anthropic_api_key', 'openai_api_key', 'smtp_password',
+const SETTINGS_SECRET_FIELDS = ['openai_api_key', 'smtp_password',
   'quickbooks_client_secret', 'twilio_auth_token'];
 // Bool fields are stored on the backend as "true"/"false" strings but rendered
 // as checkboxes here. Handled separately because FormData omits unchecked
@@ -443,7 +442,7 @@ const els = {
   settingsTestEmailBtn: document.getElementById('settings-test-email-btn'),
   settingsStatus: document.getElementById('settings-status'),
   settingsPasswordHint: document.getElementById('settings-password-hint'),
-  settingsAnthropicKeyHint: document.getElementById('settings-anthropic-key-hint'),
+  settingsAnthropicKeyHint: document.getElementById('settings-openai-key-hint'),
   settingsQboSecretHint: document.getElementById('settings-qbo-secret-hint'),
   settingsTwilioTokenHint: document.getElementById('settings-twilio-token-hint'),
   settingsOpenaiKeyHint: document.getElementById('settings-openai-key-hint'),
@@ -3319,7 +3318,7 @@ function openSettings() {
   if (scroll) scroll.scrollTop = 0;
   loadSettingsIntoForm().then(() => { if (scroll) scroll.scrollTop = 0; });
   // Verified-state dots: neutral until proven this session.
-  _setKeyDot('settings-dot-anthropic', null);
+  _setKeyDot('settings-dot-openai', null);
   _setKeyDot('settings-dot-openai', null);
   _setKeyDot('settings-dot-drive', null);
   _setKeyDot('settings-dot-gmail', null);
@@ -7173,7 +7172,7 @@ function _wireKeyTest(btnId, statusId, endpoint, dotId) {
     } finally { btn.disabled = false; }
   });
 }
-_wireKeyTest('settings-test-anthropic', 'settings-test-anthropic-status', '/settings/test-anthropic', 'settings-dot-anthropic');
+_wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-anthropic', 'settings-dot-openai');
 _wireKeyTest('settings-test-openai', 'settings-test-openai-status', '/settings/test-openai', 'settings-dot-openai');
 // v7.0: Twilio — the test reads the Account resource; it never sends a text.
 _wireKeyTest('settings-test-twilio', 'settings-twilio-status', '/settings/test-twilio', 'settings-dot-twilio');
