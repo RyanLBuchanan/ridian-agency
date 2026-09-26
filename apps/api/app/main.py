@@ -488,6 +488,7 @@ class SettingsView(BaseModel):
     anthropic_script_model: str = ""
     anthropic_api_key_configured: bool = False
     openai_model: str = ""
+    openai_research_model: str = ""
     openai_tts_voice: str = ""
     openai_tts_model: str = ""
     openai_api_key_configured: bool = False
@@ -558,6 +559,7 @@ class SettingsUpdate(BaseModel):
     anthropic_script_model: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None
+    openai_research_model: str | None = None
     openai_tts_voice: str | None = None
     openai_tts_model: str | None = None
     smtp_host: str | None = None
