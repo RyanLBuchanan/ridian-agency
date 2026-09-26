@@ -69,7 +69,7 @@ from .anthropic_runtime import (
     RunBudgetExceeded,
     estimate_cost_usd,
 )
-from . import anthropic_runtime, openai_runtime
+from . import provider_runtime
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -150,20 +150,7 @@ _SCRIPT_PROMPT = "operator_script_prompt.txt"
 _PACKET_PROMPT = "operator_research_packet_prompt.txt"
 
 
-async def _run_text_agent(*args, **kwargs):
-    """Provider-neutral specialist dispatch.
-
-    OpenAI is primary when configured; Anthropic remains a compatibility
-    fallback. The public result contract stays TextAgentResult-compatible so
-    grounding and cost gates above this layer do not change.
-    """
-    settings_service.apply_to_environment()
-    if settings_service.get_effective_value("OPENAI_API_KEY"):
-        model = kwargs.get("model")
-        if model and str(model).startswith("claude-"):
-            kwargs.pop("model", None)
-        return await openai_runtime.run_text_agent(*args, **kwargs)
-    return await anthropic_runtime.run_text_agent(*args, **kwargs)
+_run_text_agent = provider_runtime.run_text_agent
 
 
 # ---------------------------------------------------------------------------
