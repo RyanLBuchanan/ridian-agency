@@ -469,7 +469,7 @@ def _effort_note(operator: OperatorContext, model: str) -> str:
 
 # Deterministic estimate constants — no model call builds the plan (instant,
 # free, can't hallucinate the numbers). Per-search and per-token rates live in
-# anthropic_runtime (SEARCH_COST_USD / estimate_cost_usd — one shared math for
+# OpenAI runtime (SEARCH_COST_USD / estimate_cost_usd — one shared math for
 # the plan, the ceiling, the reconciliation, and failure forensics); dynamic-
 # filtering code execution is free alongside web search.
 #
@@ -513,7 +513,7 @@ def _reconciliation(res, model: str) -> str:
 # record["cost_ceiling_usd"] is snapshotted at intake (operator_service) and
 # record["spend_usd"] accumulates planner turns + sub-agent calls + FAILED
 # calls' partials. Layer 1 (here): billable tools refuse to start once the run
-# is at/over the fence. Layer 2 (anthropic_runtime): the live mid-stream guard
+# is at/over the fence. Layer 2 (OpenAI runtime): the live mid-stream guard
 # aborts a call in flight the moment observed spend crosses it.
 
 
@@ -549,7 +549,7 @@ def _add_spend(operator: OperatorContext, model: str, res) -> None:
 
 
 def _add_partial_spend(operator: OperatorContext, exc: Exception) -> str:
-    """Fold a FAILED call's pre-death spend — attached by anthropic_runtime as
+    """Fold a FAILED call's pre-death spend — attached by OpenAI runtime as
     ``ridian_partial`` — into the run's ledger. Failed runs still bill for the
     searches and tokens that ran; returns a sentence for the failed step so
     that money is STATED, never silently swallowed ("" when unknown)."""
@@ -673,7 +673,7 @@ async def web_research(
 ) -> dict:
     """Run live web research on ``topic`` and return a finished sources packet.
 
-    Uses Anthropic's server-side web search through an internal sub-agent. The
+    Uses OpenAI hosted web search through an internal sub-agent. The
     returned ``sources_md`` is a Markdown sources packet ready to be passed
     to ``write_sources_packet`` or ``write_audiobook_script``. Source URLs
     are cited; confidence flags are included.
