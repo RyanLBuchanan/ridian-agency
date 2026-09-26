@@ -88,7 +88,7 @@ class _OperationSession:
     operator: OperatorContext
     folder: Path
     system: str          # the planner system prompt (tool list spliced in)
-    input_list: list     # mirrored Anthropic messages — full conversation history
+    input_list: list     # replayable OpenAI Responses conversation history
     upload_state_line: str
     provider: str = "openai"
 
@@ -482,101 +482,42 @@ def _build_planner_input(command: str, upload_state_line: str) -> str:
 
 
 async def _run_turn(session: _OperationSession, messages: list) -> None:
-    """Run one provider-neutral planner turn.
-
-    New sessions prefer OpenAI. Durable sessions created before this migration
-    default to Anthropic so an upgrade never invalidates a parked approval or
-    question. Both paths execute the SAME registered Ridian tools and gates.
-    """
+    """Run one OpenAI planner turn through Ridian's existing tools and gates."""
     set_current_operator(session.operator)
-    session.operator._ridian_provider = session.provider
-
-    if session.provider == "openai":
-        result = await openai_runtime.run_planner_turn(
-            system=session.system,
-            input_items=messages,
-            tools=PLANNER_TOOLS,
-            max_turns=_MAX_PLANNER_TURNS,
-            effort="medium",
-        )
-        session.input_list = result["items"]
-        if result.get("text"):
-            session.operator.record["receipt"] = result["text"]
-            await session.operator.emit({
-                "event": "message", "data": {"text": result["text"]}})
-        for name in result.get("tool_names", []):
-            await session.operator.emit({
-                "event": "message",
-                "data": {"text": f"Planner → calling tool: {name}"},
-            })
-        # Present one aggregate usage object to the existing spend fence.
-        usage = type("_Usage", (), {
-            "input_tokens": int(result.get("tokens_in", 0) or 0),
-            "output_tokens": int(result.get("tokens_out", 0) or 0),
-        })()
-        msg = type("_PlannerMessage", (), {
-            "usage": usage,
-            "stop_reason": "end_turn" if result.get("completed") else "max_turns",
-        })()
-        if await _absorb_planner_spend(session.operator, msg):
-            return None
-        if _DRAINING and not result.get("completed"):
-            return CHECKPOINTED
-        if not result.get("completed"):
-            text = f"Planner stopped after {_MAX_PLANNER_TURNS} turns without completing."
-            session.operator.record["errors"].append(text)
-            await session.operator.emit_error(text)
+    session.operator._ridian_provider = "openai"
+    result = await openai_runtime.run_planner_turn(
+        system=session.system,
+        input_items=messages,
+        tools=PLANNER_TOOLS,
+        max_turns=_MAX_PLANNER_TURNS,
+        effort="medium",
+    )
+    session.input_list = result["items"]
+    if result.get("text"):
+        session.operator.record["receipt"] = result["text"]
+        await session.operator.emit({
+            "event": "message", "data": {"text": result["text"]}})
+    for name in result.get("tool_names", []):
+        await session.operator.emit({
+            "event": "message",
+            "data": {"text": f"Planner → calling tool: {name}"},
+        })
+    usage = type("_Usage", (), {
+        "input_tokens": int(result.get("tokens_in", 0) or 0),
+        "output_tokens": int(result.get("tokens_out", 0) or 0),
+    })()
+    msg = type("_PlannerMessage", (), {
+        "usage": usage,
+        "stop_reason": "end_turn" if result.get("completed") else "max_turns",
+    })()
+    if await _absorb_planner_spend(session.operator, msg):
         return None
-
-    # Compatibility path for Anthropic sessions created before/alongside the
-    # migration. This is intentionally the prior runner behavior.
-    client = anthropic_runtime.get_client()
-    restarts = 0
-    turn_no = 0
-    turn_started = time.monotonic()
-    while True:
-        runner = client.beta.messages.tool_runner(
-            model=default_model(),
-            max_tokens=16000,
-            system=session.system,
-            tools=PLANNER_TOOLS,
-            messages=messages,
-            max_iterations=_MAX_PLANNER_TURNS,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "medium"},
-        )
-        last = None
-        async for message in runner:
-            last = message
-            turn_no += 1
-            u = getattr(message, "usage", None)
-            log.info(
-                "planner.turn provider=anthropic n=%d ms=%d in=%d out=%d stop=%s",
-                turn_no, int((time.monotonic() - turn_started) * 1000),
-                int(getattr(u, "input_tokens", 0) or 0),
-                int(getattr(u, "output_tokens", 0) or 0),
-                getattr(message, "stop_reason", ""),
-            )
-            messages.append({"role": "assistant", "content": message.content})
-            tool_response = await runner.generate_tool_call_response()
-            if tool_response is not None:
-                messages.append(tool_response)
-            await _surface_planner_message(session.operator, message)
-            turn_started = time.monotonic()
-            if await _absorb_planner_spend(session.operator, message):
-                session.input_list = messages
-                return None
-            if _DRAINING and tool_response is not None:
-                session.input_list = messages
-                return CHECKPOINTED
-        if last is None or last.stop_reason != "pause_turn" or restarts >= 3:
-            break
-        if _DRAINING:
-            session.input_list = messages
-            return CHECKPOINTED
-        restarts += 1
-
-    session.input_list = messages
+    if _DRAINING and not result.get("completed"):
+        return CHECKPOINTED
+    if not result.get("completed"):
+        text = f"Planner stopped after {_MAX_PLANNER_TURNS} turns without completing."
+        session.operator.record["errors"].append(text)
+        await session.operator.emit_error(text)
     return None
 
 
@@ -875,10 +816,8 @@ async def _absorb_planner_spend(operator: OperatorContext, message) -> bool:
     """
     rec = operator.record
     u = getattr(message, "usage", None)
-    provider = getattr(operator, "_ridian_provider", "anthropic")
-    runtime = openai_runtime if provider == "openai" else anthropic_runtime
-    model = openai_runtime.default_model() if provider == "openai" else default_model()
-    turn_cost = runtime.estimate_cost_usd(
+    turn_cost = openai_runtime.estimate_cost_usd(
+        openai_runtime.default_model(),
         model,
         int(getattr(u, "input_tokens", 0) or 0),
         int(getattr(u, "output_tokens", 0) or 0),
@@ -1136,7 +1075,7 @@ def _session_from_payload(payload: dict) -> "_OperationSession":
         operator=operator, folder=folder, system=payload["system"],
         input_list=payload["input_list"],
         upload_state_line=str(payload.get("upload_state_line") or ""),
-        provider=str(payload.get("provider") or "anthropic"))
+        provider="openai")
 
 
 def _mark_expired(op: dict, why: str, message: str, now: str) -> None:
@@ -1383,7 +1322,7 @@ async def resume_checkpointed(operation_id: str) -> dict:
         return {}
     apply_to_environment()
     record = session.operator.record
-    required_key = "OPENAI_API_KEY" if session.provider == "openai" else "ANTHROPIC_API_KEY"
+    required_key = "OPENAI_API_KEY"
     if not get_effective_value(required_key):
         log.warning("operation.resume_provider_missing id=%s provider=%s", operation_id, session.provider)
         return {}
@@ -1478,9 +1417,9 @@ async def run_operation(*, command: str, emit: EmitFn, project_id: str = "",
     from the Owner Workspace: it STAMPS the record (source + job id) and
     changes nothing else — same planner, tools, gates, ceilings, allowlists."""
     apply_to_environment()
-    if not (get_effective_value("OPENAI_API_KEY") or get_effective_value("ANTHROPIC_API_KEY")):
+    if not get_effective_value("OPENAI_API_KEY"):
         await emit({"event": "error", "data": {
-            "message": "No AI provider is configured. Open Settings and add an OpenAI API key (recommended) or Anthropic API key."
+            "message": "OpenAI is not configured. Open Settings and add your OpenAI API key."
         }})
         return {}
     if _DRAINING:
@@ -1612,9 +1551,8 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
         return {}
     required_key = "OPENAI_API_KEY" if session.provider == "openai" else "ANTHROPIC_API_KEY"
     if not get_effective_value(required_key):
-        label = "OpenAI" if session.provider == "openai" else "Anthropic"
         await emit({"event": "error", "data": {
-            "message": f"{label} is required to continue this run. Add its API key in Settings and answer again."
+            "message": "OpenAI is required to continue this run. Add its API key in Settings and answer again."
         }})
         return {}
 
