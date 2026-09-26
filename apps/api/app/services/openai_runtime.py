@@ -81,7 +81,6 @@ def _tool_specs(tools: list) -> list[dict]:
             "name": tool.name,
             "description": d.get("description") or "",
             "parameters": d.get("input_schema") or {"type": "object", "properties": {}},
-            "strict": False,
         })
     return specs
 
