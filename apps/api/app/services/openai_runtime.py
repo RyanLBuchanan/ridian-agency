@@ -137,7 +137,6 @@ async def run_text_agent(
         "model": effective_model,
         "instructions": f"{date_line()}\n\n{system}",
         "input": user_input,
-        "max_output_tokens": max_tokens,
         "store": False,
     }
     if effort:
@@ -199,7 +198,6 @@ async def run_planner_turn(*, system: str, input_items: list, tools: list,
             input=items,
             tools=_tool_specs(tools),
             reasoning={"effort": effort},
-            max_output_tokens=16000,
             store=False,
         )
         t_in, t_out = _usage(response)
