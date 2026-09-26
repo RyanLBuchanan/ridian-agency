@@ -5,7 +5,7 @@ experience is one natural-language command surface: describe the outcome you
 need, then follow the planner's tool use, questions, approvals, artifacts, and
 final receipt in one operation timeline.
 
-The backend uses Python, FastAPI, the official Anthropic SDK, and Claude's tool
+The backend uses Python, FastAPI, the OpenAI Responses API, and Claude's tool
 runner. Electron provides the Windows desktop experience. Business data and
 operation history remain local; connected Google and QuickBooks capabilities
 use their respective cloud APIs.
@@ -17,7 +17,7 @@ Operator. Normal work starts in the Operator composer, not a workflow picker.
 
 ## What you get
 
-- **One Ridian Operator** backed by a general-purpose Claude planner that
+- **One Ridian Operator** backed by a general-purpose OpenAI planner that
   dynamically selects registered business tools.
 - **Observable operations** with an execution timeline, resumable questions,
   approval gates, receipts, generic artifacts, and one Operations history.
@@ -165,11 +165,13 @@ this README.
 You don't need to edit environment variables for normal use. Launch the
 app, click **Settings** in the top-right header, fill in:
 
-- **AI provider — Anthropic** — Anthropic API key (required; get one at
-  <https://console.anthropic.com/settings/keys>), model (defaults to
-  `claude-opus-4-8`).
-- **Voice input (OpenAI Whisper)** — optional OpenAI API key, used ONLY
-  for microphone transcription. Everything else runs on Claude.
+- **AI provider — OpenAI** — OpenAI API key (recommended/primary). New
+  Operator runs and specialist agents use the OpenAI Responses API.
+- **Anthropic compatibility** — optional Anthropic API key. Existing parked
+  Anthropic runs remain resumable, and Anthropic can serve as fallback when
+  no OpenAI key is configured.
+- **Voice input / read-aloud** — the OpenAI key also powers the existing
+  transcription and speech features.
 - **Operator profile** — your name, email, company name.
 - **Default email recipient** — where the Approve & Send button delivers.
 - **SMTP credentials** — only needed for the email send button.
@@ -266,7 +268,7 @@ presentation_agent -> slide_outline.md
 email_agent        -> draft_email.md
 ```
 
-The pipeline runs as five sequential Claude calls; each step's output is
+The pipeline runs as five sequential model calls; each step's output is
 written to disk before the next begins.
 
 ## Files that must never be committed
