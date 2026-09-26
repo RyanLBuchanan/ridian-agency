@@ -1,4 +1,4 @@
-"""Agent definitions for Ridian Agency (Anthropic-powered).
+"""Agent definitions for Ridian Agency (provider-neutral).
 
 An "agent" here is just a named system prompt — execution goes through
 ``services.anthropic_runtime.run_text_agent`` (one-shot specialists) or the
@@ -21,6 +21,7 @@ def load_prompt(name: str) -> str:
 
 
 def default_model() -> str:
+    """Legacy Anthropic planner model. New runs use openai_runtime.default_model()."""
     return os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
 
