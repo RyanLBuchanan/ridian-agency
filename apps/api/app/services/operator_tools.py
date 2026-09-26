@@ -69,7 +69,7 @@ from .anthropic_runtime import (
     RunBudgetExceeded,
     estimate_cost_usd,
 )
-from . import provider_runtime
+from . import openai_runtime, provider_runtime
 from .artifact_service import write_artifact
 from .operator_context import (
     ALLOWED_PROPOSAL_KINDS,
@@ -434,6 +434,8 @@ def _effective_research_model(operator: OperatorContext) -> str:
     """The composer's per-run override (allowlisted at intake by
     operator_service._sanitize_research_model), else the Settings/env
     default. Research sub-agents only — the planner never reads this."""
+    if settings_service.get_effective_value("OPENAI_API_KEY"):
+        return openai_runtime.research_model()
     return operator.record.get("research_model_override") or research_model()
 
 
@@ -441,6 +443,8 @@ def _effective_script_model(operator: OperatorContext) -> str:
     """Per-run Script selector override, else the Settings/env default
     (which itself falls back to the planner model, preserving the script
     writer's historical behavior)."""
+    if settings_service.get_effective_value("OPENAI_API_KEY"):
+        return openai_runtime.default_model()
     return operator.record.get("script_model_override") or script_model()
 
 
@@ -540,8 +544,11 @@ def _add_spend(operator: OperatorContext, model: str, res) -> None:
     """Fold a completed sub-agent call into the run's dollar ledger."""
     operator.record["spend_usd"] = round(
         float(operator.record.get("spend_usd", 0.0) or 0.0)
-        + estimate_cost_usd(model, res.tokens_in, res.tokens_out,
-                            searches=res.searches), 4)
+        + (openai_runtime.estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                                           searches=res.searches)
+           if str(model).startswith("gpt-")
+           else estimate_cost_usd(model, res.tokens_in, res.tokens_out,
+                                  searches=res.searches)), 4)
 
 
 def _add_partial_spend(operator: OperatorContext, exc: Exception) -> str:
