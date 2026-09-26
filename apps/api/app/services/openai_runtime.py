@@ -26,13 +26,12 @@ log = logging.getLogger("ridian.openai")
 _DEFAULT_MODEL = "gpt-5.6-sol"
 _DEFAULT_RESEARCH_MODEL = "gpt-5.6-terra"
 
+# Deliberately conservative until OpenAI exposes a stable machine-readable
+# price source in this app. A high estimate protects Ridian's spend fence.
 _MODEL_RATES_PER_MTOK: dict[str, tuple[float, float]] = {
-    "gpt-5.6-sol": (4.0, 20.0),
-    "gpt-5.6-terra": (2.0, 12.0),
-    "gpt-5.6-luna": (0.20, 1.20),
-    "gpt-5.6": (4.0, 20.0),
+    "gpt-5.6": (10.0, 50.0),
 }
-_TOP_TIER_RATES = (4.0, 20.0)
+_TOP_TIER_RATES = (10.0, 50.0)
 
 _client: AsyncOpenAI | None = None
 _client_key: str | None = None
