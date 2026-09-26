@@ -132,7 +132,7 @@ async def run_text_agent(
 ):
     """One-shot Ridian sub-agent on the Responses API."""
     client = get_client()
-    effective_model = model or research_model() if use_web_search else model or default_model()
+    effective_model = model or (research_model() if use_web_search else default_model())
     kwargs: dict[str, Any] = {
         "model": effective_model,
         "instructions": f"{date_line()}\n\n{system}",
