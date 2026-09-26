@@ -43,6 +43,7 @@ SETTABLE_KEYS: tuple[str, ...] = (
     "anthropic_script_model",
     "openai_api_key",
     "openai_model",
+    "openai_research_model",
     # v3.7: read-aloud (OpenAI TTS) — voice + model only; the key is the
     # existing openai_api_key. Allowlisted in speech_service at call time.
     "openai_tts_voice",
@@ -128,6 +129,7 @@ _SDK_ENV_MAP: dict[str, str] = {
     "anthropic_script_model": "ANTHROPIC_SCRIPT_MODEL",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_model": "OPENAI_MODEL",
+    "openai_research_model": "OPENAI_RESEARCH_MODEL",
 }
 
 
