@@ -1606,6 +1606,13 @@ async def continue_operation(*, operation_id: str, answer: str, emit: EmitFn) ->
     if session is None:
         await emit({"event": "expired", "data": expire_run(operation_id, why)})
         return {}
+    required_key = "OPENAI_API_KEY" if session.provider == "openai" else "ANTHROPIC_API_KEY"
+    if not get_effective_value(required_key):
+        label = "OpenAI" if session.provider == "openai" else "Anthropic"
+        await emit({"event": "error", "data": {
+            "message": f"{label} is required to continue this run. Add its API key in Settings and answer again."
+        }})
+        return {}
 
     async with _session_lock(operation_id):
         operator = session.operator
