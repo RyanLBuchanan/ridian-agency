@@ -1383,6 +1383,10 @@ async def resume_checkpointed(operation_id: str) -> dict:
         return {}
     apply_to_environment()
     record = session.operator.record
+    required_key = "OPENAI_API_KEY" if session.provider == "openai" else "ANTHROPIC_API_KEY"
+    if not get_effective_value(required_key):
+        log.warning("operation.resume_provider_missing id=%s provider=%s", operation_id, session.provider)
+        return {}
     emit = _resume_emit(record)
     session.operator.emit = emit
     parked_runs.save(session, parked_runs.RUNNING)
