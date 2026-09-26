@@ -197,7 +197,7 @@ const SOCIAL_FIELD_MAP = {
 const SETTINGS_FIELDS = [
   'operator_name', 'operator_email', 'default_to_email', 'company_name',
   'anthropic_model', 'anthropic_research_model', 'anthropic_script_model',
-  'openai_model', 'openai_tts_voice', 'openai_tts_model',
+  'openai_model', 'openai_research_model', 'openai_tts_voice', 'openai_tts_model',
   'smtp_host', 'smtp_port', 'smtp_username', 'smtp_from_email',
   'google_drive_root_folder_id',
   'operator_run_cost_ceiling_usd',
