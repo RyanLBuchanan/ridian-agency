@@ -233,7 +233,13 @@ async def run_text_agent(
     # but Anthropic server-side search cannot be silently replaced by model
     # memory masquerading as live research.
     import os
-    if os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
+    openai_active = False
+    try:
+        from .operator_context import current_operator
+        openai_active = current_operator().record.get("planner_provider") == "openai"
+    except (LookupError, RuntimeError, AttributeError):
+        openai_active = False
+    if openai_active:
         if use_web_search:
             raise RuntimeError(
                 "Live research unavailable: Anthropic web-search backend is "
