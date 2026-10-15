@@ -46,7 +46,7 @@ async def execute_registered_call(tool_by_name: dict, name: str, arguments: str)
 
 async def run_openai_planner(
     *, system: str, messages: list[dict], tools: list[Any],
-    model: str, max_turns: int = 24, on_turn=None, on_tool=None, on_step=None,
+    model: str, api_key: str | None = None, max_turns: int = 24, on_turn=None, on_tool=None, on_step=None,
 ) -> tuple[str, list[dict]]:
     """Run bounded OpenAI Chat Completions tool loop, returning history.
 
@@ -54,7 +54,7 @@ async def run_openai_planner(
     can enforce cost limits; on_tool(name, args) is called before execution
     for cancellation/approval policy. Exceptions propagate (fail closed).
     """
-    client = AsyncOpenAI()
+    client = AsyncOpenAI(api_key=api_key)
     history = [{"role": "system", "content": system}, *messages]
     specs = openai_tool_specs(tools)
     registry = {tool.name: tool for tool in tools}
