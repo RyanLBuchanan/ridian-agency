@@ -253,7 +253,8 @@ async def run_text_agent(
             selected = model
         prompt_text = (user_input if isinstance(user_input, str)
                        else str(user_input))
-        response = await AsyncOpenAI().chat.completions.create(
+        from .settings_service import get_effective_value
+        response = await AsyncOpenAI(api_key=get_effective_value("OPENAI_API_KEY")).chat.completions.create(
             model=selected,
             messages=[{"role": "system", "content": f"{date_line()}\\n\\n{system}"},
                       {"role": "user", "content": prompt_text}],
