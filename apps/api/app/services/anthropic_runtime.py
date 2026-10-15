@@ -228,6 +228,45 @@ async def run_text_agent(
     and logs an ``anthropic.run_failed`` line: failed runs still bill for what
     ran, so the ledger must show it even when the completion log never fires.
     """
+    # A cancelled Anthropic account must never be used by an OpenAI operation.
+    # Preserve source provenance: OpenAI text generation is supported here,
+    # but Anthropic server-side search cannot be silently replaced by model
+    # memory masquerading as live research.
+    import os
+    if os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
+        if use_web_search:
+            raise RuntimeError(
+                "Live research unavailable: Anthropic web-search backend is "
+                "disabled and no verified OpenAI search adapter is configured. "
+                "Use existing read_url with an explicit source instead."
+            )
+        from openai import AsyncOpenAI
+        started_openai = time.monotonic()
+        selected = (os.environ.get("OPENAI_MODEL") or "gpt-4.1-mini").strip()
+        if model and model.startswith(("gpt-", "o1", "o3", "o4")):
+            selected = model
+        prompt_text = (user_input if isinstance(user_input, str)
+                       else str(user_input))
+        response = await AsyncOpenAI().chat.completions.create(
+            model=selected,
+            messages=[{"role": "system", "content": f"{date_line()}\\n\\n{system}"},
+                      {"role": "user", "content": prompt_text}],
+        )
+        usage = response.usage
+        tin = int(getattr(usage, "prompt_tokens", 0) or 0)
+        tout = int(getattr(usage, "completion_tokens", 0) or 0)
+        estimated = (tin * 10 + tout * 50) / 1_000_000
+        if cost_ceiling is not None and spent_usd + estimated > cost_ceiling:
+            raise RunBudgetExceeded("OpenAI text-agent estimate exceeded run ceiling")
+        answer = response.choices[0].message.content or ""
+        if return_stats:
+            return TextAgentResult(
+                text=answer, searches=0, restarts=0,
+                elapsed_seconds=time.monotonic() - started_openai,
+                tokens_in=tin, tokens_out=tout,
+            )
+        return answer
+
     client = get_client()
     effective_model = model or default_model()
     kwargs: dict = {
