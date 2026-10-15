@@ -4838,6 +4838,14 @@ function _opSetStatusDot(kind) {
       // v7.7: the run's state is not known and its folder could not be read.
       kind === 'unknown'   ? 'Could not load run' :
       'Idle';
+    // Provenance comes from the backend execution record, never model prose.
+    const rec = operatorState.finalRecord;
+    if (rec && rec.planner_provider && ['completed', 'partial', 'failed'].includes(kind)) {
+      const provider = rec.planner_provider === 'openai' ? 'OpenAI'
+        : rec.planner_provider === 'anthropic' ? 'Anthropic' : 'Unknown';
+      const model = typeof rec.planner_model === 'string' ? rec.planner_model : '';
+      OPERATOR.statusLabel.textContent += ' · ' + provider + (model ? ' (' + model + ')' : '');
+    }
   }
 }
 
