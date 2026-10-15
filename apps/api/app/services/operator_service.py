@@ -526,7 +526,8 @@ async def _run_openai_turn(session: _OperationSession, messages: list):
 
     receipt, history = await run_openai_planner(
         system=session.system, messages=messages, tools=PLANNER_TOOLS,
-        model=model, max_turns=_MAX_PLANNER_TURNS,
+        model=model, api_key=get_effective_value("OPENAI_API_KEY"),
+        max_turns=_MAX_PLANNER_TURNS,
         on_turn=on_turn, on_tool=on_tool, on_step=on_step,
     )
     session.input_list = history
