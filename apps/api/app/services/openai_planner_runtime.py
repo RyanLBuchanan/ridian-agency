@@ -46,7 +46,7 @@ async def execute_registered_call(tool_by_name: dict, name: str, arguments: str)
 
 async def run_openai_planner(
     *, system: str, messages: list[dict], tools: list[Any],
-    model: str, max_turns: int = 24, on_turn=None, on_tool=None,
+    model: str, max_turns: int = 24, on_turn=None, on_tool=None, on_step=None,
 ) -> tuple[str, list[dict]]:
     """Run bounded OpenAI Chat Completions tool loop, returning history.
 
@@ -69,6 +69,8 @@ async def run_openai_planner(
         history.append(message.model_dump(exclude_none=True))
         calls = message.tool_calls or []
         if not calls:
+            if on_step is not None:
+                await on_step(history[1:])
             return (message.content or ""), history[1:]
         for call in calls:
             if on_tool is not None:
@@ -79,4 +81,6 @@ async def run_openai_planner(
             history.append({
                 "role": "tool", "tool_call_id": call.id, "content": output,
             })
+            if on_step is not None:
+                await on_step(history[1:])
     raise RuntimeError("OpenAI planner reached maximum turns without completion")
