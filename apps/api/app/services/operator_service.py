@@ -513,10 +513,18 @@ async def _run_openai_turn(session: _OperationSession, messages: list):
             "data": {"text": f"Planner → calling tool: {name}"},
         })
 
+    async def on_step(history):
+        # Persist only complete model/tool pairs. A process restart can resume
+        # without re-executing a tool whose receipt is already in the history.
+        session.input_list = history
+        parked_runs.save(session, parked_runs.RUNNING)
+        if _DRAINING:
+            raise RuntimeError("Operator closing after OpenAI step; resume from saved checkpoint")
+
     receipt, history = await run_openai_planner(
         system=session.system, messages=messages, tools=PLANNER_TOOLS,
         model=model, max_turns=_MAX_PLANNER_TURNS,
-        on_turn=on_turn, on_tool=on_tool,
+        on_turn=on_turn, on_tool=on_tool, on_step=on_step,
     )
     session.input_list = history
     if receipt.strip():
