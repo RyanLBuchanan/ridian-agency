@@ -204,6 +204,8 @@ def _finalized_view(record: dict) -> dict:
         # v1.7: missing-info questions + the planner's final receipt text.
         "needs_input": record.get("needs_input", []),
         "receipt": record.get("receipt", ""),
+        "planner_provider": record.get("planner_provider"),
+        "planner_model": record.get("planner_model"),
         # v2: paused-awaiting-user? The renderer routes the next answer to
         # POST /operations/{id}/continue (resume) instead of starting a new run.
         "awaiting_input": bool(record.get("awaiting_input")),
@@ -492,6 +494,7 @@ async def _run_openai_turn(session: _OperationSession, messages: list):
     if not model.startswith(("gpt-", "o1", "o3", "o4")):
         raise RuntimeError("Invalid OpenAI planner model; configure an OpenAI text model")
     rec["planner_provider"] = "openai"
+    rec["planner_model"] = model
 
     async def on_turn(response):
         usage = getattr(response, "usage", None)
@@ -550,10 +553,11 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
     # A saved Anthropic history must never be sent to the OpenAI API.
     provider = session.operator.record.get("planner_provider")
     if provider is None:
-        provider = ("openai" if os.environ.get("OPENAI_API_KEY") else "anthropic")
+        provider = ("openai" if get_effective_value("OPENAI_API_KEY") else "anthropic")
         session.operator.record["planner_provider"] = provider
     if provider == "openai":
         return await _run_openai_turn(session, messages)
+    session.operator.record["planner_model"] = default_model()
     set_current_operator(session.operator)
     client = get_client()
     restarts = 0
