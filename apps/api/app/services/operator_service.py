@@ -35,6 +35,7 @@ from ..agents.planner_agent import build_planner_system
 from . import (gmail_service, google_drive_service, memory_service,
                operation_log_service, parked_runs, state_store)
 from .anthropic_runtime import date_line, estimate_cost_usd, get_client
+from .openai_planner_runtime import run_openai_planner
 from .artifact_service import create_run_folder
 from .operator_context import OperatorContext, set_current_operator
 from .operator_tools import (
@@ -479,6 +480,53 @@ def _build_planner_input(command: str, upload_state_line: str) -> str:
     )
 
 
+async def _run_openai_turn(session: _OperationSession, messages: list):
+    """OpenAI planner path; retain the original approval-aware tool wrappers.
+
+    This is a provider switch, not a new tool registry. Persist history after
+    completion and fail closed on API errors or spend-ceiling violations.
+    """
+    set_current_operator(session.operator)
+    rec = session.operator.record
+    model = (get_effective_value("openai_model") or "gpt-4.1-mini").strip()
+    if not model.startswith(("gpt-", "o1", "o3", "o4")):
+        raise RuntimeError("Invalid OpenAI planner model; configure an OpenAI text model")
+    rec["planner_provider"] = "openai"
+
+    async def on_turn(response):
+        usage = getattr(response, "usage", None)
+        # Conservative fallback for unrecognized OpenAI models, rather than
+        # incorrectly applying Anthropic's per-model pricing.
+        tokens_in = int(getattr(usage, "prompt_tokens", 0) or 0)
+        tokens_out = int(getattr(usage, "completion_tokens", 0) or 0)
+        estimated = (tokens_in * 10 + tokens_out * 50) / 1_000_000
+        rec["spend_usd"] = round(float(rec.get("spend_usd") or 0) + estimated, 4)
+        ceiling = rec.get("cost_ceiling_usd")
+        if ceiling is not None and rec["spend_usd"] > float(ceiling):
+            raise RuntimeError("OpenAI planner stopped: conservative estimated cost exceeded run ceiling")
+
+    async def on_tool(name, args):
+        if _DRAINING:
+            raise RuntimeError("Operator is closing; OpenAI tool dispatch stopped")
+        await session.operator.emit({
+            "event": "message",
+            "data": {"text": f"Planner → calling tool: {name}"},
+        })
+
+    receipt, history = await run_openai_planner(
+        system=session.system, messages=messages, tools=PLANNER_TOOLS,
+        model=model, max_turns=_MAX_PLANNER_TURNS,
+        on_turn=on_turn, on_tool=on_tool,
+    )
+    session.input_list = history
+    if receipt.strip():
+        rec["receipt"] = receipt.strip()
+        await session.operator.emit({
+            "event": "message", "data": {"text": receipt.strip()},
+        })
+    return None
+
+
 async def _run_turn(session: _OperationSession, messages: list) -> None:
     """Run ONE planner turn on the Anthropic tool runner.
 
@@ -490,6 +538,14 @@ async def _run_turn(session: _OperationSession, messages: list) -> None:
     ``pause_turn`` (a long server-tool turn parking itself) is resumed by
     restarting the runner with the paused assistant turn appended, capped.
     """
+    # Provider is pinned on first run and recorded for resume/restart.
+    # A saved Anthropic history must never be sent to the OpenAI API.
+    provider = session.operator.record.get("planner_provider")
+    if provider is None:
+        provider = ("openai" if os.environ.get("OPENAI_API_KEY") else "anthropic")
+        session.operator.record["planner_provider"] = provider
+    if provider == "openai":
+        return await _run_openai_turn(session, messages)
     set_current_operator(session.operator)
     client = get_client()
     restarts = 0
