@@ -4,6 +4,7 @@ on:
     paths:
       - 'apps/api/app/services/openai_planner_runtime.py'
       - 'apps/api/app/services/operator_service.py'
+      - 'apps/api/app/services/anthropic_runtime.py'
       - 'apps/api/tests/test_openai_planner_runtime.py'
       - '.github/workflows/openai-planner-validation.yml'
   push:
@@ -20,7 +21,7 @@ jobs:
       - name: Install API requirements
         run: python -m pip install -r apps/api/requirements.txt
       - name: Compile changed modules
-        run: python -m py_compile apps/api/app/services/openai_planner_runtime.py apps/api/app/services/operator_service.py
+        run: python -m py_compile apps/api/app/services/openai_planner_runtime.py apps/api/app/services/operator_service.py apps/api/app/services/anthropic_runtime.py
       - name: Run adapter contract tests
         env:
           PYTHONPATH: apps/api
