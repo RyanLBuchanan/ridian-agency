@@ -67,7 +67,7 @@ class OpenAIPlannerAdapterTests(unittest.TestCase):
             checkpoints.append(list(history))
         with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=client):
             receipt, history = asyncio.run(run_openai_planner(
-                system="test", messages=[{"role": "user", "content": "WRN"}],
+                system="test", model="gpt-4.1-mini", messages=[{"role": "user", "content": "WRN"}],
                 tools=[FakeTool()], on_step=save,
             ))
         self.assertEqual(receipt, "Completed")
@@ -78,7 +78,7 @@ class OpenAIPlannerAdapterTests(unittest.TestCase):
             return_value=response("Resumed", [])))))
         with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=resumed):
             answer, _ = asyncio.run(run_openai_planner(
-                system="test", messages=checkpoints[0], tools=[FakeTool()],
+                system="test", model="gpt-4.1-mini", messages=checkpoints[0], tools=[FakeTool()],
             ))
         self.assertEqual(answer, "Resumed")
         self.assertEqual(resumed.chat.completions.create.await_args.kwargs["messages"][-1]["role"], "tool")
@@ -92,7 +92,7 @@ class OpenAIPlannerAdapterTests(unittest.TestCase):
         with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=client):
             with self.assertRaisesRegex(RuntimeError, "ceiling"):
                 asyncio.run(run_openai_planner(
-                    system="test", messages=[{"role": "user", "content": "WRN"}],
+                    system="test", model="gpt-4.1-mini", messages=[{"role": "user", "content": "WRN"}],
                     tools=[FakeTool()], on_turn=over_budget,
                 ))
         self.assertEqual(client.chat.completions.create.await_count, 1)
