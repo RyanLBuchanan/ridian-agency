@@ -81,7 +81,9 @@ class OpenAIPlannerAdapterTests(unittest.TestCase):
                 system="test", model="gpt-4.1-mini", messages=checkpoints[0], tools=[FakeTool()],
             ))
         self.assertEqual(answer, "Resumed")
-        self.assertEqual(resumed.chat.completions.create.await_args.kwargs["messages"][-1]["role"], "tool")
+        sent = resumed.chat.completions.create.await_args.kwargs["messages"]
+        self.assertEqual(sent[-2]["role"], "tool")
+        self.assertEqual(sent[-1]["content"], "Resumed")
 
     def test_mocked_spend_limit_stops_before_tool(self):
         call = NS(id="tool-1", function=NS(name="read_only_test", arguments='{"query":"WRN"}'))
