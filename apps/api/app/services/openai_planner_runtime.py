@@ -60,7 +60,7 @@ async def run_openai_planner(
     registry = {tool.name: tool for tool in tools}
     for _ in range(max_turns):
         response = await client.chat.completions.create(
-            model=model, messages=history, tools=specs, tool_choice="auto",
+            model=model, messages=history, tools=specs, tool_choice="auto", parallel_tool_calls=False,
         )
         if on_turn is not None:
             await on_turn(response)
