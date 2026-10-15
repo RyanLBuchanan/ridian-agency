@@ -2,9 +2,11 @@
 import asyncio
 import json
 import unittest
+from types import SimpleNamespace as NS
+from unittest.mock import AsyncMock, patch
 
 from app.services.openai_planner_runtime import (
-    execute_registered_call, openai_tool_specs,
+    execute_registered_call, openai_tool_specs, run_openai_planner,
 )
 
 
@@ -47,6 +49,53 @@ class OpenAIPlannerAdapterTests(unittest.TestCase):
             {"read_only_test": FakeTool()}, "read_only_test", "[]",
         ))
         self.assertEqual(json.loads(result)["error"], "invalid_arguments")
+
+    def test_mocked_tool_execution_and_resume(self):
+        def response(content, calls):
+            return NS(choices=[NS(message=NS(
+                content=content, tool_calls=calls,
+                model_dump=lambda **kw: {"role": "assistant", "content": content,
+                                         "tool_calls": [{"id": c.id, "type": "function",
+                                         "function": {"name": c.function.name,
+                                         "arguments": c.function.arguments}} for c in calls]},
+            ))])
+        call = NS(id="tool-1", function=NS(name="read_only_test", arguments='{"query":"WRN"}'))
+        client = NS(chat=NS(completions=NS(create=AsyncMock(
+            side_effect=[response(None, [call]), response("Completed", [])]))))
+        checkpoints = []
+        async def save(history):
+            checkpoints.append(list(history))
+        with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=client):
+            receipt, history = asyncio.run(run_openai_planner(
+                system="test", messages=[{"role": "user", "content": "WRN"}],
+                tools=[FakeTool()], on_step=save,
+            ))
+        self.assertEqual(receipt, "Completed")
+        self.assertEqual(len(checkpoints), 2)
+        self.assertEqual(history[-2]["role"], "tool")
+        self.assertTrue(json.loads(history[-2]["content"])["verified"])
+        resumed = NS(chat=NS(completions=NS(create=AsyncMock(
+            return_value=response("Resumed", [])))))
+        with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=resumed):
+            answer, _ = asyncio.run(run_openai_planner(
+                system="test", messages=checkpoints[0], tools=[FakeTool()],
+            ))
+        self.assertEqual(answer, "Resumed")
+        self.assertEqual(resumed.chat.completions.create.await_args.kwargs["messages"][-1]["role"], "tool")
+
+    def test_mocked_spend_limit_stops_before_tool(self):
+        call = NS(id="tool-1", function=NS(name="read_only_test", arguments='{"query":"WRN"}'))
+        reply = NS(choices=[NS(message=NS(content=None, tool_calls=[call]))])
+        client = NS(chat=NS(completions=NS(create=AsyncMock(return_value=reply))))
+        async def over_budget(response):
+            raise RuntimeError("spend ceiling exceeded")
+        with patch("app.services.openai_planner_runtime.AsyncOpenAI", return_value=client):
+            with self.assertRaisesRegex(RuntimeError, "ceiling"):
+                asyncio.run(run_openai_planner(
+                    system="test", messages=[{"role": "user", "content": "WRN"}],
+                    tools=[FakeTool()], on_turn=over_budget,
+                ))
+        self.assertEqual(client.chat.completions.create.await_count, 1)
 
 
 if __name__ == "__main__":
