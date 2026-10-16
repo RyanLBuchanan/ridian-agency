@@ -890,15 +890,17 @@ async function setupPush(me) {
 async function loadAwaiting() {
   try {
     const data = await api("/operations/recent?limit=50");
-    const waiting = (data.operations || []).filter((o) => o.status === "awaiting_input");
+    if (!data || !Array.isArray(data.operations)) throw new Error("Recent operations response unavailable or invalid.");
+    const waiting = data.operations.filter((o) => o && o.status === "awaiting_input");
     $("awaiting-list").innerHTML = waiting.length ? "" : '<p class="note">Nothing is parked.</p>';
     waiting.forEach((o) => {
-      const need = (o.needs_input || [])[o.needs_input.length - 1];
+      const needs = Array.isArray(o.needs_input) ? o.needs_input : [];
+      const need = needs.length ? needs[needs.length - 1] : null;
       const el = document.createElement("div");
       el.className = "card";
       el.innerHTML = `<div class="meta">${esc(o.command)}</div><div class="qwrap"></div>
         <div class="row-btns"><button class="btn btn-ghost btn-compact cancel">Cancel task</button></div>`;
-      if (need) renderQuestion(el.querySelector(".qwrap"), o.id, need);
+      if (need && typeof need === "object") renderQuestion(el.querySelector(".qwrap"), o.id, need);
       el.querySelector(".cancel").addEventListener("click", async () => {
         if (!confirm("Cancel this parked task?")) return;
         try { await api(`/operations/${encodeURIComponent(o.id)}/dismiss`, { method: "POST" }); }
