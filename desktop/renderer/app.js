@@ -9374,17 +9374,6 @@ if (_projectChipClear) _projectChipClear.addEventListener('click', () => _railSe
 
 _railThreadsFill().then(() => _railProjectsFill());
 
-// Refresh the operations rail when a paired phone submits a run.
-let _railSyncPending = false;
-async function _railSyncRecent() {
-  if (document.hidden || _railSyncPending) return;
-  _railSyncPending = true;
-  try { await _railThreadsFill(); } finally { _railSyncPending = false; }
-}
-setInterval(_railSyncRecent, 5000);
-window.addEventListener('focus', _railSyncRecent);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) _railSyncRecent(); });
-
 /* ----- 3. Command-history (↑/↓) in the command box ----- */
 
 const _CMD_HISTORY_KEY = 'ridian.cmdHistory';
