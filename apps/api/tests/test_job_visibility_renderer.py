@@ -85,3 +85,18 @@ def test_an_expired_run_is_said_and_offers_send_again():
     notice = app_js.split("function _jobsHandleNotice(", 1)[1].split("\nfunction ", 1)[0]
     assert "notice.kind === 'expired'" in notice and "_opRenderExpired(" in notice
     assert "no longer active" not in app_js
+
+
+def test_desktop_cross_device_operations_refresh():
+    """Phone-submitted operations appear without restarting the desktop."""
+    app_js = (_DESKTOP / "renderer" / "app.js").read_text(encoding="utf-8")
+    sync = app_js.split("// Cross-device operations sync:", 1)[1].split("async function _railThreadsFill(", 1)[0]
+    assert "setInterval(_railSyncRecent, 5000)" in sync
+    assert "window.addEventListener('focus', _railSyncRecent)" in sync
+    assert "visibilitychange" in sync
+    assert "cache: 'no-store'" in sync
+    assert "Array.isArray(data.operations)" in sync
+    assert "_railOps = data.operations" in sync
+    assert "_railRenderThreads()" in sync
+    assert "_railRenderProjects()" in sync
+    assert "_railSyncBusy" in sync
