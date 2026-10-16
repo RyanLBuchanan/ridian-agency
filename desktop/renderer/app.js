@@ -8456,6 +8456,36 @@ async function _railFetchWithRetry(url) {
   }
 }
 
+// Cross-device operations sync: refresh the rail without restarting Electron.
+let _railSyncBusy = false;
+async function _railSyncRecent() {
+  if (_railSyncBusy || document.hidden) return;
+  _railSyncBusy = true;
+  try {
+    const res = await fetch(`${BACKEND}/operations/recent?limit=30`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data || !Array.isArray(data.operations)) throw new Error('Invalid operations response');
+    _railOps = data.operations;
+    _railThreadsState = RAIL_STATE.READY;
+    _railRenderThreads();
+    _railRenderProjects();
+  } catch (_) {
+    // Preserve the last known operations; a temporary outage is not an empty inbox.
+    if (_railThreadsState !== RAIL_STATE.READY) {
+      _railThreadsState = RAIL_STATE.UNAVAILABLE;
+      _railRenderThreads();
+    }
+  } finally {
+    _railSyncBusy = false;
+  }
+}
+setInterval(_railSyncRecent, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _railSyncRecent();
+});
+window.addEventListener('focus', _railSyncRecent);
+
 async function _railThreadsFill() {
   const data = await _railFetchWithRetry(`${BACKEND}/operations/recent?limit=30`);
   if (data === null) {
