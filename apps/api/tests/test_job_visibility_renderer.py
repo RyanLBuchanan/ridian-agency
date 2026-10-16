@@ -130,3 +130,14 @@ def test_header_settings_shortcut():
     assert 'id="topbar-settings-btn"' in html
     assert 'aria-label="Open Settings"' in html
     assert "getElementById('topbar-settings-btn')?.addEventListener('click', openSettings)" in js
+
+
+def test_operator_workspace_redesign_contract():
+    html = (_DESKTOP / 'renderer' / 'index.html').read_text(encoding='utf-8')
+    css = (_DESKTOP / 'renderer' / 'styles.css').read_text(encoding='utf-8')
+    for section in ('Operator workspace', 'Projects and recent operations', 'Manage integrations, models, and application settings'):
+        assert section in html
+    for token in ('--color-accent: #8f2233', '.rail-nav-btn.is-current', '.settings-view', '.operator-form', '[data-theme="dark"]', 'prefers-reduced-motion'):
+        assert token in css
+    for essential_id in ('rail-operations-btn', 'rail-approvals-btn', 'rail-obligations-btn', 'rail-brief-btn', 'rail-settings-btn', 'operator-command'):
+        assert 'id="' + essential_id + '"' in html

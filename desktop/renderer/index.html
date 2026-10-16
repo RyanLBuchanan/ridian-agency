@@ -245,7 +245,7 @@
                   autocomplete="off"
                   spellcheck="false"
                 />
-                <nav class="rail-nav" aria-label="Primary">
+                <nav class="rail-nav" aria-label="Operator workspace">
                   <button id="rail-operations-btn" type="button" class="rail-nav-btn is-current" aria-current="page">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
@@ -280,10 +280,10 @@
                   </button>
                 </nav>
                 </div><!-- /rail-top -->
-                <section class="rail-ops" aria-label="Operations">
+                <section class="rail-ops" aria-label="Projects and recent operations">
                   <details id="rail-projects-panel" class="rail-projects-panel">
                     <summary class="rail-projects-summary" title="Filter operations by project (new runs are filed under it too), or hide failed and cancelled ones">
-                      <span class="rail-projects-summary-label">Project</span>
+                      <span class="rail-projects-summary-label">Workspace</span>
                       <span id="rail-project-current" class="rail-project-current">All operations</span>
                       <span id="rail-filter-note" class="rail-filter-note"></span>
                     </summary>
@@ -336,10 +336,10 @@
                       <span>Memory</span>
                       <span class="sr-only" id="operator-context-memory-value">Loading…</span>
                     </button>
-                    <button id="rail-audit-btn" type="button" class="rail-utility-link">
+                    <button id="rail-audit-btn" type="button" class="rail-utility-link" title="Review recorded Operator actions">
                       <span>Audit log</span>
                     </button>
-                    <button id="rail-settings-btn" type="button" class="rail-utility-link">
+                    <button id="rail-settings-btn" type="button" class="rail-utility-link" title="Manage integrations, models, and application settings">
                       <span>Settings</span>
                     </button>
                   </div>

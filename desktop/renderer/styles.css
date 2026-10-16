@@ -5771,3 +5771,181 @@ body {
 @media (max-width: 720px) {
   .legacy-tools-grid { grid-template-columns: 1fr; }
 }
+
+/* ================================================================
+   Ridian Operator workspace redesign — cohesive desktop design system
+   Pure presentation layer: existing view IDs, forms and gates preserved.
+   ================================================================ */
+:root {
+  --color-bg: #f3f5f8;
+  --color-bg-soft: #eef1f5;
+  --color-surface: #fff;
+  --color-sidebar: #f9fafc;
+  --color-sidebar-hover: #edf1f6;
+  --color-sidebar-active: #e8edf5;
+  --color-text-strong: #192335;
+  --color-text: #344155;
+  --color-muted: #667388;
+  --color-border: #e2e7ee;
+  --color-border-strong: #cdd6e2;
+  --color-accent: #8f2233;
+  --color-accent-deep: #701a29;
+  --color-accent-soft: #f8eaed;
+  --shadow-soft: 0 3px 14px rgba(25,35,53,.035);
+  --shadow-elev: 0 12px 34px rgba(25,35,53,.075);
+  --shadow-cta: 0 8px 18px rgba(143,34,51,.15);
+  --gradient-primary: linear-gradient(145deg,#a02b40,#7d1d30);
+  --gradient-primary-hover: linear-gradient(145deg,#ad344a,#842136);
+  --gradient-hero: linear-gradient(180deg,#fff 0%,#f7f8fa 100%);
+  --radius-sm: 9px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+}
+body { letter-spacing: -.008em; }
+button, input, textarea, select { font-family: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.workspace-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 90px;
+  padding-inline: clamp(22px,3vw,52px);
+}
+.workspace-title { letter-spacing: -.045em; font-weight: 750; }
+.workspace-body {
+  background: var(--color-bg);
+  padding: clamp(16px,2vw,30px);
+  gap: 18px;
+}
+.topbar-icon-btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 2px 7px rgba(25,35,53,.025);
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.topbar-icon-btn:hover { background: var(--color-accent-soft); border-color: #e9b9c2; transform: translateY(-1px); }
+.operator-rail { padding: 10px 6px 12px 0; gap: 10px; }
+.rail-top { gap: 10px; }
+.rail-search {
+  min-height: 42px;
+  padding: 9px 12px;
+  background: #fff;
+  border-color: var(--color-border);
+  border-radius: 11px;
+  font-size: 13px;
+}
+.rail-nav { gap: 4px; }
+.rail-nav-btn {
+  min-height: 41px;
+  padding: 9px 12px;
+  gap: 12px;
+  border-radius: 10px;
+  font-weight: 550;
+  transition: background .15s ease, color .15s ease;
+}
+.rail-nav-btn.is-current, .rail-nav-btn[aria-current="page"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
+  font-weight: 700;
+}
+.rail-nav-btn.is-current svg, .rail-nav-btn[aria-current="page"] svg { stroke: var(--color-accent); }
+.rail-threads { gap: 5px; padding-right: 4px; }
+.rail-thread-btn { border-radius: 10px; min-height: 48px; }
+.rail-thread-btn:hover { background: var(--color-sidebar-hover); }
+.rail-footer { padding-top: 12px; gap: 8px; }
+.rail-utility { gap: 5px; }
+.rail-utility-link {
+  min-height: 31px;
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-weight: 550;
+}
+.rail-utility-link:hover { background: var(--color-sidebar-hover); }
+.rail-utility-link.is-current { color: var(--color-accent); background: var(--color-accent-soft); }
+.operator-main { gap: 16px; }
+.operator-main .operator-scroll { scrollbar-gutter: stable; }
+.operator-form {
+  border-radius: 18px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(14px,1.5vw,22px);
+  gap: 12px;
+}
+.operator-command-wrap { border-radius: 13px; border-color: var(--color-border-strong); }
+.operator-command-wrap:focus-within { box-shadow: 0 0 0 3px rgba(143,34,51,.09); }
+#operator-command { line-height: 1.55; }
+.operator-send-btn { background: var(--color-accent); border-color: var(--color-accent); }
+.operator-send-btn:hover:not(:disabled) { background: var(--color-accent-deep); border-color: var(--color-accent-deep); }
+.operator-example { border-radius: 999px; }
+.operator-active, .operator-thread, .operator-live { min-width: 0; }
+.settings-view {
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+.settings-head {
+  min-height: 76px;
+  padding: 17px clamp(18px,2vw,30px);
+  background: #fff;
+}
+.settings-title { letter-spacing: -.035em; }
+.settings-scroll {
+  padding: clamp(18px,2vw,30px);
+  gap: 16px;
+  background: #fff;
+}
+.settings-row { gap: 12px; }
+.settings-input {
+  border-radius: 10px;
+  border-color: var(--color-border-strong);
+}
+.settings-row-note { line-height: 1.55; }
+.settings-view .btn-primary, .settings-view button[type="submit"].btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.settings-view .btn-primary:hover { background: var(--color-accent-deep); }
+.workspace-back-btn { border: 1px solid var(--color-border); border-radius: 50%; }
+.banner { border-radius: 12px; }
+@media (max-width: 1050px) {
+  .workspace-header { min-height: 76px; }
+  .workspace-body { padding: 16px; }
+  .settings-scroll { padding: 18px; }
+}
+@media (max-width: 760px) {
+  .workspace-header { padding-inline: 18px; }
+  .workspace-body { padding: 12px; }
+  .settings-row { grid-template-columns: 14px minmax(85px,110px) minmax(0,1fr); }
+  .settings-row-note { padding-left: 0; }
+  .settings-row > button { justify-self: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar-icon-btn, .rail-nav-btn, .operator-command-wrap { transition: none; }
+}
+[data-theme="dark"] {
+  --color-bg: #141923;
+  --color-bg-soft: #1c2430;
+  --color-surface: #1e2633;
+  --color-sidebar: #1a222d;
+  --color-sidebar-hover: #293446;
+  --color-sidebar-active: #3a2836;
+  --color-text-strong: #f1f4f9;
+  --color-text: #d7deea;
+  --color-muted: #aeb8c9;
+  --color-border: #354051;
+  --color-border-strong: #4b5668;
+  --color-accent: #e98ca0;
+  --color-accent-deep: #f6b4c0;
+  --color-accent-soft: #422834;
+}
+[data-theme="dark"] .workspace-header,
+[data-theme="dark"] .settings-head,
+[data-theme="dark"] .settings-scroll,
+[data-theme="dark"] .operator-form,
+[data-theme="dark"] .rail-search,
+[data-theme="dark"] .topbar-icon-btn { background: var(--color-surface); }
+[data-theme="dark"] .rail-nav-btn.is-current { background: var(--color-accent-soft); }
