@@ -29,6 +29,8 @@ jobs:
         run: node --check desktop/renderer/app.js
       - name: Compile changed modules
         run: python -m py_compile apps/api/app/services/openai_planner_runtime.py apps/api/app/services/operator_service.py apps/api/app/services/anthropic_runtime.py
+      - name: Validate standard profile navigation and appearance
+        run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k standard_profile_menu_and_blue_theme -v
       - name: Validate workspace redesign contract
         run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k operator_workspace_redesign_contract -v
       - name: Run Settings shortcut regression
