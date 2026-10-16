@@ -100,3 +100,14 @@ def test_desktop_cross_device_operations_refresh():
     assert "_railRenderThreads()" in sync
     assert "_railRenderProjects()" in sync
     assert "_railSyncBusy" in sync
+
+
+def test_cross_device_operations_refresh_and_null_safe_parked_runs():
+    app_js = (_DESKTOP / 'renderer' / 'app.js').read_text(encoding='utf-8')
+    assert 'setInterval(_railSyncRecent, 5000)' in app_js
+    assert "window.addEventListener('focus', _railSyncRecent)" in app_js
+    assert 'Array.isArray(data.operations)' in app_js
+    companion = (_DESKTOP.parent / 'apps' / 'api' / 'app' / 'static' / 'companion.html').read_text(encoding='utf-8')
+    assert 'Array.isArray(data.operations)' in companion
+    assert 'o && o.status === "awaiting_input"' in companion
+    assert 'needs.length ? needs[needs.length - 1] : null' in companion
