@@ -141,3 +141,19 @@ def test_operator_workspace_redesign_contract():
         assert token in css
     for essential_id in ('rail-operations-btn', 'rail-approvals-btn', 'rail-obligations-btn', 'rail-brief-btn', 'rail-settings-btn', 'operator-command'):
         assert 'id="' + essential_id + '"' in html
+
+
+def test_standard_profile_menu_and_blue_theme():
+    html = (_DESKTOP / 'renderer' / 'index.html').read_text(encoding='utf-8')
+    css = (_DESKTOP / 'renderer' / 'styles.css').read_text(encoding='utf-8')
+    js = (_DESKTOP / 'renderer' / 'app.js').read_text(encoding='utf-8')
+    assert 'id="rail-account-menu"' in html
+    assert 'id="operator-context-memory"' in html
+    assert 'id="rail-audit-btn"' in html
+    assert 'id="rail-settings-btn"' in html
+    for choice in ('light', 'dark', 'system'):
+        assert 'data-rail-theme="' + choice + '"' in html
+    assert '--color-accent: #2854d8' in css
+    assert '.rail-account-panel' in css
+    assert 'function _syncAccountAppearance()' in js
+    assert 'applyTheme(pref)' in js
