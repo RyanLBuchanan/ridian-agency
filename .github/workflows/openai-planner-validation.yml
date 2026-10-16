@@ -29,6 +29,8 @@ jobs:
         run: node --check desktop/renderer/app.js
       - name: Compile changed modules
         run: python -m py_compile apps/api/app/services/openai_planner_runtime.py apps/api/app/services/operator_service.py apps/api/app/services/anthropic_runtime.py
+      - name: Run Settings shortcut regression
+        run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k header_settings_shortcut -v
       - name: Run operations search shortcut regression
         run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k operations_search_keyboard_shortcut -v
       - name: Run cross-device refresh and null-safe companion regression tests
