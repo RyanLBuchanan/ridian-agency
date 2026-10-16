@@ -137,7 +137,7 @@ def test_operator_workspace_redesign_contract():
     css = (_DESKTOP / 'renderer' / 'styles.css').read_text(encoding='utf-8')
     for section in ('Operator workspace', 'Projects and recent operations', 'Manage integrations, models, and application settings'):
         assert section in html
-    for token in ('--color-accent: #8f2233', '.rail-nav-btn.is-current', '.settings-view', '.operator-form', '[data-theme="dark"]', 'prefers-reduced-motion'):
+    for token in ('--color-accent: #2854d8', '.rail-nav-btn.is-current', '.settings-view', '.operator-form', '[data-theme="dark"]', 'prefers-reduced-motion'):
         assert token in css
     for essential_id in ('rail-operations-btn', 'rail-approvals-btn', 'rail-obligations-btn', 'rail-brief-btn', 'rail-settings-btn', 'operator-command'):
         assert 'id="' + essential_id + '"' in html
