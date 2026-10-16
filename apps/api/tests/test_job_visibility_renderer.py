@@ -122,3 +122,11 @@ def test_operations_search_keyboard_shortcut():
     assert '_railSearch.focus()' in app_js
     assert '_railSearch.select()' in app_js
     assert "event.key === 'Escape'" in app_js
+
+
+def test_header_settings_shortcut():
+    html = (_DESKTOP / 'renderer' / 'index.html').read_text(encoding='utf-8')
+    js = (_DESKTOP / 'renderer' / 'app.js').read_text(encoding='utf-8')
+    assert 'id="topbar-settings-btn"' in html
+    assert 'aria-label="Open Settings"' in html
+    assert "getElementById('topbar-settings-btn')?.addEventListener('click', openSettings)" in js
