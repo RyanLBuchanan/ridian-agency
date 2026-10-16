@@ -112,3 +112,13 @@ def test_cross_device_operations_refresh_and_null_safe_parked_runs():
     assert 'Array.isArray(data.operations)' in companion
     assert 'o && o.status === "awaiting_input"' in companion
     assert 'needs.length ? needs[needs.length - 1] : null' in companion
+
+
+def test_operations_search_keyboard_shortcut():
+    html = (_DESKTOP / 'renderer' / 'index.html').read_text(encoding='utf-8')
+    app_js = (_DESKTOP / 'renderer' / 'app.js').read_text(encoding='utf-8')
+    assert 'Search operations… (Ctrl+K)' in html
+    assert "event.key.toLowerCase() === 'k'" in app_js
+    assert '_railSearch.focus()' in app_js
+    assert '_railSearch.select()' in app_js
+    assert "event.key === 'Escape'" in app_js
