@@ -8747,6 +8747,7 @@ if (_railSearch) {
 
 const _railSettingsBtn = document.getElementById('rail-settings-btn');
 if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
+document.getElementById('topbar-settings-btn')?.addEventListener('click', openSettings);
 // v7.6: the Operations nav item closes whatever view is up (the unsaved-
 // settings guard still applies) and shows the list from its top — where
 // what needs attention is.
