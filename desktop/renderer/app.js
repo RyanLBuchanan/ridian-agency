@@ -8493,7 +8493,12 @@ async function _railThreadsFill() {
     _railRenderThreads();
     return;
   }
-  _railOps = data.operations || [];
+  if (!data || !Array.isArray(data.operations)) {
+    _railThreadsState = RAIL_STATE.UNAVAILABLE;
+    _railRenderThreads();
+    return;
+  }
+  _railOps = data.operations;
   _railThreadsState = RAIL_STATE.READY;   // the backend has now SPOKEN
   _railRenderThreads();
   _railRenderProjects();   // per-project chat counts derive from _railOps
@@ -9368,6 +9373,17 @@ const _projectChipClear = document.getElementById('operator-project-chip-clear')
 if (_projectChipClear) _projectChipClear.addEventListener('click', () => _railSelectProject(''));
 
 _railThreadsFill().then(() => _railProjectsFill());
+
+// Refresh the operations rail when a paired phone submits a run.
+let _railSyncPending = false;
+async function _railSyncRecent() {
+  if (document.hidden || _railSyncPending) return;
+  _railSyncPending = true;
+  try { await _railThreadsFill(); } finally { _railSyncPending = false; }
+}
+setInterval(_railSyncRecent, 5000);
+window.addEventListener('focus', _railSyncRecent);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) _railSyncRecent(); });
 
 /* ----- 3. Command-history (↑/↓) in the command box ----- */
 
