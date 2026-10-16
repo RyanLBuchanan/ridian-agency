@@ -3060,6 +3060,31 @@ function _writeSavedTheme(pref) {
   } catch (_) { /* private mode / disabled storage */ }
 }
 
+// Account-menu appearance switcher. Uses the existing appearance preference.
+function _syncAccountAppearance() {
+  const current = _readSavedTheme() || 'system';
+  document.querySelectorAll('[data-rail-theme]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.railTheme === current));
+  });
+}
+document.querySelectorAll('[data-rail-theme]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const pref = button.dataset.railTheme;
+    applyTheme(pref);
+    _syncAccountAppearance();
+    const field = document.querySelector('[name="appearance"]');
+    if (field) {
+      field.value = pref;
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+});
+document.getElementById('rail-account-menu')?.addEventListener('toggle', _syncAccountAppearance);
+document.addEventListener('pointerdown', (event) => {
+  const menu = document.getElementById('rail-account-menu');
+  if (menu?.open && !menu.contains(event.target)) menu.open = false;
+});
+
 function applyTheme(pref) {
   const val = (pref || 'system').toLowerCase();
   if (val === 'dark') {
