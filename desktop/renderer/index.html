@@ -177,7 +177,7 @@
               aria-label="Menu"
               title="Menu"
             >&#x2630;</button>
-            <button id="topbar-settings-btn" type="button" class="topbar-icon-btn" aria-label="Open Settings" title="Settings">&#9881;</button>
+            <button id="topbar-settings-btn" type="button" class="topbar-icon-btn" aria-label="Open Settings" title="Settings"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.15 1.6v.09H9.8V21A1.7 1.7 0 0 0 8.65 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.26 15a1.7 1.7 0 0 0-1.6-1.15h-.09V9.8h.09A1.7 1.7 0 0 0 4.26 8.65a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.86-2.86.06.06A1.7 1.7 0 0 0 8.65 4.26a1.7 1.7 0 0 0 1.15-1.6v-.09h4.05v.09A1.7 1.7 0 0 0 15 4.26a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.65a1.7 1.7 0 0 0 1.6 1.15h.09v4.05H21A1.7 1.7 0 0 0 19.4 15Z"/></svg></button>
             <!-- Settings moved to the sidebar's bottom-left (rail-settings-btn);
                  also reachable from the ☰ menu. -->
           </div>
@@ -329,20 +329,25 @@
                   </ul>
                 </section>
                 <div class="rail-footer">
-                  <div class="rail-utility">
-                    <!-- Memory keeps its doorway here (the only one in
-                         single-pane mode); the counts ride its tooltip. -->
-                    <button type="button" id="operator-context-memory" class="rail-utility-link" title="Memory">
-                      <span>Memory</span>
-                      <span class="sr-only" id="operator-context-memory-value">Loading…</span>
-                    </button>
-                    <button id="rail-audit-btn" type="button" class="rail-utility-link" title="Review recorded Operator actions">
-                      <span>Audit log</span>
-                    </button>
-                    <button id="rail-settings-btn" type="button" class="rail-utility-link" title="Manage integrations, models, and application settings">
-                      <span>Settings</span>
-                    </button>
-                  </div>
+                  <details id="rail-account-menu" class="rail-account-menu">
+                    <summary class="rail-account-trigger" aria-label="Open account and appearance menu">
+                      <span class="rail-account-avatar" aria-hidden="true">R</span>
+                      <span class="rail-account-copy"><strong>Ridian Technologies</strong><small>Account &amp; preferences</small></span>
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+                    </summary>
+                    <div class="rail-account-panel">
+                      <div class="rail-account-heading">Workspace</div>
+                      <button type="button" id="operator-context-memory" class="rail-utility-link"><span>Memory</span><span class="sr-only" id="operator-context-memory-value">Loading…</span></button>
+                      <button type="button" id="rail-audit-btn" class="rail-utility-link" title="Review recorded Operator actions"><span>Audit log</span></button>
+                      <button type="button" id="rail-settings-btn" class="rail-utility-link" title="Manage integrations, models, and application settings"><span>Settings</span></button>
+                      <div class="rail-account-heading">Appearance</div>
+                      <div class="rail-theme-options" role="group" aria-label="Appearance">
+                        <button type="button" data-rail-theme="light" aria-pressed="false">Light</button>
+                        <button type="button" data-rail-theme="dark" aria-pressed="false">Dark</button>
+                        <button type="button" data-rail-theme="system" aria-pressed="false">System</button>
+                      </div>
+                    </div>
+                  </details>
                   <!-- v7.1: Owner Workspace sync state, one quiet line. -->
                   <p id="rail-ows-status" class="rail-sync-line" title="Owner Workspace sync — details in Settings">Owner Workspace · not connected</p>
                 </div><!-- /rail-footer -->
