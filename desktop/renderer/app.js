@@ -8727,6 +8727,24 @@ const _railNewChatBtn = document.getElementById('rail-new-chat');
 if (_railNewChatBtn) _railNewChatBtn.addEventListener('click', _opNewChat);
 const _railSearch = document.getElementById('rail-search');
 if (_railSearch) _railSearch.addEventListener('input', _railRenderThreads);
+// Operations search keyboard shortcut.
+if (_railSearch) {
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      _railSearch.focus();
+      _railSearch.select();
+    }
+  });
+  _railSearch.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      _railSearch.value = '';
+      _railRenderThreads();
+      _railSearch.blur();
+    }
+  });
+}
+
 const _railSettingsBtn = document.getElementById('rail-settings-btn');
 if (_railSettingsBtn) _railSettingsBtn.addEventListener('click', openSettings);
 // v7.6: the Operations nav item closes whatever view is up (the unsaved-
