@@ -8,6 +8,7 @@ on:
       - 'apps/api/tests/test_openai_planner_runtime.py'
       - 'apps/api/tests/test_planner_provider_evidence.py'
       - 'desktop/renderer/app.js'
+      - 'desktop/renderer/index.html'
       - 'apps/api/app/static/companion.html'
       - 'apps/api/tests/test_job_visibility_renderer.py'
       - '.github/workflows/openai-planner-validation.yml'
@@ -28,6 +29,8 @@ jobs:
         run: node --check desktop/renderer/app.js
       - name: Compile changed modules
         run: python -m py_compile apps/api/app/services/openai_planner_runtime.py apps/api/app/services/operator_service.py apps/api/app/services/anthropic_runtime.py
+      - name: Run operations search shortcut regression
+        run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k operations_search_keyboard_shortcut -v
       - name: Run cross-device refresh and null-safe companion regression tests
         run: python -m pytest apps/api/tests/test_job_visibility_renderer.py -k 'desktop_cross_device_operations_refresh or cross_device_operations_refresh_and_null_safe_parked_runs' -v
       - name: Run provider provenance regression tests
