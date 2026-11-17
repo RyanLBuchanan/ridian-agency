@@ -57,9 +57,28 @@ jobs:
       - name: Native Windows regression tests (including real DPAPI and Electron)
         timeout-minutes: 6
         run: |
-          .venv/Scripts/python.exe -m pytest apps/api/tests/test_frozen_paths.py apps/api/tests/test_state_guard.py apps/api/tests/test_installer_icon.py apps/api/tests/test_run_checkpoint.py apps/api/tests/test_backup_restore.py apps/api/tests/test_audit_log.py apps/api/tests/test_ui_grounding_and_packaging.py apps/api/tests/test_single_instance.py apps/api/tests/test_dpapi_at_rest.py -q --junitxml=work/windows-validation/native-tests.xml
+          .venv/Scripts/python.exe -m pytest apps/api/tests/test_project_preference_retention.py apps/api/tests/test_frozen_paths.py apps/api/tests/test_state_guard.py apps/api/tests/test_installer_icon.py apps/api/tests/test_run_checkpoint.py apps/api/tests/test_backup_restore.py apps/api/tests/test_audit_log.py apps/api/tests/test_ui_grounding_and_packaging.py apps/api/tests/test_single_instance.py apps/api/tests/test_dpapi_at_rest.py -q --junitxml=work/windows-validation/native-tests.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .venv/Scripts/python.exe .github/scripts/validate_windows_installer.py --check-native-results work/windows-validation/native-tests.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: RyanLBuchanan/ridian-agency
+          ref: f286d5ebd1dac9ac57c7a3f966e5df57ed390c72
+          path: work/baseline
+          persist-credentials: false
+
+      - name: Build pinned pre-fix installer for actual synthetic upgrade
+        timeout-minutes: 12
+        working-directory: work/baseline/desktop
+        run: |
+          New-Item -ItemType Junction -Path ../.venv -Target "$env:GITHUB_WORKSPACE/.venv" | Out-Null
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node build-backend.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx --no-install electron-builder --win nsis --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build bundled backend and x64 NSIS installer without publishing
@@ -72,7 +91,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install and validate the actual packaged app in runner scratch
-        timeout-minutes: 5
+        timeout-minutes: 7
         run: |
           .venv/Scripts/python.exe .github/scripts/validate_windows_installer.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

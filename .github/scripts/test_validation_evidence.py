@@ -20,7 +20,9 @@ class EvidenceTests(unittest.TestCase):
     def report(self, extra="", names=None):
         names = names if names is not None else [
             "test_protect_unprotect_round_trips", "test_corrupt_blob_fails_closed",
-            "test_second_launch_quits_without_hotkey_and_first_is_raised"]
+            "test_second_launch_quits_without_hotkey_and_first_is_raised"] + [
+                f"test_installer_preflight[{case}]" for case in
+                ("first", "legacy", "existing", "same", "conflict", "invalid", "upgrade")]
         path = self.root / "tests.xml"
         path.write_text('<testsuites><testsuite>' + ''.join(
             f'<testcase name="{name}">{extra}</testcase>' for name in names)
@@ -29,7 +31,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_native_success_requires_named_cases(self):
         self.assertEqual(validation.check_native_results(self.report()),
-                         {"status": "PASS", "passed": 3, "skipped": 0})
+                         {"status": "PASS", "passed": 10, "skipped": 0})
 
     def test_native_skips_failures_and_errors_are_rejected(self):
         for tag in ("skipped", "failure", "error"):
@@ -40,6 +42,12 @@ class EvidenceTests(unittest.TestCase):
         for names in ([], ["some_other_test"]):
             with self.subTest(names=names), self.assertRaises(RuntimeError):
                 validation.check_native_results(self.report(names=names))
+
+    def test_missing_preference_case_is_rejected(self):
+        names = ["test_protect_unprotect_round_trips", "test_corrupt_blob_fails_closed",
+                 "test_second_launch_quits_without_hotkey_and_first_is_raised"]
+        with self.assertRaisesRegex(RuntimeError, "preflight case missing"):
+            validation.check_native_results(self.report(names=names))
 
     def test_manifest_detects_changed_missing_and_added_files(self):
         binary = self.root / "backend.exe"

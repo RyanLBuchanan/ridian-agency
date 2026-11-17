@@ -70,6 +70,9 @@ def check_native_results(path):
                 "test_corrupt_blob_fails_closed",
                 "test_second_launch_quits_without_hotkey_and_first_is_raised"}
     require(required <= names, "Real DPAPI/Electron native tests were not collected")
+    for case in ('first', 'legacy', 'existing', 'same', 'conflict', 'invalid', 'upgrade'):
+        require(f"test_installer_preflight[{case}]" in names,
+                f"Required preference preflight case missing: {case}")
     return {"status": "PASS", "passed": len(cases), "skipped": 0}
 
 
@@ -213,11 +216,37 @@ def smoke_test(report):
     installer_process = app = None
     job = ProcessJob()
     try:
+        baseline = list((REPO / "work/baseline/desktop/dist").glob("*Setup*.exe"))
+        require(len(baseline) == 1, "Pinned pre-fix installer is required")
+        report["baseline_installer"] = {"commit": "f286d5ebd1dac9ac57c7a3f966e5df57ed390c72",
+                                          **fingerprint(baseline[0])}
+        installer_process = subprocess.Popen(f'"{baseline[0]}" /S /D={installed}', env=env, cwd=scratch)
+        job.assign(installer_process)
+        require(installer_process.wait(timeout=120) == 0, "Baseline installation failed")
+        check_pe(installed / "Ridian Operator.exe", x64=True)
+        legacy = installed / "resources/backend/_internal/hidden_projects.json"
+        preference_bytes = b'{"hidden_folders":["synthetic-hidden"],"pinned_folders":["synthetic-pinned"]}'
+        legacy.write_bytes(preference_bytes)
+        settings = data / "local_settings.json"
+        memory = data / "state/contacts.json"
+        settings.write_text(json.dumps({"operator_name": "Synthetic upgrade owner"}), encoding="utf-8")
+        memory.parent.mkdir(parents=True)
+        memory.write_text(json.dumps([{"id": "synthetic-contact", "name": "Synthetic Contact",
+                                      "written_by": "save_memory", "source_op": "synthetic-upgrade"}]), encoding="utf-8")
+        for name in ("synthetic-hidden", "synthetic-pinned"):
+            (scratch / "outputs" / name).mkdir(parents=True)
+        preserved = {p: p.read_bytes() for p in (settings, memory)}
+        report["synthetic_upgrade"] = "NOT VERIFIED"
         # /D must be LAST; NSIS expects its directory argument without quotes.
         command = f'"{installer}" /S /D={installed}'
         installer_process = subprocess.Popen(command, env=env, cwd=scratch)
         job.assign(installer_process)
         require(installer_process.wait(timeout=120) == 0, "NSIS installer failed")
+        preferences = data / "hidden_projects.json"
+        require(preferences.read_bytes() == preference_bytes, "Installer did not migrate legacy preferences")
+        for file, original in preserved.items():
+            require(file.read_bytes() == original, "Installer changed synthetic settings or memory")
+        require(not legacy.exists(), "Old bundle preference file survived replacement unexpectedly")
         exe = installed / "Ridian Operator.exe"
         backend = installed / "resources/backend"
         check_pe(exe, x64=True)
@@ -271,6 +300,14 @@ def smoke_test(report):
         require(ready, "Installed app did not show its window with a healthy bundled backend")
         check_listener_owner(port, app.pid, backend / "ridian-backend.exe")
         report["backend_process_ownership"] = "PASS"
+        with opener.open(f"http://127.0.0.1:{port}/projects/recent", timeout=5) as response:
+            recent = json.load(response)["projects"]
+        require(not any(p["name"] == "synthetic-hidden" for p in recent), "Hidden preference not applied")
+        require(any(p["name"] == "synthetic-pinned" and p["pinned"] for p in recent),
+                "Pinned preference not applied")
+        with opener.open(f"http://127.0.0.1:{port}/projects/hidden", timeout=5) as response:
+            hidden = json.load(response)["projects"]
+        require(any(p["name"] == "synthetic-hidden" for p in hidden), "Hidden preference missing")
         report["installed_app_smoke"] = "PASS"
         report["child_path_without_python_node"] = "PASS"
         # Close our own window; verify the desktop's normal drain/cleanup path.
@@ -289,6 +326,15 @@ def smoke_test(report):
         else:
             raise RuntimeError("Bundled backend still listening after desktop exit")
         report["owned_backend_shutdown"] = "PASS"
+        for file, original in preserved.items():
+            require(file.read_bytes() == original, "Startup/shutdown changed synthetic settings or memory")
+        require(preferences.read_bytes() == preference_bytes, "Startup/shutdown lost migrated preferences")
+        require(fingerprint(installer) == {k: report["installer"][k] for k in ("bytes", "sha256")},
+                "Installer hash changed during validation")
+        report["installer_sha256_rechecked"] = "PASS"
+        report["synthetic_upgrade"] = "PASS"
+        report["settings_memory_preservation"] = "PASS"
+        report["hidden_pinned_preservation"] = "PASS"
     finally:
         try:
             stop_tree(app)
@@ -310,7 +356,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True)
     report = {"commit": os.environ.get("GITHUB_SHA"), "status": "FAIL",
               "limitations": ["Physical tower and clean-PC testing NOT RUN",
-                              "Upgrade/preference preservation NOT RUN; known hidden/pinned defect remains"]}
+                              "Synthetic upgrade only; physical Owner data and downgrade behavior NOT RUN"]}
     try:
         smoke_test(report)
         report["status"] = "PASS"
