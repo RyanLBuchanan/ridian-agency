@@ -1,7 +1,8 @@
 """CI-only Windows installer smoke test. Never run against an Owner install.
 
-Only fresh runner scratch data is used. No integrations, migrations, upgrades,
-provider calls, credential reads, or release publishing are part of this test.
+Only fresh runner scratch data is used for the baseline-to-candidate upgrade
+and legacy preference migration. No integrations, provider calls, credential
+reads, or release publishing are part of this test.
 The Windows runner has Python/Node installed; restricting the child's PATH is
 useful evidence of bundling, not proof of behavior on a clean physical PC.
 """
