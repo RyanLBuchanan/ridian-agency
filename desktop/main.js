@@ -51,6 +51,11 @@ function sandboxEnvPreflight() {
    .bat) is untouched: the backend is started externally and this block
    no-ops because the port is already serving. */
 let _backendChild = null;
+let _backendStartupComplete = false;
+let _quitting = false;
+let _cancelBackendStartup = null;
+const BACKEND_STARTUP_TIMEOUT_MS = 60000;
+const BACKEND_STARTUP_POLL_MS = 250;
 
 function _portInUse(port) {
   return new Promise((resolve) => {
@@ -75,12 +80,15 @@ function _expectedDataDir() {
 // true only for a Ridian backend using OUR expected data dir. Anything
 // else — a sandbox orphan, another profile, a non-Ridian service, or a
 // backend too old to identify itself — is a stranger.
-async function _backendIdentityMatches() {
+async function _backendIdentityMatches(signal) {
   // The abort deadline covers headers AND body: a stranger that sends 200
   // then stalls the body must not hang startup past the 3s budget (found
   // by adversarial review — clearing the timeout before res.json() left a
   // silent up-to-5-minute hang exactly for the not-Ridian-at-all case).
   const ctl = new AbortController();
+  const abort = () => ctl.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
   const t = setTimeout(() => ctl.abort(), 3000);
   try {
     const res = await fetch(`${BACKEND_ORIGIN}/health`, { signal: ctl.signal });
@@ -93,7 +101,74 @@ async function _backendIdentityMatches() {
     return false;
   } finally {
     clearTimeout(t);
+    signal?.removeEventListener('abort', abort);
   }
+}
+
+// Only fixed diagnostic codes and guidance cross this boundary. Never include
+// child output, exception messages, environment values, health payloads or
+// resolved paths: all may contain credentials or personal information.
+function _reportBackendStartupFailure(code) {
+  const guidance = {
+    BACKEND_MISSING: 'The installed backend component is missing. Run the Ridian Operator installer again to repair the installation. Do not delete your application data folder.',
+    BACKEND_LAUNCH_FAILED: 'Windows could not start the installed backend. Check whether Windows Security blocked Ridian Operator, then run the installer again if needed. Do not delete your application data folder.',
+    BACKEND_EXITED: 'The backend stopped before startup completed. Relaunch Ridian Operator. If this repeats, run the installer again and report the diagnostic code below. Do not delete your application data folder.',
+    BACKEND_STARTUP_TIMEOUT: 'The backend did not become ready within 60 seconds. Relaunch Ridian Operator. If this repeats, check whether Windows Security blocked the app and report the diagnostic code below. Do not delete your application data folder.',
+  };
+  dialog.showErrorBox(
+    'Ridian Operator — backend startup failed',
+    `${guidance[code]}\n\nDiagnostic code: ${code}`,
+  );
+  return false;
+}
+
+function _waitForBackendStartup(child) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let pollTimer;
+    const ctl = new AbortController();
+    const deadline = setTimeout(() => finish('BACKEND_STARTUP_TIMEOUT'),
+                                BACKEND_STARTUP_TIMEOUT_MS);
+
+    function finish(failureCode, cancelled = false) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      clearTimeout(pollTimer);
+      ctl.abort(); // also cancel a health response whose body has stalled
+      _cancelBackendStartup = null;
+      if (cancelled) {
+        // Shutdown owns the existing drain/stop sequence. Cancellation must
+        // neither report a failure nor trigger a second quit before it drains.
+        resolve(false);
+      } else if (failureCode) {
+        // Only our child is owned. An adopted backend or another port owner
+        // must never be stopped when this launch attempt fails.
+        if (_backendChild === child) stopBackend();
+        resolve(_reportBackendStartupFailure(failureCode));
+      } else {
+        resolve(true);
+      }
+    }
+
+    // Keep the error listener after readiness so a later process error cannot
+    // become an unhandled EventEmitter error. Startup diagnostics settle once.
+    child.on('error', () => finish('BACKEND_LAUNCH_FAILED'));
+    child.once('exit', () => {
+      if (_backendChild === child) _backendChild = null;
+      finish('BACKEND_EXITED');
+    });
+    _cancelBackendStartup = () => finish(null, true);
+
+    async function probe() {
+      const matches = await _backendIdentityMatches(ctl.signal);
+      if (settled) return;
+      if (matches) finish();
+      else pollTimer = setTimeout(probe, BACKEND_STARTUP_POLL_MS);
+    }
+    if (_quitting) _cancelBackendStartup();
+    else void probe();
+  });
 }
 
 async function startBackendIfNeeded() {
@@ -108,11 +183,16 @@ async function startBackendIfNeeded() {
   //                     real app adopt orphaned sandbox backends and render
   //                     their empty state as if the operator's settings,
   //                     chats, and memory had been wiped (4x, 2026-07-27).
-  // Returns false when startup must abort (stranger on the port).
+  // Returns false when startup must abort. A newly spawned packaged backend
+  // must complete the same identity handshake before the window is created.
   // The handshake runs in DEV too (expected home: the repo's apps/api) —
   // the dev .bat flow was just as exposed to orphan adoption.
-  if (await _portInUse(BACKEND_PORT)) {
-    if (await _backendIdentityMatches()) return true;
+  const portInUse = await _portInUse(BACKEND_PORT);
+  if (_quitting) return false;
+  if (portInUse) {
+    const matches = await _backendIdentityMatches();
+    if (_quitting) return false;
+    if (matches) return true;
     dialog.showErrorBox(
       'Ridian Operator — another backend owns port ' + BACKEND_PORT,
       'Something is already serving on port ' + BACKEND_PORT + ', but it is not '
@@ -128,27 +208,31 @@ async function startBackendIfNeeded() {
   }
   if (!app.isPackaged) return true;   // dev: backend is external (.bat); nothing to spawn
   const exe = path.join(process.resourcesPath, 'backend', 'ridian-backend.exe');
-  if (!fs.existsSync(exe)) return true;
-  _backendChild = spawn(exe, [], {
-    cwd: path.dirname(exe),
-    windowsHide: true,
-    stdio: 'ignore',
-    // v6.9.10: the backend serves the INSTALLER version to /health,
-    // /companion/me and the stamped companion page — one source of truth
-    // (this package's version), visible on every surface.
-    env: { ...process.env, RIDIAN_APP_VERSION: app.getVersion() },
-  });
-  _backendChild.on('exit', () => { _backendChild = null; });
-  return true;
+  if (!fs.existsSync(exe)) return _reportBackendStartupFailure('BACKEND_MISSING');
+  try {
+    _backendChild = spawn(exe, [], {
+      cwd: path.dirname(exe),
+      windowsHide: true,
+      stdio: 'ignore',
+      // v6.9.10: the backend serves the INSTALLER version to /health,
+      // /companion/me and the stamped companion page — one source of truth
+      // (this package's version), visible on every surface.
+      env: { ...process.env, RIDIAN_APP_VERSION: app.getVersion() },
+    });
+  } catch (_) {
+    return _reportBackendStartupFailure('BACKEND_LAUNCH_FAILED');
+  }
+  return _waitForBackendStartup(_backendChild);
 }
 
 function stopBackend() {
   if (!_backendChild) return;
   const pid = _backendChild.pid;
   _backendChild = null;
+  if (!Number.isInteger(pid) || pid <= 0) return; // failed spawn has no process
   if (process.platform === 'win32') {
     // Kill the whole tree — uvicorn may hold child workers.
-    try { execFile('taskkill', ['/PID', String(pid), '/T', '/F']); } catch (_) {}
+    try { execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {}); } catch (_) {}
   } else {
     try { process.kill(pid); } catch (_) {}
   }
@@ -219,7 +303,9 @@ if (!gotTheLock) {
 
 app.on('second-instance', () => {
   console.log('[ridian] second-instance signal — raising the existing window');
-  if (!app.isReady()) return;   // mid-boot: the window will show on its own
+  // Electron can be ready while the packaged backend is still starting.
+  // A second launch must not create a window ahead of the readiness gate.
+  if (!app.isReady() || !_backendStartupComplete || _quitting) return;
   raiseMainWindow();
 });
 
@@ -454,7 +540,9 @@ app.whenReady().then(async () => {
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
   const backendOk = await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
-  if (!backendOk) { app.quit(); return; }          // stranger on the port — refused
+  if (_quitting) return;                         // let the original quit/drain finish
+  if (!backendOk) { app.quit(); return; }          // startup failure already reported
+  _backendStartupComplete = true;
   createWindow();
   wireCommandBarIpc();
   await installGlobalHotkey();   // dialog + persistent status if unavailable
@@ -487,6 +575,8 @@ async function drainBackend() {
 }
 
 app.on('before-quit', (e) => {
+  _quitting = true;
+  _cancelBackendStartup?.();
   if (_drained || !_backendChild) return;
   e.preventDefault();
   _drained = true;
