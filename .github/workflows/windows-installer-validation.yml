@@ -5,6 +5,9 @@ name: Windows installer validation
 # adding this file to PR #12 does not authorize a merge or a bootstrap run.
 on:
   workflow_dispatch:
+  push:
+    branches: [fix/packaged-backend-startup-diagnostics]
+    paths: [.github/workflows/windows-installer-validation.yml]
 
 permissions:
   contents: read
@@ -15,6 +18,11 @@ concurrency:
 
 jobs:
   validate:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/fix/packaged-backend-startup-diagnostics' &&
+      github.event.before == '0a20fc056cee6c315c81a4b176ec50e1fdfa28df' &&
+      github.run_attempt == 1
     runs-on: windows-2022 # Standard GitHub-hosted x64 runner, never a larger runner.
     timeout-minutes: 40
     defaults:
