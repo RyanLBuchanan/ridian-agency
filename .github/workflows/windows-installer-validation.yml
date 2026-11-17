@@ -1,0 +1,96 @@
+name: Windows installer validation
+
+# Preparation only: dispatch requires separate Owner approval. GitHub requires
+# workflow_dispatch workflows to exist on the default branch before dispatch;
+# adding this file to PR #12 does not authorize a merge or a bootstrap run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: windows-2022 # Standard GitHub-hosted x64 runner, never a larger runner.
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install build and test dependencies (no cache)
+        timeout-minutes: 10
+        run: |
+          New-Item -ItemType Directory -Force work/windows-validation | Out-Null
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .venv/Scripts/python.exe -m pip install -r apps/api/requirements.txt pytest pyinstaller
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix desktop ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Startup supervisor tests (mocked boundaries)
+        timeout-minutes: 2
+        run: |
+          .venv/Scripts/python.exe .github/scripts/test_validation_evidence.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test --test-reporter=junit --test-reporter-destination=work/windows-validation/startup-tests.xml desktop/tests/backend-startup.test.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Native Windows regression tests (including real DPAPI and Electron)
+        timeout-minutes: 6
+        run: |
+          .venv/Scripts/python.exe -m pytest apps/api/tests/test_frozen_paths.py apps/api/tests/test_state_guard.py apps/api/tests/test_installer_icon.py apps/api/tests/test_run_checkpoint.py apps/api/tests/test_backup_restore.py apps/api/tests/test_audit_log.py apps/api/tests/test_ui_grounding_and_packaging.py apps/api/tests/test_single_instance.py apps/api/tests/test_dpapi_at_rest.py -q --junitxml=work/windows-validation/native-tests.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .venv/Scripts/python.exe .github/scripts/validate_windows_installer.py --check-native-results work/windows-validation/native-tests.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build bundled backend and x64 NSIS installer without publishing
+        timeout-minutes: 18
+        working-directory: desktop
+        run: |
+          node build-backend.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx --no-install electron-builder --win nsis --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install and validate the actual packaged app in runner scratch
+        timeout-minutes: 5
+        run: |
+          .venv/Scripts/python.exe .github/scripts/validate_windows_installer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Retain test and package evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-validation-evidence-${{ github.sha }}
+          path: work/windows-validation/*
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Retain validated installer only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer-${{ github.sha }}
+          path: desktop/dist/*Setup*.exe
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
