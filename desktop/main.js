@@ -52,6 +52,8 @@ function sandboxEnvPreflight() {
    no-ops because the port is already serving. */
 let _backendChild = null;
 let _backendStartupComplete = false;
+let _quitting = false;
+let _cancelBackendStartup = null;
 const BACKEND_STARTUP_TIMEOUT_MS = 60000;
 const BACKEND_STARTUP_POLL_MS = 250;
 
@@ -128,13 +130,18 @@ function _waitForBackendStartup(child) {
     const deadline = setTimeout(() => finish('BACKEND_STARTUP_TIMEOUT'),
                                 BACKEND_STARTUP_TIMEOUT_MS);
 
-    function finish(failureCode) {
+    function finish(failureCode, cancelled = false) {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
       clearTimeout(pollTimer);
       ctl.abort(); // also cancel a health response whose body has stalled
-      if (failureCode) {
+      _cancelBackendStartup = null;
+      if (cancelled) {
+        // Shutdown owns the existing drain/stop sequence. Cancellation must
+        // neither report a failure nor trigger a second quit before it drains.
+        resolve(false);
+      } else if (failureCode) {
         // Only our child is owned. An adopted backend or another port owner
         // must never be stopped when this launch attempt fails.
         if (_backendChild === child) stopBackend();
@@ -151,6 +158,7 @@ function _waitForBackendStartup(child) {
       if (_backendChild === child) _backendChild = null;
       finish('BACKEND_EXITED');
     });
+    _cancelBackendStartup = () => finish(null, true);
 
     async function probe() {
       const matches = await _backendIdentityMatches(ctl.signal);
@@ -158,7 +166,8 @@ function _waitForBackendStartup(child) {
       if (matches) finish();
       else pollTimer = setTimeout(probe, BACKEND_STARTUP_POLL_MS);
     }
-    void probe();
+    if (_quitting) _cancelBackendStartup();
+    else void probe();
   });
 }
 
@@ -178,8 +187,12 @@ async function startBackendIfNeeded() {
   // must complete the same identity handshake before the window is created.
   // The handshake runs in DEV too (expected home: the repo's apps/api) —
   // the dev .bat flow was just as exposed to orphan adoption.
-  if (await _portInUse(BACKEND_PORT)) {
-    if (await _backendIdentityMatches()) return true;
+  const portInUse = await _portInUse(BACKEND_PORT);
+  if (_quitting) return false;
+  if (portInUse) {
+    const matches = await _backendIdentityMatches();
+    if (_quitting) return false;
+    if (matches) return true;
     dialog.showErrorBox(
       'Ridian Operator — another backend owns port ' + BACKEND_PORT,
       'Something is already serving on port ' + BACKEND_PORT + ', but it is not '
@@ -292,7 +305,7 @@ app.on('second-instance', () => {
   console.log('[ridian] second-instance signal — raising the existing window');
   // Electron can be ready while the packaged backend is still starting.
   // A second launch must not create a window ahead of the readiness gate.
-  if (!app.isReady() || !_backendStartupComplete) return;
+  if (!app.isReady() || !_backendStartupComplete || _quitting) return;
   raiseMainWindow();
 });
 
@@ -527,6 +540,7 @@ app.whenReady().then(async () => {
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(null); // hide default File/Edit/View menu chrome
   const backendOk = await startBackendIfNeeded();  // packaged: hidden uvicorn; dev: no-op
+  if (_quitting) return;                         // let the original quit/drain finish
   if (!backendOk) { app.quit(); return; }          // startup failure already reported
   _backendStartupComplete = true;
   createWindow();
@@ -561,6 +575,8 @@ async function drainBackend() {
 }
 
 app.on('before-quit', (e) => {
+  _quitting = true;
+  _cancelBackendStartup?.();
   if (_drained || !_backendChild) return;
   e.preventDefault();
   _drained = true;

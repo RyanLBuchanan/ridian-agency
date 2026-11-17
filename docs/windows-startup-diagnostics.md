@@ -5,6 +5,8 @@ the existing hidden-window, working-directory and version environment options.
 It waits up to 60 seconds for the existing service/data-directory identity
 check to succeed before opening the main window. A second desktop launch
 during this wait leaves the first launch in control.
+Quitting during the wait cancels startup without opening a window or showing a
+startup error. The original backend drain/stop sequence completes normally.
 
 Startup failures display fixed guidance and one diagnostic code:
 

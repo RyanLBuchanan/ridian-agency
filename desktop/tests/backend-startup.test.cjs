@@ -5,17 +5,19 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const windowsPath = path.win32;
 const { test } = require('node:test');
 const vm = require('node:vm');
 
 const fullSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const source = fullSource.split('// Window/taskbar icon:')[0];
 // Include the real lifecycle callbacks as well as the supervisor. Window and
-// hotkey boundaries below are fakes; the readiness/second-launch gates are not.
+// hotkey boundaries below are fakes; the readiness, second-launch and shutdown
+// gates are not. This includes the real drain-before-quit behavior.
 const lifecycleSource = fullSource.slice(
   fullSource.indexOf("app.on('second-instance'"), fullSource.indexOf('\nfunction createWindow()'),
 ) + fullSource.slice(
-  fullSource.indexOf('app.whenReady().then'), fullSource.indexOf("\napp.on('window-all-closed'"),
+  fullSource.indexOf('app.whenReady().then'),
 );
 const PRIVATE = 'PRIVATE_VALUE_MUST_NEVER_APPEAR';
 
@@ -27,18 +29,25 @@ function harness(options = {}) {
   const appEvents = new EventEmitter();
   const lifecycle = { windows: 0, raises: 0, quits: 0, hotkeys: 0 };
   let readyCallback;
+  let portSocket;
+  const quit = () => {
+    lifecycle.quits++;
+    let prevented = false;
+    appEvents.emit('before-quit', { preventDefault: () => { prevented = true; } });
+    if (!prevented) appEvents.emit('will-quit');
+  };
   const env = {
-    APPDATA: `/profile/${PRIVATE}`,
+    APPDATA: windowsPath.join('C:\\profile', PRIVATE),
     ANTHROPIC_API_KEY: PRIVATE,
     RIDIAN_APP_VERSION: 'stale-parent-version',
     ...options.env,
   };
   const packaged = options.packaged ?? true;
-  const desktopDir = `/repository/${PRIVATE}/desktop`;
+  const desktopDir = windowsPath.join('C:\\repository', PRIVATE, 'desktop');
   const expectedDataDir = env.RIDIAN_SANDBOX && env.RIDIAN_DATA_DIR
     ? env.RIDIAN_DATA_DIR
-    : packaged ? path.join(env.APPDATA, 'Ridian Operator')
-      : path.join(desktopDir, '..', 'apps', 'api');
+    : packaged ? windowsPath.join(env.APPDATA, 'Ridian Operator')
+      : windowsPath.join(desktopDir, '..', 'apps', 'api');
   const matchingIdentity = { service: 'ridian-agency', data_dir: expectedDataDir };
   const child = new EventEmitter();
   Object.assign(child, { pid: 4242, exitCode: null, signalCode: null });
@@ -64,6 +73,7 @@ function harness(options = {}) {
   });
   const context = {
     require(name) {
+      if (name === 'node:path') return windowsPath;
       if (name === 'electron') return {
         app: {
           isPackaged: packaged,
@@ -71,10 +81,11 @@ function harness(options = {}) {
           isReady: () => true,
           on: (...args) => appEvents.on(...args),
           whenReady: () => ({ then: callback => { readyCallback = callback; } }),
-          quit: () => { lifecycle.quits++; },
+          quit,
         },
         Menu: { setApplicationMenu() {} },
-        BrowserWindow: { getAllWindows: () => Array(lifecycle.windows).fill({}) },
+        BrowserWindow: { getAllWindows: () => Array(lifecycle.windows).fill({ hide() {} }) },
+        globalShortcut: { unregisterAll() {} },
         dialog: { showErrorBox: (...args) => dialogs.push(args) },
       };
       if (name === 'node:child_process') return {
@@ -94,8 +105,11 @@ function harness(options = {}) {
       if (name === 'node:fs') return { existsSync: () => options.exists ?? true };
       if (name === 'node:net') return { connect: () => {
         const socket = new EventEmitter();
+        portSocket = socket;
         socket.destroy = () => {};
-        queueMicrotask(() => socket.emit(options.occupied ? 'connect' : 'error'));
+        if (!options.holdPortProbe) {
+          queueMicrotask(() => socket.emit(options.occupied ? 'connect' : 'error'));
+        }
         return socket;
       } };
       if (name === './hotkey') return {};
@@ -104,7 +118,7 @@ function harness(options = {}) {
     __dirname: desktopDir,
     process: {
       env,
-      resourcesPath: `/installation/${PRIVATE}/resources`,
+      resourcesPath: windowsPath.join('C:\\installation', PRIVATE, 'resources'),
       platform: 'win32',
       kill: (pid) => kills.push({ pid }),
     },
@@ -155,12 +169,29 @@ function harness(options = {}) {
     }
     assert.fail('startup failed to settle');
   }
+  async function advance(ms) {
+    const target = now + ms;
+    for (let steps = 0; steps < 1000; steps++) {
+      await flush();
+      const next = [...timers.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next || next[1].at > target) {
+        now = target;
+        return;
+      }
+      now = next[1].at;
+      timers.delete(next[0]);
+      next[1].fn();
+    }
+    assert.fail('timers did not quiesce');
+  }
   return {
     ...context.api, child, dialogs, logs, spawns, kills, requests, env,
-    matchingIdentity, flush, settle, now: () => now,
+    matchingIdentity, flush, settle, advance, now: () => now,
     lifecycle,
     beginReady: () => readyCallback(),
     secondInstance: () => appEvents.emit('second-instance'),
+    requestQuit: quit,
+    releasePortProbe: () => portSocket.emit(options.occupied ? 'connect' : 'error'),
   };
 }
 
@@ -218,9 +249,9 @@ test('present executable keeps launch arguments, working directory and environme
   assert.equal(await h.settle(h.startBackendIfNeeded()), true);
   assert.equal(h.spawns.length, 1);
   const [exe, args, options] = h.spawns[0];
-  assert.equal(exe, `/installation/${PRIVATE}/resources/backend/ridian-backend.exe`);
+  assert.equal(exe, windowsPath.join('C:\\installation', PRIVATE, 'resources', 'backend', 'ridian-backend.exe'));
   assert.deepEqual([...args], []);
-  assert.equal(options.cwd, path.dirname(exe));
+  assert.equal(options.cwd, windowsPath.dirname(exe));
   assert.equal(options.windowsHide, true);
   assert.equal(options.stdio, 'ignore');
   assert.deepEqual({ ...options.env }, { ...h.env, RIDIAN_APP_VERSION: '0.9.18' });
@@ -375,4 +406,121 @@ test('successful readiness opens once, then a second launch raises the existing 
   assert.deepEqual(h.lifecycle, { windows: 1, raises: 1, quits: 0, hotkeys: 1 });
   assert.equal(h.dialogs.length, 0);
   assert.equal(h.kills.length, 0);
+});
+
+test('quit cancels pending startup while retaining its child for the original drain', async () => {
+  let releaseHealth, releaseDrain, healthSignal;
+  const h = harness({ fetch: ({ url, init, response }) => new Promise(resolve => {
+    if (url.endsWith('/health')) {
+      healthSignal = init.signal;
+      // Deliberately resolve even after abort: a completed response may already
+      // be queued when quit begins, and must not resurrect the ready callback.
+      releaseHealth = () => resolve(response());
+    } else if (url.endsWith('/app/drain')) {
+      assert.equal(init.method, 'POST');
+      releaseDrain = () => resolve(response());
+    } else {
+      assert.fail(`unexpected request: ${url}`);
+    }
+  }) });
+  const ready = h.beginReady();
+  await h.flush();
+  assert.equal(typeof releaseHealth, 'function');
+  h.requestQuit();
+  await h.flush();
+  assert.equal(healthSignal.aborted, true, 'quit cancels the in-flight health request');
+  assert.equal(typeof releaseDrain, 'function', 'retain the existing drain request');
+  assert.equal(h.lifecycle.quits, 1, 'cancellation must not request another quit');
+  assert.equal(h.kills.length, 0, 'the backend must remain alive while drain is pending');
+  releaseHealth();
+  await h.settle(ready);
+  h.secondInstance();
+  assert.deepEqual(h.lifecycle, { windows: 0, raises: 0, quits: 1, hotkeys: 0 });
+  assert.equal(h.dialogs.length, 0);
+  assert.equal(h.kills.length, 0);
+  releaseDrain();
+  await h.flush();
+  assert.equal(h.lifecycle.quits, 2, 'only drain completion requests the final quit');
+  assert.deepEqual(h.kills, [{ exe: 'taskkill', args: ['/PID', '4242', '/T', '/F'] }]);
+  await h.advance(65000);
+  assert.equal(h.dialogs.length, 0, 'cancelled startup cannot show a stale timeout');
+  assert.equal(h.lifecycle.quits, 2);
+  assert.equal(h.kills.length, 1);
+});
+
+test('quit during pending startup preserves the drain timeout before stopping its child', async () => {
+  const h = harness({ fetch: ({ init }) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(new Error(PRIVATE)), { once: true });
+  }) });
+  const ready = h.beginReady();
+  await h.flush();
+  h.requestQuit();
+  await h.settle(ready);
+  await h.advance(24999);
+  assert.equal(h.lifecycle.quits, 1);
+  assert.equal(h.kills.length, 0, 'startup cancellation must not shorten the drain grace');
+  assert.equal(h.dialogs.length, 0);
+  await h.advance(1);
+  assert.equal(h.lifecycle.quits, 2);
+  assert.equal(h.kills.length, 1);
+  await h.advance(40000);
+  assert.equal(h.dialogs.length, 0);
+  assert.equal(h.lifecycle.windows, 0);
+  assert.equal(h.lifecycle.hotkeys, 0);
+});
+
+test('quit during the port probe prevents a later backend spawn or window', async () => {
+  const h = harness({ holdPortProbe: true });
+  const ready = h.beginReady();
+  await h.flush();
+  h.requestQuit();
+  h.releasePortProbe();
+  await h.settle(ready);
+  h.secondInstance();
+  assert.deepEqual(h.lifecycle, { windows: 0, raises: 0, quits: 1, hotkeys: 0 });
+  assert.equal(h.spawns.length, 0);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.kills.length, 0);
+  assert.equal(h.dialogs.length, 0);
+});
+
+test('quit while checking an existing backend never adopts or drains it', async () => {
+  let releaseHealth;
+  const h = harness({ occupied: true, fetch: ({ response }) => new Promise(resolve => {
+    releaseHealth = () => resolve(response());
+  }) });
+  const ready = h.beginReady();
+  await h.flush();
+  h.requestQuit();
+  releaseHealth();
+  await h.settle(ready);
+  assert.deepEqual(h.lifecycle, { windows: 0, raises: 0, quits: 1, hotkeys: 0 });
+  assert.equal(h.spawns.length, 0);
+  assert.equal(h.requests.length, 1, 'only the original health request was made');
+  assert.equal(h.kills.length, 0);
+  assert.equal(h.dialogs.length, 0);
+});
+
+test('successful packaged startup still drains before stopping the owned backend on quit', async () => {
+  let releaseDrain;
+  const h = harness({ fetch: async ({ url, response }) => {
+    if (url.endsWith('/app/drain')) {
+      return new Promise(resolve => { releaseDrain = () => resolve(response()); });
+    }
+    return response();
+  } });
+  await h.settle(h.beginReady());
+  assert.equal(h.lifecycle.windows, 1);
+  assert.equal(h.lifecycle.hotkeys, 1);
+  h.requestQuit();
+  await h.flush();
+  h.secondInstance();
+  assert.equal(h.lifecycle.raises, 0, 'a second launch must not raise the draining window');
+  assert.equal(h.lifecycle.quits, 1);
+  assert.equal(h.kills.length, 0);
+  releaseDrain();
+  await h.flush();
+  assert.equal(h.lifecycle.quits, 2);
+  assert.deepEqual(h.kills, [{ exe: 'taskkill', args: ['/PID', '4242', '/T', '/F'] }]);
+  assert.equal(h.dialogs.length, 0);
 });
