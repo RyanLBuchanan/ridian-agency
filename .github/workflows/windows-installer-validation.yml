@@ -1,13 +1,10 @@
 name: Windows installer validation
 
-# Owner-approved one-run bootstrap; restore manual-only after this attempt.
+# Preparation only: dispatch requires separate Owner approval. GitHub requires
+# workflow_dispatch workflows to exist on the default branch before dispatch;
+# adding this file to PR #12 does not authorize a merge or a bootstrap run.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/packaged-backend-startup-diagnostics
-    paths:
-      - .github/workflows/windows-installer-validation.yml
 
 permissions:
   contents: read
@@ -18,12 +15,6 @@ concurrency:
 
 jobs:
   validate:
-    # Only the first push from the approved code may execute; reruns are blocked.
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/fix/packaged-backend-startup-diagnostics' &&
-      github.event.before == 'cfefbccb34cf0a0bdf69dae401f196a0bff3dcbf' &&
-      github.run_attempt == 1
     runs-on: windows-2022 # Standard GitHub-hosted x64 runner, never a larger runner.
     timeout-minutes: 40
     defaults:
