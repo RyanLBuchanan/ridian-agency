@@ -160,7 +160,13 @@ def migrate_legacy_state(src: Path, dst: Path) -> list[str]:
     by test_frozen_paths). Existing destination files are never overwritten.
     Returns the names copied."""
     import shutil
-    copied: list[str] = []
+    # Preferences also need the opt-in repo-to-persistent migration route.
+    from .project_preferences import migrate
+    preference_source = src / "hidden_projects.json"
+    preference_destination = dst / "hidden_projects.json"
+    preference_new = preference_source.exists() and not preference_destination.exists()
+    migrate(preference_source, preference_destination)
+    copied: list[str] = ["hidden_projects.json"] if preference_new else []
     dst.mkdir(parents=True, exist_ok=True)
     for name in _MIGRATABLE:
         s, d = src / name, dst / name

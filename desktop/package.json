@@ -47,6 +47,7 @@
       "installerIcon": "assets/sunrise-waves.ico",
       "uninstallerIcon": "assets/sunrise-waves.ico",
       "oneClick": true,
+      "include": "installer/preferences.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Ridian Operator"

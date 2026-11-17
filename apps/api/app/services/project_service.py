@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from .artifact_service import outputs_dir
+from .runtime_paths import data_dir, resource_base, guard_real_state_write
+from .project_preferences import migrate
 
 log = logging.getLogger("ridian.projects")
 
@@ -67,12 +70,11 @@ _AGENTIC_MARKERS = ("agentic_advances_brief.md",)
 _NOTEBOOKLM_MARKERS = ("notebooklm_package.md",)
 _OPERATOR_MARKERS = ("operation_log.json",)
 
-# Sibling of .env / local_settings.json. Stores per-machine sidebar
-# preferences (hidden + pinned). Git-ignored. Folders themselves are
-# never deleted — this is purely a render-time filter / order.
-HIDDEN_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "hidden_projects.json"
-)
+# Dev paths stay unchanged; frozen/sandbox paths use established persistent data.
+HIDDEN_PATH = data_dir() / "hidden_projects.json"
+LEGACY_HIDDEN_PATH = (HIDDEN_PATH if os.environ.get("RIDIAN_SANDBOX")
+                      else resource_base() / "hidden_projects.json")
+
 
 
 class ProjectError(Exception):
@@ -197,6 +199,8 @@ def _project_meta(folder: Path) -> dict:
 def _load_prefs() -> tuple[set[str], set[str]]:
     """Read the sidebar prefs file. Returns ``(hidden_basenames, pinned_basenames)``."""
     if not HIDDEN_PATH.exists():
+        migrate(LEGACY_HIDDEN_PATH, HIDDEN_PATH)
+    if not HIDDEN_PATH.exists():
         return set(), set()
     try:
         data = json.loads(HIDDEN_PATH.read_text(encoding="utf-8"))
@@ -213,6 +217,9 @@ def _load_prefs() -> tuple[set[str], set[str]]:
 
 
 def _save_prefs(hidden: set[str], pinned: set[str]) -> None:
+    if not HIDDEN_PATH.exists():
+        migrate(LEGACY_HIDDEN_PATH, HIDDEN_PATH)
+    guard_real_state_write(HIDDEN_PATH)
     HIDDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     HIDDEN_PATH.write_text(
         json.dumps(
